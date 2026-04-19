@@ -1,0 +1,424 @@
+import type { ServerRow, UserRow } from "./db.js";
+import { applyUsersTrafficSnapshot, getUser, listDeployedServers } from "./db.js";
+import {
+  TZADMIN_VLESS_TAG,
+  sshExecCommand,
+  sshReadRemoteFile,
+  type SshConfig,
+  type SshLog,
+} from "./ssh.js";
+import { resolveConfigPath } from "./userSync.js";
+
+export type UserTrafficAgg = { up: number; down: number; online: number };
+
+function shellQuote(s: string): string {
+  return `'${s.replace(/'/g, `'\\''`)}'`;
+}
+
+/** Адрес для `xray api … --server=…` (упрощённый api.listen или legacy inbound tag api). */
+export function parseXrayApiServerForStatsQuery(config: Record<string, unknown>): string | null {
+  const api = config.api as Record<string, unknown> | undefined;
+  if (api && typeof api.listen === "string" && api.listen.trim()) {
+    return api.listen.trim();
+  }
+  const inbounds = config.inbounds;
+  if (!Array.isArray(inbounds)) return null;
+  for (const raw of inbounds) {
+    const ib = raw as Record<string, unknown>;
+    if (ib.tag !== "api") continue;
+    const listenRaw = ib.listen;
+    const listen =
+      listenRaw === "0.0.0.0" || listenRaw === "::" ? "127.0.0.1" : String(listenRaw ?? "127.0.0.1");
+    const port = Number(ib.port);
+    if (!Number.isFinite(port) || port <= 0) return null;
+    if (listen.includes(":") && !listen.startsWith("[")) {
+      return `[${listen}]:${port}`;
+    }
+    if (listen.startsWith("[") && listen.includes("]")) {
+      return `${listen}:${port}`;
+    }
+    return `${listen}:${port}`;
+  }
+  return null;
+}
+
+/** Соответствие ключа статистики Xray (`email` клиента) → UUID клиента `id`. */
+export function buildStatKeyToUuidMap(config: Record<string, unknown>): Map<string, string> {
+  const m = new Map<string, string>();
+  const inbounds = config.inbounds;
+  if (!Array.isArray(inbounds)) return m;
+  const ib = inbounds.find((x) => (x as { tag?: string }).tag === TZADMIN_VLESS_TAG) as
+    | Record<string, unknown>
+    | undefined;
+  if (!ib) return m;
+  const settings = (ib.settings as Record<string, unknown>) ?? {};
+  const clients = (settings.clients as Array<Record<string, unknown>>) ?? [];
+  for (const c of clients) {
+    const id = String(c.id ?? "").trim();
+    if (!id) continue;
+    const em = String(c.email ?? id).trim() || id;
+    m.set(em, id);
+    m.set(em.toLowerCase(), id);
+    m.set(id, id);
+    m.set(id.toLowerCase(), id);
+  }
+  return m;
+}
+
+type StatRow = { name?: string; value?: number | string; Name?: string; Value?: number | string };
+
+/** Значение счётчика в JSON от `xray api`: число, строка int64, иногда вложенный объект Long. */
+function coerceStatCounter(raw: unknown): number {
+  if (typeof raw === "number" && Number.isFinite(raw)) {
+    return Math.max(0, Math.floor(raw));
+  }
+  if (typeof raw === "string" && raw.trim()) {
+    const n = Number(raw.trim());
+    if (Number.isFinite(n)) return Math.max(0, Math.floor(n));
+    try {
+      const bi = BigInt(raw.trim());
+      const max = BigInt(Number.MAX_SAFE_INTEGER);
+      if (bi > max) return Number.MAX_SAFE_INTEGER;
+      return Math.max(0, Number(bi));
+    } catch {
+      return 0;
+    }
+  }
+  if (raw && typeof raw === "object") {
+    const o = raw as Record<string, unknown>;
+    if (typeof o.low === "number") {
+      const unsigned = o.unsigned === true;
+      const hi = typeof o.high === "number" ? o.high : 0;
+      const lo = o.low >>> 0;
+      if (!unsigned && hi === 0) return Math.max(0, lo);
+      if (unsigned && hi === 0) return Math.max(0, lo);
+    }
+  }
+  return 0;
+}
+
+function statRowNameValue(row: StatRow): { name?: string; value: number } {
+  const name =
+    typeof row.name === "string"
+      ? row.name
+      : typeof row.Name === "string"
+        ? row.Name
+        : undefined;
+  const raw = row.value ?? row.Value;
+  return { name, value: coerceStatCounter(raw) };
+}
+
+function normalizeStatList(raw: unknown): StatRow[] {
+  if (!raw || typeof raw !== "object") return [];
+  const o = raw as Record<string, unknown>;
+  const cands = [o.stat, o.Stat, o.stats, o.Stats];
+  for (const c of cands) {
+    if (c == null) continue;
+    if (Array.isArray(c)) return c as StatRow[];
+    if (typeof c === "object") return [c as StatRow];
+  }
+  return [];
+}
+
+function firstJsonObject(s: string): unknown {
+  const i = s.indexOf("{");
+  if (i < 0) throw new Error("statsquery: нет JSON в выводе");
+  return JSON.parse(s.slice(i)) as unknown;
+}
+
+/** Разбор вывода `xray api statsquery` → байты по ключу email в счётчике. */
+export function parseStatsQueryStdout(stdout: string): Map<string, UserTrafficAgg> {
+  const raw = firstJsonObject(stdout) as Record<string, unknown>;
+  const list = normalizeStatList(raw);
+  const byKey = new Map<string, UserTrafficAgg>();
+  for (const row of list) {
+    const { name, value: val } = statRowNameValue(row);
+    if (typeof name !== "string" || !name.startsWith("user>>>")) continue;
+    const parts = name.split(">>>");
+    /* traffic: user>>>email>>>traffic>>>uplink; online: user>>>email>>>online */
+    if (parts.length < 3) continue;
+    const emailKey = parts[1] ?? "";
+    if (!emailKey) continue;
+    let cur = byKey.get(emailKey);
+    if (!cur) {
+      cur = { up: 0, down: 0, online: 0 };
+      byKey.set(emailKey, cur);
+    }
+    const seg2 = (parts[2] ?? "").toLowerCase();
+    if (parts.length === 3 && seg2 === "online") {
+      cur.online = Math.max(cur.online, val);
+      continue;
+    }
+    if (parts.length >= 4 && seg2 === "traffic") {
+      const seg3 = (parts[3] ?? "").toLowerCase();
+      if (seg3 === "uplink") cur.up = val;
+      else if (seg3 === "downlink") cur.down = val;
+    }
+  }
+  return byKey;
+}
+
+function mergeKeyMapIntoUuidMap(
+  rawByKey: Map<string, UserTrafficAgg>,
+  keyToUuid: Map<string, string>,
+): Map<string, UserTrafficAgg> {
+  const out = new Map<string, UserTrafficAgg>();
+  for (const [key, v] of rawByKey) {
+    const uuid = keyToUuid.get(key) ?? keyToUuid.get(key.toLowerCase());
+    if (!uuid) continue;
+    const nk = uuid.trim().toLowerCase();
+    const cur = out.get(nk) ?? { up: 0, down: 0, online: 0 };
+    cur.up += v.up;
+    cur.down += v.down;
+    cur.online = Math.max(cur.online, v.online);
+    out.set(nk, cur);
+  }
+  return out;
+}
+
+function sshCfg(row: ServerRow): SshConfig {
+  return {
+    host: row.host,
+    port: row.ssh_port,
+    username: row.ssh_user,
+    passwordEnc: row.ssh_password_enc,
+  };
+}
+
+function buildStatsQueryCommand(apiListen: string): string {
+  const srv = shellQuote(apiListen);
+  return (
+    "PATH=/usr/local/bin:/usr/bin:$PATH " +
+    "X=$(command -v xray 2>/dev/null || echo /usr/local/bin/xray); " +
+    '"$X" api statsquery --server=' +
+    srv
+  );
+}
+
+/** Один вызов на узел: список онлайн-аккаунтов (Xray ≥ с RPC GetAllOnlineUsers). */
+function buildOnlineUsersCommand(apiListen: string): string {
+  const srv = shellQuote(apiListen);
+  return (
+    'PATH=/usr/local/bin:/usr/bin:$PATH ' +
+    'X=$(command -v xray 2>/dev/null || echo /usr/local/bin/xray); ' +
+    '"$X" api statsgetallonlineusers --server=' +
+    srv +
+    ' 2>/dev/null || true'
+  );
+}
+
+function mergeOnlineUsersStdout(
+  stdout: string,
+  keyToUuid: Map<string, string>,
+  byUuid: Map<string, UserTrafficAgg>,
+): void {
+  const trimmed = stdout.trim();
+  if (!trimmed || /unknown command|not found|No help topic/i.test(trimmed)) return;
+  let raw: Record<string, unknown>;
+  try {
+    raw = firstJsonObject(trimmed) as Record<string, unknown>;
+  } catch {
+    return;
+  }
+  const arr = raw.users ?? raw.Users;
+  if (!Array.isArray(arr)) return;
+  for (const line of arr) {
+    if (typeof line !== "string") continue;
+    const parts = line.split(">>>");
+    if (parts.length < 3) continue;
+    if (String(parts[0]).toLowerCase() !== "user") continue;
+    const email = String(parts[1] ?? "");
+    if (!email) continue;
+    if (String(parts[parts.length - 1] ?? "").toLowerCase() !== "online") continue;
+    const uuid = keyToUuid.get(email) ?? keyToUuid.get(email.toLowerCase());
+    if (!uuid) continue;
+    const nk = uuid.trim().toLowerCase();
+    const agg = byUuid.get(nk);
+    if (agg) agg.online = Math.max(agg.online, 1);
+  }
+}
+
+/**
+ * Снимает счётчики user>>>… с одного узла (localhost на сервере = API Xray).
+ */
+export async function pullTrafficFromServer(
+  row: ServerRow,
+  log?: SshLog,
+): Promise<{ host: string; byUuid: Map<string, UserTrafficAgg>; warn?: string }> {
+  const cfg = sshCfg(row);
+  const path = await resolveConfigPath(row, log);
+  const raw = await sshReadRemoteFile(cfg, path, log);
+  const config = JSON.parse(raw.toString("utf8")) as Record<string, unknown>;
+  const apiSrv = parseXrayApiServerForStatsQuery(config);
+  if (!apiSrv) {
+    return {
+      host: row.host,
+      byUuid: new Map(),
+      warn: "нет api.listen / inbound api — выполните синхронизацию конфига на узлы (деплой / сохранение клиента).",
+    };
+  }
+  const keyToUuid = buildStatKeyToUuidMap(config);
+  const cmd = buildStatsQueryCommand(apiSrv);
+  const r = await sshExecCommand(cfg, cmd, log);
+  if (r.code !== 0) {
+    throw new Error(r.stderr.trim() || r.stdout.trim() || `xray api exit ${r.code}`);
+  }
+  let rawStats: Map<string, UserTrafficAgg>;
+  try {
+    rawStats = parseStatsQueryStdout(r.stdout);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    throw new Error(`statsquery JSON: ${msg}`);
+  }
+  const byUuid = mergeKeyMapIntoUuidMap(rawStats, keyToUuid);
+  const rOnline = await sshExecCommand(cfg, buildOnlineUsersCommand(apiSrv), log);
+  mergeOnlineUsersStdout(rOnline.stdout, keyToUuid, byUuid);
+  return { host: row.host, byUuid };
+}
+
+/** Суммирует трафик и онлайн по всем развёрнутым узлам (один UUID может быть на нескольких серверах). */
+export async function pullTrafficFromAllDeployedServers(log?: SshLog): Promise<{
+  byUuid: Map<string, UserTrafficAgg>;
+  errors: string[];
+  warns: string[];
+}> {
+  const errors: string[] = [];
+  const warns: string[] = [];
+  const merged = new Map<string, UserTrafficAgg>();
+  const servers = listDeployedServers();
+  if (servers.length === 0) {
+    warns.push("Нет развёрнутых серверов — нечего опрашивать.");
+    return { byUuid: merged, errors, warns };
+  }
+  for (const row of servers) {
+    try {
+      const { host, byUuid, warn } = await pullTrafficFromServer(row, log);
+      if (warn) warns.push(`${host}: ${warn}`);
+      for (const [uuid, v] of byUuid) {
+        const nk = uuid.trim().toLowerCase();
+        const cur = merged.get(nk) ?? { up: 0, down: 0, online: 0 };
+        cur.up += v.up;
+        cur.down += v.down;
+        cur.online = Math.max(cur.online, v.online);
+        merged.set(nk, cur);
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      errors.push(`${row.host}: ${msg}`);
+    }
+  }
+  return { byUuid: merged, errors, warns };
+}
+
+/** Суммарный трафик/онлайн с узлов для одного клиента (только чтение, без записи в БД). */
+export async function peekUserTrafficFromServers(user: UserRow, log?: SshLog): Promise<UserTrafficAgg> {
+  const uuid = user.vless_uuid;
+  const uuidKey = uuid.trim().toLowerCase();
+  const merged = new Map<string, UserTrafficAgg>();
+  for (const row of listDeployedServers()) {
+    try {
+      const { byUuid } = await pullTrafficFromServer(row, log);
+      const hit = byUuid.get(uuidKey) ?? byUuid.get(uuid);
+      if (!hit) continue;
+      const cur = merged.get(uuidKey) ?? { up: 0, down: 0, online: 0 };
+      cur.up += hit.up;
+      cur.down += hit.down;
+      cur.online = Math.max(cur.online, hit.online);
+      merged.set(uuidKey, cur);
+    } catch {
+      /* skip */
+    }
+  }
+  return merged.get(uuidKey) ?? { up: 0, down: 0, online: 0 };
+}
+
+const subPeekCache = new Map<string, { at: number; peek: UserTrafficAgg }>();
+const SUB_PEEK_TTL_MS = 28_000;
+
+/** Кэшированный peek для GET подписки — не SSH на каждый запрос клиента. */
+export async function peekUserTrafficForSubscription(user: UserRow, log?: SshLog): Promise<UserTrafficAgg> {
+  const key = user.sub_token;
+  const now = Date.now();
+  const slot = subPeekCache.get(key);
+  if (slot && now - slot.at < SUB_PEEK_TTL_MS) return slot.peek;
+  const peek = await peekUserTrafficFromServers(user, log);
+  subPeekCache.set(key, { at: now, peek });
+  return peek;
+}
+
+/** Не опрашивать SSH на каждый запрос подписки (клиенты дергают URL часто). */
+const SUB_TRAFFIC_SYNC_MIN_MS = 32_000;
+const subTrafficLastAttempt = new Map<string, number>();
+const subTrafficInflight = new Map<string, Promise<void>>();
+
+/**
+ * Обновить в БД traffic_up/down и online для одного пользователя по всем узлам.
+ * Вызывать при GET подписки — тогда v2rayTun и др. видят актуальный `subscription-userinfo`.
+ */
+export async function refreshUserTrafficFromServersIfDue(user: UserRow, log?: SshLog): Promise<void> {
+  const key = user.sub_token;
+  const prevRun = subTrafficInflight.get(key);
+  if (prevRun) {
+    await prevRun.catch(() => {});
+    return;
+  }
+  const now = Date.now();
+  if (now - (subTrafficLastAttempt.get(key) ?? 0) < SUB_TRAFFIC_SYNC_MIN_MS) return;
+
+  const job = (async () => {
+    const uuid = user.vless_uuid;
+    const uuidKey = uuid.trim().toLowerCase();
+    const merged = new Map<string, UserTrafficAgg>();
+    const servers = listDeployedServers();
+    for (const row of servers) {
+      try {
+        const { byUuid } = await pullTrafficFromServer(row, log);
+        const hit = byUuid.get(uuidKey) ?? byUuid.get(uuid);
+        if (!hit) continue;
+        const cur = merged.get(uuidKey) ?? { up: 0, down: 0, online: 0 };
+        cur.up += hit.up;
+        cur.down += hit.down;
+        cur.online = Math.max(cur.online, hit.online);
+        merged.set(uuidKey, cur);
+      } catch {
+        /* узел недоступен — пропускаем */
+      }
+    }
+    const fresh = getUser(user.id);
+    if (!fresh) return;
+    const agg = merged.get(uuidKey);
+    if (agg) {
+      applyUsersTrafficSnapshot(
+        [
+          {
+            vless_uuid: fresh.vless_uuid,
+            traffic_up: agg.up,
+            traffic_down: agg.down,
+            online: agg.online > 0,
+          },
+        ],
+        Date.now(),
+      );
+    } else {
+      applyUsersTrafficSnapshot(
+        [
+          {
+            vless_uuid: fresh.vless_uuid,
+            traffic_up: fresh.traffic_up,
+            traffic_down: fresh.traffic_down,
+            online: false,
+          },
+        ],
+        Date.now(),
+      );
+    }
+    subTrafficLastAttempt.set(key, Date.now());
+  })();
+
+  subTrafficInflight.set(key, job);
+  try {
+    await job;
+  } finally {
+    if (subTrafficInflight.get(key) === job) subTrafficInflight.delete(key);
+  }
+}
