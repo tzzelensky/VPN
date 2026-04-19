@@ -39,6 +39,19 @@ export type ServerDto = {
   vless_port: number;
   vless_uuid: string | null;
   xray_config_path: string | null;
+  /** Снимок streamSettings inbound после деплоя — для корректной подписки. */
+  sub_network: string;
+  sub_security: string;
+  sub_type: string;
+  sub_host: string;
+  sub_path: string;
+  sub_sni: string;
+  sub_fp: string;
+  sub_alpn: string;
+  sub_allow_insecure: number;
+  sub_reality_pbk: string;
+  sub_reality_sid: string;
+  sub_reality_spx: string;
   vless_deployed: boolean;
   last_ssh_ok: boolean;
   last_error: string | null;
@@ -88,7 +101,28 @@ export async function deleteServer(id: number): Promise<void> {
 
 export type NdjsonEvent =
   | { type: "log"; msg: string; t?: number }
-  | { type: "done"; ok?: boolean; detail?: string; uuid?: string; configPath?: string; user?: UserDto }
+  | {
+      type: "done";
+      ok?: boolean;
+      detail?: string;
+      uuid?: string;
+      configPath?: string;
+      user?: UserDto;
+      hints?: {
+        sub_network: string;
+        sub_security: string;
+        sub_type: string;
+        sub_host: string;
+        sub_path: string;
+        sub_sni: string;
+        sub_fp: string;
+        sub_alpn: string;
+        sub_allow_insecure: number;
+        sub_reality_pbk: string;
+        sub_reality_sid: string;
+        sub_reality_spx: string;
+      };
+    }
   | { type: "error"; message: string };
 
 export async function postNdjsonStream(

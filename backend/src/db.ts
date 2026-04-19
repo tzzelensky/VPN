@@ -111,6 +111,19 @@ export type ServerRow = {
   vless_port: number;
   vless_uuid: string | null;
   xray_config_path: string | null;
+  /** Снимок транспорта inbound tzadmin-vless для корректной подписки (заполняется при деплое). */
+  sub_network: string;
+  sub_security: string;
+  sub_type: string;
+  sub_host: string;
+  sub_path: string;
+  sub_sni: string;
+  sub_fp: string;
+  sub_alpn: string;
+  sub_allow_insecure: number;
+  sub_reality_pbk: string;
+  sub_reality_sid: string;
+  sub_reality_spx: string;
   vless_deployed: number;
   last_ssh_ok: number;
   last_error: string | null;
@@ -224,6 +237,18 @@ export function normalizeServer(s: ServerRow): ServerRow {
     name,
     country_code: normalizeCountryCode(s.country_code),
     xray_config_path: s.xray_config_path ?? null,
+    sub_network: String(s.sub_network ?? "").trim(),
+    sub_security: String(s.sub_security ?? "").trim().toLowerCase(),
+    sub_type: String(s.sub_type ?? "").trim(),
+    sub_host: String(s.sub_host ?? "").trim(),
+    sub_path: String(s.sub_path ?? "").trim(),
+    sub_sni: String(s.sub_sni ?? "").trim(),
+    sub_fp: String(s.sub_fp ?? "").trim(),
+    sub_alpn: String(s.sub_alpn ?? "").trim(),
+    sub_allow_insecure: s.sub_allow_insecure === 1 ? 1 : 0,
+    sub_reality_pbk: String(s.sub_reality_pbk ?? "").trim(),
+    sub_reality_sid: String(s.sub_reality_sid ?? "").trim(),
+    sub_reality_spx: String(s.sub_reality_spx ?? "").trim() || "/",
   };
 }
 

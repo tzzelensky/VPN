@@ -1,5 +1,6 @@
 import { Client } from "ssh2";
 import { decryptSecret } from "./crypto.js";
+import { extractVlessLinkHintsFromConfig, type ServerLinkHints } from "./vlessLinkHints.js";
 
 export type SshConfig = {
   host: string;
@@ -93,15 +94,72 @@ function shellQuote(s: string): string {
 }
 
 async function restartXray(conn: Client, log?: SshLog): Promise<void> {
-  const restartCmds = [
-    "systemctl restart xray 2>/dev/null || true",
-    "systemctl restart xray.service 2>/dev/null || true",
-    "service xray restart 2>/dev/null || true",
-  ];
+  const unitPath = await exec(
+    conn,
+    "systemctl show -p FragmentPath --value x-ui.service 2>/dev/null || true",
+  );
+  const hasXuiUnit = Boolean((unitPath.stdout || "").trim()) && !/(not-found|\/dev\/null)/i.test(unitPath.stdout);
+  const xuiBin = await exec(conn, "test -x /usr/local/x-ui/x-ui && echo OK || true");
+  const hasXuiBin = xuiBin.stdout.includes("OK");
+  const xuiActive = await exec(
+    conn,
+    "systemctl is-active x-ui 2>/dev/null || systemctl is-active x-ui.service 2>/dev/null || true",
+  );
+  const xuiProc = await exec(conn, "pgrep -f '/usr/local/x-ui/x-ui' >/dev/null 2>&1; echo $?");
+  const shouldUseXui =
+    (hasXuiUnit && (xuiActive.stdout.trim() === "active" || xuiProc.stdout.trim() === "0")) ||
+    (hasXuiBin && xuiProc.stdout.trim() === "0");
+
+  if (shouldUseXui) {
+    log?.(
+      "Обнаружен x-ui: применяем конфиг через x-ui (reload → при необходимости restart), не трогаем отдельный xray.service.",
+    );
+    let r = { code: 1 as number | null, stdout: "", stderr: "" };
+    if (hasXuiUnit) {
+      const reload = await exec(conn, "systemctl reload x-ui 2>/dev/null || systemctl reload x-ui.service 2>/dev/null");
+      r = reload;
+      if (reload.code !== 0) {
+        r = await exec(conn, "systemctl restart x-ui 2>/dev/null || systemctl restart x-ui.service 2>/dev/null");
+      }
+    } else {
+      // Нет systemd unit, но процесс x-ui запущен — шлём USR1 как у ExecReload в типовом unit.
+      r = await exec(conn, "pkill -USR1 -f '/usr/local/x-ui/x-ui' 2>/dev/null || true");
+    }
+    if (r.code !== 0) {
+      const err = (r.stderr || r.stdout || "").trim();
+      log?.(`x-ui reload/restart не удался (${err || "no output"}), пробуем обычный xray.service…`);
+    } else {
+      const ok = await exec(conn, "pgrep -f 'xray-linux-amd64|/usr/local/bin/xray' >/dev/null 2>&1; echo $?");
+      if (ok.stdout.trim() === "0") return;
+      log?.("x-ui перезапущен, но процесс xray не найден — пробуем обычный xray.service…");
+    }
+  }
+
+  const restartCmds = ["systemctl restart xray", "systemctl restart xray.service", "service xray restart"];
+  let lastError = "не удалось перезапустить xray";
   for (const c of restartCmds) {
     log?.(`Выполнение: ${c}`);
-    await exec(conn, c);
+    const r = await exec(conn, c);
+    if (r.code !== 0) {
+      const err = (r.stderr || r.stdout || "").trim();
+      if (err) lastError = `${c}: ${err}`;
+      continue;
+    }
+    // Не вызываем несколько restart подряд: это может уронить сервис в start-limit-hit.
+    const active = await exec(
+      conn,
+      "systemctl is-active xray 2>/dev/null || systemctl is-active xray.service 2>/dev/null || true",
+    );
+    if (active.stdout.trim() === "active") return;
+
+    const hasProc = await exec(conn, "pgrep -x xray >/dev/null 2>&1; echo $?");
+    if (hasProc.stdout.trim() === "0") return;
+
+    const status = await exec(conn, "systemctl status xray --no-pager 2>/dev/null || true");
+    const text = (status.stderr || status.stdout || "").trim();
+    if (text) lastError = `${c}: xray не активен после restart.\n${text.slice(0, 700)}`;
   }
+  throw new Error(lastError);
 }
 
 /** Inbound VLESS, которым управляет панель (список UUID клиентов). */
@@ -128,18 +186,76 @@ export function ensureXrayStatsPolicyApi(config: Record<string, unknown>): void 
     if (typeof s === "string" && s) services.add(s);
   }
   services.add("StatsService");
-  const legacyApiInbound =
-    Array.isArray(config.inbounds) &&
-    (config.inbounds as unknown[]).some((ib) => (ib as { tag?: string }).tag === "api");
   const api: Record<string, unknown> = {
     ...prevApi,
     tag: String(prevApi.tag || "api"),
     services: [...services],
   };
-  if (!legacyApiInbound && !api.listen) {
-    api.listen = "127.0.0.1:10085";
-  }
   config.api = api;
+
+  const inbounds = Array.isArray(config.inbounds) ? [...(config.inbounds as Record<string, unknown>[])] : [];
+  const apiIdx = inbounds.findIndex((ib) => String(ib?.tag ?? "") === "api");
+  const hasApiListen = typeof (config.api as Record<string, unknown>).listen === "string";
+
+  if (hasApiListen) {
+    // Уже есть api.listen — не добавляем второй inbound api (иначе bind: address already in use).
+    if (apiIdx >= 0) {
+      inbounds.splice(apiIdx, 1);
+      config.inbounds = inbounds;
+    }
+  } else if (apiIdx >= 0) {
+    // x-ui часто держит inbound tag=api как tunnel на случайном localhost-порту — не перетираем.
+    const proto = String((inbounds[apiIdx] as Record<string, unknown>).protocol ?? "").toLowerCase();
+    if (proto && proto !== "dokodemo-door") {
+      config.inbounds = inbounds;
+    } else {
+      const apiInbound: Record<string, unknown> = {
+        ...(apiIdx >= 0 ? inbounds[apiIdx] : {}),
+        tag: "api",
+        listen: "127.0.0.1",
+        port: 10085,
+        protocol: "dokodemo-door",
+        settings: {
+          address: "127.0.0.1",
+          ...(apiIdx >= 0 ? (((inbounds[apiIdx].settings as Record<string, unknown>) || {}) as Record<string, unknown>) : {}),
+        },
+      };
+      inbounds[apiIdx] = apiInbound;
+      config.inbounds = inbounds;
+      delete (config.api as Record<string, unknown>).listen;
+    }
+  } else {
+    const apiInbound: Record<string, unknown> = {
+      tag: "api",
+      listen: "127.0.0.1",
+      port: 10085,
+      protocol: "dokodemo-door",
+      settings: {
+        address: "127.0.0.1",
+      },
+    };
+    inbounds.push(apiInbound);
+    config.inbounds = inbounds;
+    delete (config.api as Record<string, unknown>).listen;
+  }
+
+  const prevRouting = (config.routing as Record<string, unknown>) || {};
+  const rules = Array.isArray(prevRouting.rules) ? [...(prevRouting.rules as Record<string, unknown>[])] : [];
+  const hasApiRoute = rules.some(
+    (r) =>
+      String(r?.type ?? "").toLowerCase() === "field" &&
+      Array.isArray(r.inboundTag) &&
+      (r.inboundTag as unknown[]).some((t) => String(t) === "api") &&
+      String(r.outboundTag ?? "") === "api",
+  );
+  if (!hasApiRoute) {
+    rules.push({
+      type: "field",
+      inboundTag: ["api"],
+      outboundTag: "api",
+    });
+  }
+  config.routing = { ...prevRouting, rules };
 }
 
 function buildMinimalConfig(clientUuids: string[], vlessPort: number): Record<string, unknown> {
@@ -162,7 +278,6 @@ function buildMinimalConfig(clientUuids: string[], vlessPort: number): Record<st
     },
     api: {
       tag: "api",
-      listen: "127.0.0.1:10085",
       services: ["StatsService"],
     },
     inbounds: [
@@ -182,6 +297,9 @@ function buildMinimalConfig(clientUuids: string[], vlessPort: number): Record<st
       },
     ],
     outbounds: [{ protocol: "freedom", tag: "direct" }],
+    routing: {
+      rules: [{ type: "field", inboundTag: ["api"], outboundTag: "api" }],
+    },
   };
   ensureXrayStatsPolicyApi(cfg);
   return cfg;
@@ -211,7 +329,12 @@ export async function testSshConnection(
   }
 }
 
-const XRAY_CONFIG_PATHS = ["/usr/local/etc/xray/config.json", "/etc/xray/config.json"];
+const XRAY_CONFIG_PATHS = [
+  "/usr/local/x-ui/bin/config.json",
+  "/etc/x-ui/xray/config.json",
+  "/usr/local/etc/xray/config.json",
+  "/etc/xray/config.json",
+];
 
 export async function detectXrayConfigPath(cfg: SshConfig, log?: SshLog): Promise<string | null> {
   return withSsh(
@@ -237,9 +360,10 @@ export async function deployOrSyncVless(
   cfg: SshConfig,
   opts: { clientUuids: string[]; vlessPort: number; configPath: string },
   log?: SshLog,
-): Promise<{ ok: boolean; detail: string; backup?: string }> {
+): Promise<{ ok: boolean; detail: string; backup?: string; hints?: ServerLinkHints }> {
   const backup = `${opts.configPath}.bak.${Date.now()}`;
   const clientUuids = [...new Set(opts.clientUuids.filter(Boolean))];
+  let hints: ServerLinkHints | undefined;
 
   try {
     const detail = await withSsh(
@@ -277,7 +401,15 @@ export async function deployOrSyncVless(
                 };
               });
               ib.settings = settings;
-              ib.port = opts.vlessPort;
+              const curPort = Number(ib.port);
+              if (Number.isFinite(curPort) && curPort > 0 && curPort !== opts.vlessPort) {
+                log?.(
+                  `Порт в конфиге inbound «${TZADMIN_VLESS_TAG}» = ${curPort}, в панели указано ${opts.vlessPort}. ` +
+                    `Порт в конфиге НЕ меняю (иначе ломается TLS/Reality). Исправьте порт узла в панели под фактический.`,
+                );
+              } else {
+                ib.port = opts.vlessPort;
+              }
               inbounds[idx] = ib;
               parsed.inbounds = inbounds;
               config = parsed;
@@ -296,6 +428,8 @@ export async function deployOrSyncVless(
         }
         ensureXrayStatsPolicyApi(config);
 
+        hints = extractVlessLinkHintsFromConfig(config);
+
         const json = JSON.stringify(config, null, 2);
         log?.(`Запись ${opts.configPath} (${json.length} байт)…`);
         await sftpWriteFile(conn, opts.configPath, Buffer.from(json, "utf8"));
@@ -307,7 +441,7 @@ export async function deployOrSyncVless(
       },
       log,
     );
-    return { ok: true, detail, backup };
+    return { ok: true, detail, backup, hints };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     return { ok: false, detail: msg };
@@ -319,7 +453,7 @@ export async function syncServerClientUuids(
   cfg: SshConfig,
   opts: { configPath: string; vlessPort: number; clientUuids: string[] },
   log?: SshLog,
-): Promise<{ ok: boolean; detail: string }> {
+): Promise<{ ok: boolean; detail: string; hints?: ServerLinkHints }> {
   return deployOrSyncVless(
     cfg,
     { clientUuids: opts.clientUuids, vlessPort: opts.vlessPort, configPath: opts.configPath },

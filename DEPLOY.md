@@ -123,6 +123,18 @@ git clone https://github.com/ВАШ_АККАУНТ/VPN.git .
 # или приватный репо — настройте SSH-ключ для github на сервере / используйте deploy token
 ```
 
+**Важно:** в конце команды должна быть **точка** (`.`) — она кладёт файлы прямо в `/opt/vpn-admin`. Если написать только `git clone …/VPN.git` без точки, Git создаст папку **`/opt/vpn-admin/VPN/`**, и команды вроде `cp backend/.env.example` из `/opt/vpn-admin` выдадут *No such file or directory*.
+
+Если вы уже клонировали без точки — один раз поднимите содержимое на уровень выше (из-под `root` или `vpnadm`):
+
+```bash
+cd /opt/vpn-admin
+rsync -a ./VPN/ ./
+rm -rf ./VPN
+```
+
+После этого снова `cd /opt/vpn-admin` — рядом должны появиться `backend/`, `frontend/`, `package.json`.
+
 Если репозитория нет — залейте файлы через `scp`/`rsync` в `/opt/vpn-admin`.
 
 Данные панели (отдельная папка):
@@ -178,29 +190,70 @@ Telegram (опционально) — см. комментарии в `backend/.
 
 ## 8. Сборка backend и frontend
 
-```bash
-cd /opt/vpn-admin/backend
-npm ci
-npm run build
+Собирайте от имени **`vpnadm`**, как потом будет работать systemd (права на файлы совпадут с продом).
 
-cd /opt/vpn-admin/frontend
-npm ci
-npm run build
+**Владелец каталога проекта.** Если вы когда-либо запускали **`npm install` / `npm ci` от `root`**, в `backend/node_modules` (и во `frontend`) файлы останутся с владельцем root — тогда у **`vpnadm`** при `npm ci` будет ошибка **`EACCES: permission denied, rmdir .../node_modules/.bin`**. Перед сборкой один раз выровняйте владельца на весь проект (подставьте свой путь, если клон в `VPN/`):
+
+```bash
+sudo chown -R vpnadm:vpnadm /opt/vpn-admin
 ```
 
-Проверка: есть каталоги `backend/dist` и `frontend/dist`.
+Альтернатива: удалить только зависимости от root и поставить заново уже от `vpnadm`:
 
-Права на артефакты и данные:
+```bash
+sudo rm -rf /opt/vpn-admin/backend/node_modules /opt/vpn-admin/frontend/node_modules
+sudo chown -R vpnadm:vpnadm /opt/vpn-admin/backend /opt/vpn-admin/frontend
+```
+
+Сборка:
+
+```bash
+sudo -u vpnadm -H bash -lc 'cd /opt/vpn-admin/backend && npm ci && npm run build'
+sudo -u vpnadm -H bash -lc 'cd /opt/vpn-admin/frontend && npm ci && npm run build'
+```
+
+После **`npm run build`** в логах не должно быть ошибок TypeScript. Если `tsc` упал — папки **`dist` не будет**, и сервис из раздела 9 выдаст `Cannot find module '.../dist/index.js'`.
+
+**Обязательная проверка** (оба файла должны существовать):
+
+```bash
+test -f /opt/vpn-admin/backend/dist/index.js && echo "backend OK" || echo "backend: нет dist — повторите сборку и читайте вывод npm/tsc"
+test -f /opt/vpn-admin/frontend/dist/index.html && echo "frontend OK" || echo "frontend: нет dist"
+```
+
+Только если обе проверки **OK**, выставьте владельца на артефакты и данные:
 
 ```bash
 sudo chown -R vpnadm:www-data /opt/vpn-admin/backend/dist /opt/vpn-admin/frontend/dist /opt/vpn-admin/data
 ```
 
+Если `chown` пишет *No such file or directory* для `dist` — сборка не создала каталог: снова `cd /opt/vpn-admin/backend`, `npm run build` и смотрите полный вывод (не должно быть красных строк от `tsc`).
+
 ---
 
 ## 9. Systemd: автозапуск API
 
-Создайте файл `/etc/systemd/system/vpn-admin-api.service`:
+**Перед этим шагом** должны быть готовы: каталог `/opt/vpn-admin` с проектом, файл `backend/.env`, сборка `npm run build` в `backend/` (есть папка `backend/dist`). Если проект лежит в `/opt/vpn-admin/VPN`, замените пути ниже на `/opt/vpn-admin/VPN/backend` и т.д.
+
+### 9.1. Путь к Node
+
+Systemd запускает сервис от имени `vpnadm`. Узнайте, где лежит `node` для этого пользователя:
+
+```bash
+sudo -u vpnadm -H bash -lc 'which node && node -v'
+```
+
+Часто на Ubuntu из пакета это **`/usr/bin/node`** — тогда блок `[Service]` ниже можно не менять. Если путь другой (например, из nvm) — в `ExecStart=` подставьте **полный путь** из вывода `which node`.
+
+### 9.2. Создать unit-файл
+
+Unit — это обычный текстовый файл в `/etc/systemd/system/`. Создайте его от **root** любым редактором, например:
+
+```bash
+sudo nano /etc/systemd/system/vpn-admin-api.service
+```
+
+Вставьте целиком (при необходимости поправьте `ExecStart=` на свой путь к `node`):
 
 ```ini
 [Unit]
@@ -221,7 +274,15 @@ RestartSec=5
 WantedBy=multi-user.target
 ```
 
-Включение и проверка:
+Сохраните файл: в **nano** — `Ctrl+O`, Enter, затем `Ctrl+X`.
+
+Проверка синтаксиса (опционально):
+
+```bash
+sudo systemd-analyze verify vpn-admin-api.service
+```
+
+### 9.3. Включить сервис и проверить
 
 ```bash
 sudo systemctl daemon-reload
@@ -230,7 +291,26 @@ sudo systemctl status vpn-admin-api
 curl -s http://127.0.0.1:4000/api/health
 ```
 
-Ожидается: `{"ok":true}`. Ошибки смотреть: `journalctl -u vpn-admin-api -n 50 --no-pager`.
+Ожидается ответ: `{"ok":true}`. Если **failed** или **activating**:
+
+```bash
+journalctl -u vpn-admin-api -n 80 --no-pager
+```
+
+Типичные причины: неверный `WorkingDirectory`, нет `backend/dist`, нет `backend/.env`, в `ExecStart` не тот путь к `node`, в `.env` ошибка (порт занят, неверный `DATA_PATH`).
+
+**Ошибка `Cannot find module '.../dist/index.js'` или `MODULE_NOT_FOUND`:** сервис стартует раньше, чем появился скомпилированный код. Остановите цикл перезапусков, соберите backend, проверьте файл, снова включите сервис:
+
+```bash
+sudo systemctl stop vpn-admin-api
+sudo -u vpnadm -H bash -lc 'cd /opt/vpn-admin/backend && npm ci && npm run build'
+ls -la /opt/vpn-admin/backend/dist/index.js
+sudo chown -R vpnadm:www-data /opt/vpn-admin/backend/dist
+sudo systemctl start vpn-admin-api
+curl -s http://127.0.0.1:4000/api/health
+```
+
+После правок в `.service` снова выполните `sudo systemctl daemon-reload` и `sudo systemctl restart vpn-admin-api`.
 
 ---
 

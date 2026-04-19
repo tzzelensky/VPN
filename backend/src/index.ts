@@ -44,11 +44,17 @@ initDb();
 const app = express();
 const PORT = Number(process.env.PORT) || 4000;
 const FRONTEND_ORIGIN = process.env.FRONTEND_ORIGIN ?? "http://localhost:5173";
+const COOKIE_SECURE = process.env.COOKIE_SECURE === "1";
 const FRONTEND_ORIGINS = new Set([
   FRONTEND_ORIGIN,
   "http://localhost:5173",
   "http://127.0.0.1:5173",
 ]);
+
+// За Nginx/Traefik secure-cookie без trust proxy не будет устанавливаться.
+if (COOKIE_SECURE) {
+  app.set("trust proxy", 1);
+}
 
 app.use(
   cors({
@@ -73,7 +79,7 @@ app.use(
     cookie: {
       httpOnly: true,
       sameSite: "lax",
-      secure: process.env.COOKIE_SECURE === "1",
+      secure: COOKIE_SECURE,
       maxAge: 7 * 24 * 60 * 60 * 1000,
     },
   }),

@@ -13,6 +13,7 @@ export function subscriptionVlessLinksForUser(user: UserRow): string[] {
       user.vless_uuid,
       vlessListLabel(serverNameForSubscription(r), user),
       user,
+      r,
     ),
   );
 }

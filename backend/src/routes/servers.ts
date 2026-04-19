@@ -36,6 +36,18 @@ function serverToJson(r: ServerRow) {
     vless_port: r.vless_port,
     vless_uuid: r.vless_uuid,
     xray_config_path: r.xray_config_path,
+    sub_network: r.sub_network,
+    sub_security: r.sub_security,
+    sub_type: r.sub_type,
+    sub_host: r.sub_host,
+    sub_path: r.sub_path,
+    sub_sni: r.sub_sni,
+    sub_fp: r.sub_fp,
+    sub_alpn: r.sub_alpn,
+    sub_allow_insecure: r.sub_allow_insecure,
+    sub_reality_pbk: r.sub_reality_pbk,
+    sub_reality_sid: r.sub_reality_sid,
+    sub_reality_spx: r.sub_reality_spx,
     vless_deployed: Boolean(r.vless_deployed),
     last_ssh_ok: Boolean(r.last_ssh_ok),
     last_error: r.last_error,
@@ -79,6 +91,18 @@ router.post("/", (req, res) => {
     vless_port: vp,
     vless_uuid: null,
     xray_config_path: null,
+    sub_network: "",
+    sub_security: "",
+    sub_type: "",
+    sub_host: "",
+    sub_path: "",
+    sub_sni: "",
+    sub_fp: "",
+    sub_alpn: "",
+    sub_allow_insecure: 0,
+    sub_reality_pbk: "",
+    sub_reality_sid: "",
+    sub_reality_spx: "",
     vless_deployed: 0,
     last_ssh_ok: 0,
     last_error: null,
@@ -274,9 +298,31 @@ router.post("/:id/deploy-vless", async (req, res) => {
       last_ssh_ok: 1,
       last_error: null,
       xray_config_path: pathToUse,
+      ...(dep.hints
+        ? {
+            sub_network: dep.hints.sub_network,
+            sub_security: dep.hints.sub_security,
+            sub_type: dep.hints.sub_type,
+            sub_host: dep.hints.sub_host,
+            sub_path: dep.hints.sub_path,
+            sub_sni: dep.hints.sub_sni,
+            sub_fp: dep.hints.sub_fp,
+            sub_alpn: dep.hints.sub_alpn,
+            sub_allow_insecure: dep.hints.sub_allow_insecure,
+            sub_reality_pbk: dep.hints.sub_reality_pbk,
+            sub_reality_sid: dep.hints.sub_reality_sid,
+            sub_reality_spx: dep.hints.sub_reality_spx,
+          }
+        : {}),
     });
 
-    const payload = { ok: true, uuid, configPath: pathToUse, detail: dep.detail };
+    const payload = {
+      ok: true,
+      uuid,
+      configPath: pathToUse,
+      detail: dep.detail,
+      hints: dep.hints,
+    };
     if (stream) {
       ndjsonLine(res, { type: "done", ...payload });
       return res.end();

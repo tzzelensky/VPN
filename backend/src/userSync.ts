@@ -43,7 +43,26 @@ export async function pushClientListToAllDeployedServers(log?: SshLog): Promise<
         },
         log,
       );
-      if (!r.ok) log?.(`Ошибка на ${row.host}: ${r.detail}`);
+      if (!r.ok) {
+        log?.(`Ошибка на ${row.host}: ${r.detail}`);
+        continue;
+      }
+      if (r.hints) {
+        updateServer(row.id, {
+          sub_network: r.hints.sub_network,
+          sub_security: r.hints.sub_security,
+          sub_type: r.hints.sub_type,
+          sub_host: r.hints.sub_host,
+          sub_path: r.hints.sub_path,
+          sub_sni: r.hints.sub_sni,
+          sub_fp: r.hints.sub_fp,
+          sub_alpn: r.hints.sub_alpn,
+          sub_allow_insecure: r.hints.sub_allow_insecure,
+          sub_reality_pbk: r.hints.sub_reality_pbk,
+          sub_reality_sid: r.hints.sub_reality_sid,
+          sub_reality_spx: r.hints.sub_reality_spx,
+        });
+      }
     }
   };
   const job = pushQueue.then(() => run());

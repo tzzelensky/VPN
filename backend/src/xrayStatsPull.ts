@@ -1,5 +1,5 @@
 import type { ServerRow, UserRow } from "./db.js";
-import { applyUsersTrafficSnapshot, getUser, listDeployedServers } from "./db.js";
+import { applyUsersTrafficSnapshot, getUser, listDeployedServers, updateServer } from "./db.js";
 import {
   TZADMIN_VLESS_TAG,
   sshExecCommand,
@@ -17,27 +17,29 @@ function shellQuote(s: string): string {
 
 /** Адрес для `xray api … --server=…` (упрощённый api.listen или legacy inbound tag api). */
 export function parseXrayApiServerForStatsQuery(config: Record<string, unknown>): string | null {
+  const inbounds = config.inbounds;
+  if (Array.isArray(inbounds)) {
+    for (const raw of inbounds) {
+      const ib = raw as Record<string, unknown>;
+      if (ib.tag !== "api") continue;
+      const listenRaw = ib.listen;
+      const listen =
+        listenRaw === "0.0.0.0" || listenRaw === "::" ? "127.0.0.1" : String(listenRaw ?? "127.0.0.1");
+      const port = Number(ib.port);
+      if (!Number.isFinite(port) || port <= 0) continue;
+      if (listen.includes(":") && !listen.startsWith("[")) {
+        return `[${listen}]:${port}`;
+      }
+      if (listen.startsWith("[") && listen.includes("]")) {
+        return `${listen}:${port}`;
+      }
+      return `${listen}:${port}`;
+    }
+  }
+
   const api = config.api as Record<string, unknown> | undefined;
   if (api && typeof api.listen === "string" && api.listen.trim()) {
     return api.listen.trim();
-  }
-  const inbounds = config.inbounds;
-  if (!Array.isArray(inbounds)) return null;
-  for (const raw of inbounds) {
-    const ib = raw as Record<string, unknown>;
-    if (ib.tag !== "api") continue;
-    const listenRaw = ib.listen;
-    const listen =
-      listenRaw === "0.0.0.0" || listenRaw === "::" ? "127.0.0.1" : String(listenRaw ?? "127.0.0.1");
-    const port = Number(ib.port);
-    if (!Number.isFinite(port) || port <= 0) return null;
-    if (listen.includes(":") && !listen.startsWith("[")) {
-      return `[${listen}]:${port}`;
-    }
-    if (listen.startsWith("[") && listen.includes("]")) {
-      return `${listen}:${port}`;
-    }
-    return `${listen}:${port}`;
   }
   return null;
 }
@@ -207,6 +209,45 @@ function buildOnlineUsersCommand(apiListen: string): string {
   );
 }
 
+const XRAY_ALT_CONFIG_PATHS_FOR_STATS = [
+  "/usr/local/x-ui/bin/config.json",
+  "/etc/x-ui/xray/config.json",
+];
+
+async function readConfigAndPull(
+  row: ServerRow,
+  configPath: string,
+  log?: SshLog,
+): Promise<{ host: string; byUuid: Map<string, UserTrafficAgg>; warn?: string }> {
+  const cfg = sshCfg(row);
+  const raw = await sshReadRemoteFile(cfg, configPath, log);
+  const config = JSON.parse(raw.toString("utf8")) as Record<string, unknown>;
+  const apiSrv = parseXrayApiServerForStatsQuery(config);
+  if (!apiSrv) {
+    return {
+      host: row.host,
+      byUuid: new Map(),
+      warn: "нет api.listen / inbound api — выполните синхронизацию конфига на узлы (деплой / сохранение клиента).",
+    };
+  }
+  const keyToUuid = buildStatKeyToUuidMap(config);
+  const r = await sshExecCommand(cfg, buildStatsQueryCommand(apiSrv), log);
+  if (r.code !== 0) {
+    throw new Error(r.stderr.trim() || r.stdout.trim() || `xray api exit ${r.code}`);
+  }
+  let rawStats: Map<string, UserTrafficAgg>;
+  try {
+    rawStats = parseStatsQueryStdout(r.stdout);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    throw new Error(`statsquery JSON: ${msg}`);
+  }
+  const byUuid = mergeKeyMapIntoUuidMap(rawStats, keyToUuid);
+  const rOnline = await sshExecCommand(cfg, buildOnlineUsersCommand(apiSrv), log);
+  mergeOnlineUsersStdout(rOnline.stdout, keyToUuid, byUuid);
+  return { host: row.host, byUuid };
+}
+
 function mergeOnlineUsersStdout(
   stdout: string,
   keyToUuid: Map<string, string>,
@@ -245,35 +286,29 @@ export async function pullTrafficFromServer(
   row: ServerRow,
   log?: SshLog,
 ): Promise<{ host: string; byUuid: Map<string, UserTrafficAgg>; warn?: string }> {
-  const cfg = sshCfg(row);
   const path = await resolveConfigPath(row, log);
-  const raw = await sshReadRemoteFile(cfg, path, log);
-  const config = JSON.parse(raw.toString("utf8")) as Record<string, unknown>;
-  const apiSrv = parseXrayApiServerForStatsQuery(config);
-  if (!apiSrv) {
-    return {
-      host: row.host,
-      byUuid: new Map(),
-      warn: "нет api.listen / inbound api — выполните синхронизацию конфига на узлы (деплой / сохранение клиента).",
-    };
-  }
-  const keyToUuid = buildStatKeyToUuidMap(config);
-  const cmd = buildStatsQueryCommand(apiSrv);
-  const r = await sshExecCommand(cfg, cmd, log);
-  if (r.code !== 0) {
-    throw new Error(r.stderr.trim() || r.stdout.trim() || `xray api exit ${r.code}`);
-  }
-  let rawStats: Map<string, UserTrafficAgg>;
   try {
-    rawStats = parseStatsQueryStdout(r.stdout);
+    return await readConfigAndPull(row, path, log);
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    throw new Error(`statsquery JSON: ${msg}`);
+    const dialErr =
+      /failed to dial|connection refused|no such host|deadline exceeded|i\/o timeout/i.test(msg) ||
+      /127\.0\.0\.1:\d+/.test(msg);
+    // Узлы под 3x-ui часто используют отдельный config path. Если в БД остался системный путь,
+    // пробуем только для чтения x-ui config, не трогая сервисы 3x-ui.
+    if (!dialErr) throw e;
+    for (const altPath of XRAY_ALT_CONFIG_PATHS_FOR_STATS) {
+      if (altPath === path) continue;
+      try {
+        const pulled = await readConfigAndPull(row, altPath, log);
+        updateServer(row.id, { xray_config_path: altPath });
+        return pulled;
+      } catch {
+        /* пробуем следующий путь */
+      }
+    }
+    throw e;
   }
-  const byUuid = mergeKeyMapIntoUuidMap(rawStats, keyToUuid);
-  const rOnline = await sshExecCommand(cfg, buildOnlineUsersCommand(apiSrv), log);
-  mergeOnlineUsersStdout(rOnline.stdout, keyToUuid, byUuid);
-  return { host: row.host, byUuid };
 }
 
 /** Суммирует трафик и онлайн по всем развёрнутым узлам (один UUID может быть на нескольких серверах). */
