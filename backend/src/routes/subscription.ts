@@ -5,6 +5,7 @@ import { subscriptionVlessLinksForUser } from "../subscriptionLinks.js";
 import { setSubscriptionUserHeaders } from "../subscriptionMeta.js";
 import { peekUserTrafficForSubscription, refreshUserTrafficFromServersIfDue } from "../xrayStatsPull.js";
 import { pushClientListToAllDeployedServers } from "../userSync.js";
+import { refreshMissingSubscriptionHintsIfDue } from "../subscriptionHintsRefresh.js";
 
 const router = Router();
 
@@ -19,6 +20,7 @@ router.get("/:token", async (req, res) => {
     }
 
     const base = getUserBySubToken(token) ?? user;
+    await refreshMissingSubscriptionHintsIfDue();
     let headerUser: UserRow = base;
     try {
       const peek = await peekUserTrafficForSubscription(user);
