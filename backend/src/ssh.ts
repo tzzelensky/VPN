@@ -1,6 +1,7 @@
 import { Client } from "ssh2";
 import { decryptSecret } from "./crypto.js";
 import { extractVlessLinkHintsFromConfig, type ServerLinkHints } from "./vlessLinkHints.js";
+import path from "node:path";
 
 export type SshConfig = {
   host: string;
@@ -385,16 +386,32 @@ export async function detectXrayConfigPath(cfg: SshConfig, log?: SshLog): Promis
   return withSsh(
     cfg,
     async (conn) => {
-      const cmdline = await exec(
+      const pidOut = await exec(
         conn,
-        "sh -lc 'P=$(pgrep -f \"xray-linux-amd|/usr/local/bin/xray|/usr/bin/xray\" | head -n1 || true); " +
-          'if [ -n "$P" ] && [ -r "/proc/$P/cmdline" ]; then tr "\\000" " " < "/proc/$P/cmdline"; fi\'',
+        "sh -lc 'pgrep -f \"xray-linux-amd|/usr/local/bin/xray|/usr/bin/xray\" | head -n1 || true'",
       );
-      const runningCfg = parseXrayConfigPathFromCmdline(cmdline.stdout);
-      if (runningCfg) {
-        log?.(`Проверка config из процесса xray: ${runningCfg}…`);
-        const r = await exec(conn, `test -f ${shellQuote(runningCfg)} && echo OK || true`);
-        if (r.stdout.includes("OK")) return runningCfg;
+      const pid = pidOut.stdout.trim();
+      if (pid) {
+        const cmdline = await exec(
+          conn,
+          `sh -lc 'if [ -r "/proc/${pid}/cmdline" ]; then tr "\\000" " " < "/proc/${pid}/cmdline"; fi'`,
+        );
+        const cwdOut = await exec(
+          conn,
+          `sh -lc 'if [ -L "/proc/${pid}/cwd" ]; then readlink -f "/proc/${pid}/cwd"; fi'`,
+        );
+        const cwd = cwdOut.stdout.trim();
+        const runningCfgRaw = parseXrayConfigPathFromCmdline(cmdline.stdout);
+        if (runningCfgRaw) {
+          const runningCfg = path.posix.isAbsolute(runningCfgRaw)
+            ? runningCfgRaw
+            : cwd
+              ? path.posix.join(cwd, runningCfgRaw)
+              : runningCfgRaw;
+          log?.(`Проверка config из процесса xray: ${runningCfg}…`);
+          const r = await exec(conn, `test -f ${shellQuote(runningCfg)} && echo OK || true`);
+          if (r.stdout.includes("OK")) return runningCfg;
+        }
       }
 
       for (const p of XRAY_CONFIG_PATHS) {
