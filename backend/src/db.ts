@@ -289,7 +289,7 @@ function normalizeUser(u: UserRow): UserRow {
     name: u.name ?? "user",
     email: u.email ?? u.name ?? "user",
     vless_uuid: u.vless_uuid,
-    sub_token: u.sub_token,
+    sub_token: String(u.sub_token ?? "").trim(),
     flow: normalizeFlow(u.flow ?? ""),
     total_gb: coerceTotalGbField(u.total_gb),
     expiry_time: coerceExpiryTimeMs(u.expiry_time),
@@ -436,10 +436,11 @@ export function findUsersByTelegramChatId(chatId: number | string): UserRow[] {
 
 export function getUserBySubToken(token: string): UserRow | undefined {
   const t = token.trim();
-  const exact = readStore().users.find((u) => u.sub_token === t);
+  const users = readStore().users;
+  const exact = users.find((u) => String(u.sub_token ?? "").trim() === t);
   if (exact) return exact;
   const lower = t.toLowerCase();
-  return readStore().users.find((u) => u.sub_token.toLowerCase() === lower);
+  return users.find((u) => String(u.sub_token ?? "").trim().toLowerCase() === lower);
 }
 
 export function findUserByVlessUuid(uuid: string): UserRow | undefined {
