@@ -103,6 +103,8 @@ app.use("/api/servers", serversRouter);
 app.use("/api/users", usersRouter);
 app.use("/api/subscription-shop", subscriptionShopRouter);
 app.use("/sub", subscriptionRouter);
+app.use("/api/sub", subscriptionRouter);
+app.use("/api/subscription", subscriptionRouter);
 if (isTelegramWebhookEnabled()) {
   app.use("/api/telegram", telegramRouter);
 }
