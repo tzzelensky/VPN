@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { getUserBySubToken, userAllowedOnServers, type UserRow } from "../db.js";
+import { getUserBySubToken, listUsers, userAllowedOnServers, type UserRow } from "../db.js";
 import { buildSubscriptionPayload } from "../vlessLink.js";
 import { subscriptionVlessLinksForUser } from "../subscriptionLinks.js";
 import { setSubscriptionUserHeaders } from "../subscriptionMeta.js";
@@ -9,17 +9,30 @@ import { refreshMissingSubscriptionHintsIfDue } from "../subscriptionHintsRefres
 
 const router = Router();
 
+function resolveSubscriptionUser(rawToken: string): UserRow | undefined {
+  const token = decodeURIComponent(String(rawToken ?? "").trim());
+  const byToken = token ? getUserBySubToken(token) : undefined;
+  if (byToken) return byToken;
+
+  // Operational fallback: when token is missing/invalid and there is exactly one user,
+  // still serve subscription so client links keep working after manual data edits.
+  if ((process.env.SUBSCRIPTION_FALLBACK_SINGLE_USER ?? "1") === "1") {
+    const rows = listUsers();
+    if (rows.length === 1) return rows[0];
+  }
+  return undefined;
+}
+
 router.get("/:token", async (req, res) => {
   try {
-    const token = decodeURIComponent(String(req.params.token ?? "").trim());
-    const user = getUserBySubToken(token);
+    const user = resolveSubscriptionUser(String(req.params.token ?? ""));
 
     if (!user) {
       res.status(404).send("not found");
       return;
     }
 
-    const base = getUserBySubToken(token) ?? user;
+    const base = getUserBySubToken(user.sub_token) ?? user;
     await refreshMissingSubscriptionHintsIfDue();
     let headerUser: UserRow = base;
     try {
@@ -53,6 +66,21 @@ router.get("/:token", async (req, res) => {
 
     const links = subscriptionVlessLinksForUser(base);
     res.send(buildSubscriptionPayload(links));
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    res.status(500).send(msg);
+  }
+});
+
+router.get("/", async (_req, res) => {
+  try {
+    const rows = listUsers();
+    if (rows.length !== 1) {
+      res.status(404).send("not found");
+      return;
+    }
+    const only = rows[0];
+    res.redirect(302, `/sub/${encodeURIComponent(only.sub_token)}`);
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     res.status(500).send(msg);
