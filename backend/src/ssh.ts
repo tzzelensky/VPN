@@ -517,7 +517,7 @@ export async function deployOrSyncVless(
         }
         ensureXrayStatsPolicyApi(config);
 
-        hints = extractVlessLinkHintsFromConfig(config);
+        hints = extractVlessLinkHintsFromConfig(config, opts.vlessPort);
 
         const json = JSON.stringify(config, null, 2);
         log?.(`Запись ${opts.configPath} (${json.length} байт)…`);

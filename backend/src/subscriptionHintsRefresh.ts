@@ -71,7 +71,7 @@ async function refreshOneServerHints(row: ServerRow, log?: SshLog): Promise<void
   } catch {
     return;
   }
-  const hints = extractVlessLinkHintsFromConfig(parsed);
+  const hints = extractVlessLinkHintsFromConfig(parsed, row.vless_port);
   if (!hasAnyExtractedHints(hints)) return;
 
   updateServer(row.id, {

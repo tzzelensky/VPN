@@ -41,18 +41,32 @@ function firstStr(v: unknown): string {
 }
 
 /** Вытащить параметры для VLESS URI из inbound после деплоя (x-ui Reality/TLS/WS и т.д.). */
-export function extractVlessLinkHintsFromConfig(config: Record<string, unknown>): ServerLinkHints {
+export function extractVlessLinkHintsFromConfig(
+  config: Record<string, unknown>,
+  preferredPort?: number,
+): ServerLinkHints {
   const out = emptyHints();
   const inbounds = config.inbounds;
   if (!Array.isArray(inbounds)) return out;
 
-  const ib =
+  const byTag =
     (inbounds.find((x) => (x as { tag?: string }).tag === TZADMIN_VLESS_TAG) as
       | Record<string, unknown>
-      | undefined) ??
-    (inbounds.find((x) => String((x as { protocol?: string }).protocol ?? "").toLowerCase() === "vless") as
-      | Record<string, unknown>
       | undefined);
+  const byPort =
+    preferredPort && Number.isFinite(preferredPort) && preferredPort > 0
+      ? (inbounds.find(
+          (x) =>
+            String((x as { protocol?: string }).protocol ?? "").toLowerCase() === "vless" &&
+            Number((x as { port?: unknown }).port) === preferredPort,
+        ) as Record<string, unknown> | undefined)
+      : undefined;
+  const firstVless = inbounds.find(
+    (x) => String((x as { protocol?: string }).protocol ?? "").toLowerCase() === "vless",
+  ) as
+      | Record<string, unknown>
+      | undefined;
+  const ib = byTag ?? byPort ?? firstVless;
   if (!ib) return out;
 
   const ss = (ib.streamSettings as Record<string, unknown>) || {};
