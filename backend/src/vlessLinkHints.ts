@@ -30,6 +30,30 @@ const emptyHints = (): ServerLinkHints => ({
   sub_reality_spx: "",
 });
 
+function pickVlessInbound(
+  inbounds: unknown[],
+  preferredPort?: number,
+): Record<string, unknown> | undefined {
+  const byTag =
+    (inbounds.find((x) => (x as { tag?: string }).tag === TZADMIN_VLESS_TAG) as
+      | Record<string, unknown>
+      | undefined);
+  const byPort =
+    preferredPort && Number.isFinite(preferredPort) && preferredPort > 0
+      ? (inbounds.find(
+          (x) =>
+            String((x as { protocol?: string }).protocol ?? "").toLowerCase() === "vless" &&
+            Number((x as { port?: unknown }).port) === preferredPort,
+        ) as Record<string, unknown> | undefined)
+      : undefined;
+  const firstVless = inbounds.find(
+    (x) => String((x as { protocol?: string }).protocol ?? "").toLowerCase() === "vless",
+  ) as
+      | Record<string, unknown>
+      | undefined;
+  return byTag ?? byPort ?? firstVless;
+}
+
 function str(v: unknown): string {
   return typeof v === "string" ? v.trim() : "";
 }
@@ -49,24 +73,7 @@ export function extractVlessLinkHintsFromConfig(
   const inbounds = config.inbounds;
   if (!Array.isArray(inbounds)) return out;
 
-  const byTag =
-    (inbounds.find((x) => (x as { tag?: string }).tag === TZADMIN_VLESS_TAG) as
-      | Record<string, unknown>
-      | undefined);
-  const byPort =
-    preferredPort && Number.isFinite(preferredPort) && preferredPort > 0
-      ? (inbounds.find(
-          (x) =>
-            String((x as { protocol?: string }).protocol ?? "").toLowerCase() === "vless" &&
-            Number((x as { port?: unknown }).port) === preferredPort,
-        ) as Record<string, unknown> | undefined)
-      : undefined;
-  const firstVless = inbounds.find(
-    (x) => String((x as { protocol?: string }).protocol ?? "").toLowerCase() === "vless",
-  ) as
-      | Record<string, unknown>
-      | undefined;
-  const ib = byTag ?? byPort ?? firstVless;
+  const ib = pickVlessInbound(inbounds, preferredPort);
   if (!ib) return out;
 
   const ss = (ib.streamSettings as Record<string, unknown>) || {};
@@ -119,4 +126,21 @@ export function extractVlessLinkHintsFromConfig(
   }
 
   return out;
+}
+
+/** Нужен для случаев x-ui, где есть только realitySettings.privateKey (без publicKey). */
+export function extractRealityPrivateKeyFromConfig(
+  config: Record<string, unknown>,
+  preferredPort?: number,
+): string {
+  const inbounds = config.inbounds;
+  if (!Array.isArray(inbounds)) return "";
+  const ib = pickVlessInbound(inbounds, preferredPort);
+  if (!ib) return "";
+  const ss = (ib.streamSettings as Record<string, unknown>) || {};
+  const secRaw = str(ss.security).toLowerCase();
+  if (secRaw !== "reality") return "";
+  const rs = (ss.realitySettings as Record<string, unknown>) || {};
+  const rsSettings = (rs.settings as Record<string, unknown>) || {};
+  return str(rs.privateKey) || str(rsSettings.privateKey);
 }

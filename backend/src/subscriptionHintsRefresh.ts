@@ -1,6 +1,6 @@
 import { listDeployedServers, updateServer, type ServerRow } from "./db.js";
-import { detectXrayConfigPath, sshReadRemoteFile, type SshConfig, type SshLog } from "./ssh.js";
-import { extractVlessLinkHintsFromConfig } from "./vlessLinkHints.js";
+import { detectXrayConfigPath, sshExecCommand, sshReadRemoteFile, type SshConfig, type SshLog } from "./ssh.js";
+import { extractRealityPrivateKeyFromConfig, extractVlessLinkHintsFromConfig } from "./vlessLinkHints.js";
 
 const REFRESH_MIN_MS = 45_000;
 let lastRefreshAttemptMs = 0;
@@ -34,6 +34,27 @@ function hasAnyExtractedHints(h: ReturnType<typeof extractVlessLinkHintsFromConf
       (h.sub_sni ?? "").trim() ||
       (h.sub_network ?? "").trim(),
   );
+}
+
+function shellQuote(s: string): string {
+  return `'${s.replace(/'/g, `'\\''`)}'`;
+}
+
+async function deriveRealityPublicKeyFromPrivateOnServer(
+  cfg: SshConfig,
+  privateKey: string,
+  log?: SshLog,
+): Promise<string> {
+  const cmd =
+    "PATH=/usr/local/bin:/usr/bin:$PATH; " +
+    "X=$(command -v xray 2>/dev/null || echo /usr/local/bin/xray); " +
+    '"$X" x25519 -i ' +
+    shellQuote(privateKey) +
+    " 2>/dev/null || true";
+  const r = await sshExecCommand(cfg, cmd, log);
+  const text = `${r.stdout}\n${r.stderr}`;
+  const m = text.match(/Public key:\s*([A-Za-z0-9_-]{20,})/i);
+  return m?.[1]?.trim() ?? "";
 }
 
 async function refreshOneServerHints(row: ServerRow, log?: SshLog): Promise<void> {
@@ -72,6 +93,13 @@ async function refreshOneServerHints(row: ServerRow, log?: SshLog): Promise<void
     return;
   }
   const hints = extractVlessLinkHintsFromConfig(parsed, row.vless_port);
+  if ((hints.sub_security ?? "").toLowerCase() === "reality" && !hints.sub_reality_pbk) {
+    const priv = extractRealityPrivateKeyFromConfig(parsed, row.vless_port);
+    if (priv) {
+      const pbk = await deriveRealityPublicKeyFromPrivateOnServer(cfg, priv, log);
+      if (pbk) hints.sub_reality_pbk = pbk;
+    }
+  }
   if (!hasAnyExtractedHints(hints)) return;
 
   updateServer(row.id, {
