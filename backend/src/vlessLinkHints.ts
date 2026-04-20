@@ -96,11 +96,12 @@ export function extractVlessLinkHintsFromConfig(config: Record<string, unknown>)
     out.sub_allow_insecure = tls.allowInsecure === true || tls.allowInsecure === 1 || tls.allowInsecure === "1" ? 1 : 0;
   } else if (secRaw === "reality") {
     const rs = (ss.realitySettings as Record<string, unknown>) || {};
-    out.sub_reality_pbk = str(rs.publicKey);
-    out.sub_reality_sid = str(rs.shortId);
-    out.sub_reality_spx = str(rs.spiderX) || "/";
-    out.sub_sni = str(rs.serverName);
-    out.sub_fp = str(rs.fingerprint) || "chrome";
+    const rsSettings = (rs.settings as Record<string, unknown>) || {};
+    out.sub_reality_pbk = str(rs.publicKey) || str(rsSettings.publicKey);
+    out.sub_reality_sid = str(rs.shortId) || firstStr(rs.shortIds);
+    out.sub_reality_spx = str(rs.spiderX) || str(rsSettings.spiderX) || "/";
+    out.sub_sni = str(rs.serverName) || firstStr(rs.serverNames);
+    out.sub_fp = str(rs.fingerprint) || str(rsSettings.fingerprint) || "chrome";
   }
 
   return out;
