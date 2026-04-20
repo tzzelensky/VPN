@@ -258,6 +258,45 @@ export function ensureXrayStatsPolicyApi(config: Record<string, unknown>): void 
   config.routing = { ...prevRouting, rules };
 }
 
+function buildManagedClients(
+  prevList: Array<Record<string, unknown>>,
+  clientUuids: string[],
+): Array<Record<string, unknown>> {
+  const prevById = new Map(prevList.map((c) => [String(c.id ?? "").toLowerCase(), c]));
+  return clientUuids.map((id) => {
+    const prev = prevById.get(id.toLowerCase());
+    const base: Record<string, unknown> = prev && typeof prev === "object" ? { ...prev } : {};
+    return {
+      ...base,
+      id,
+      email: String(base.email ?? id).trim() || id,
+      level: Number(base.level ?? 0) || 0,
+    };
+  });
+}
+
+function findCandidateVlessInboundIndex(
+  inbounds: Record<string, unknown>[],
+  preferredPort: number,
+): number {
+  const vlessIdx = inbounds
+    .map((ib, i) => ({ ib, i }))
+    .filter(({ ib }) => String(ib.protocol ?? "").toLowerCase() === "vless");
+  if (vlessIdx.length === 0) return -1;
+
+  const samePort = vlessIdx.find(({ ib }) => Number(ib.port) === preferredPort);
+  if (samePort) return samePort.i;
+
+  const secure = vlessIdx.find(({ ib }) => {
+    const ss = (ib.streamSettings as Record<string, unknown>) || {};
+    const sec = String(ss.security ?? "").toLowerCase();
+    return sec === "reality" || sec === "tls";
+  });
+  if (secure) return secure.i;
+
+  return vlessIdx[0]!.i;
+}
+
 function buildMinimalConfig(clientUuids: string[], vlessPort: number): Record<string, unknown> {
   const clients = [...new Set(clientUuids.filter(Boolean))].map((id) => ({
     id,
@@ -336,13 +375,31 @@ const XRAY_CONFIG_PATHS = [
   "/etc/xray/config.json",
 ];
 
+function parseXrayConfigPathFromCmdline(cmdline: string): string | null {
+  const m = cmdline.match(/(?:^|\s)-(?:config|c)\s+(\S+)/);
+  if (!m?.[1]) return null;
+  return m[1].trim().replace(/^['"]|['"]$/g, "");
+}
+
 export async function detectXrayConfigPath(cfg: SshConfig, log?: SshLog): Promise<string | null> {
   return withSsh(
     cfg,
     async (conn) => {
+      const cmdline = await exec(
+        conn,
+        "sh -lc 'P=$(pgrep -f \"xray-linux-amd|/usr/local/bin/xray|/usr/bin/xray\" | head -n1 || true); " +
+          'if [ -n "$P" ] && [ -r "/proc/$P/cmdline" ]; then tr "\\000" " " < "/proc/$P/cmdline"; fi\'',
+      );
+      const runningCfg = parseXrayConfigPathFromCmdline(cmdline.stdout);
+      if (runningCfg) {
+        log?.(`Проверка config из процесса xray: ${runningCfg}…`);
+        const r = await exec(conn, `test -f ${shellQuote(runningCfg)} && echo OK || true`);
+        if (r.stdout.includes("OK")) return runningCfg;
+      }
+
       for (const p of XRAY_CONFIG_PATHS) {
         log?.(`Проверка наличия ${p}…`);
-        const r = await exec(conn, `test -f '${p}' && echo OK || true`);
+        const r = await exec(conn, `test -f ${shellQuote(p)} && echo OK || true`);
         if (r.stdout.includes("OK")) return p;
       }
       return null;
@@ -389,17 +446,7 @@ export async function deployOrSyncVless(
               const ib = inbounds[idx] as Record<string, unknown>;
               const settings = (ib.settings as Record<string, unknown>) ?? {};
               const prevList = (settings.clients as Array<Record<string, unknown>>) ?? [];
-              const prevById = new Map(prevList.map((c) => [String(c.id ?? "").toLowerCase(), c]));
-              settings.clients = clientUuids.map((id) => {
-                const prev = prevById.get(id.toLowerCase());
-                const base: Record<string, unknown> = prev && typeof prev === "object" ? { ...prev } : {};
-                return {
-                  ...base,
-                  id,
-                  email: String(base.email ?? id).trim() || id,
-                  level: Number(base.level ?? 0) || 0,
-                };
-              });
+              settings.clients = buildManagedClients(prevList, clientUuids);
               ib.settings = settings;
               const curPort = Number(ib.port);
               if (Number.isFinite(curPort) && curPort > 0 && curPort !== opts.vlessPort) {
@@ -415,8 +462,33 @@ export async function deployOrSyncVless(
               config = parsed;
               log?.(`Обновлён только inbound «${TZADMIN_VLESS_TAG}» (${clientUuids.length} UUID).`);
             } else {
-              config = buildMinimalConfig(clientUuids, opts.vlessPort);
-              log?.(`Inbound «${TZADMIN_VLESS_TAG}» не найден — записан минимальный конфиг.`);
+              const rows = inbounds as Record<string, unknown>[];
+              const candIdx = findCandidateVlessInboundIndex(rows, opts.vlessPort);
+              if (candIdx >= 0) {
+                const ib = { ...(rows[candIdx] as Record<string, unknown>) };
+                const settings = (ib.settings as Record<string, unknown>) ?? {};
+                const prevList = (settings.clients as Array<Record<string, unknown>>) ?? [];
+                settings.clients = buildManagedClients(prevList, clientUuids);
+                settings.decryption = "none";
+                ib.settings = settings;
+                ib.tag = TZADMIN_VLESS_TAG;
+                const curPort = Number(ib.port);
+                if (Number.isFinite(curPort) && curPort > 0 && curPort !== opts.vlessPort) {
+                  log?.(
+                    `Взят существующий VLESS inbound (порт ${curPort}) и переименован в «${TZADMIN_VLESS_TAG}». ` +
+                      `Порт в конфиге сохранён (не меняем, чтобы не ломать TLS/Reality).`,
+                  );
+                } else {
+                  ib.port = opts.vlessPort;
+                }
+                rows[candIdx] = ib;
+                parsed.inbounds = rows;
+                config = parsed;
+                log?.(`Inbound «${TZADMIN_VLESS_TAG}» создан из существующего VLESS inbound (${clientUuids.length} UUID).`);
+              } else {
+                config = buildMinimalConfig(clientUuids, opts.vlessPort);
+                log?.(`VLESS inbound не найден — записан минимальный конфиг.`);
+              }
             }
           } else {
             config = buildMinimalConfig(clientUuids, opts.vlessPort);

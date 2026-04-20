@@ -46,14 +46,20 @@ export function extractVlessLinkHintsFromConfig(config: Record<string, unknown>)
   const inbounds = config.inbounds;
   if (!Array.isArray(inbounds)) return out;
 
-  const ib = inbounds.find((x) => (x as { tag?: string }).tag === TZADMIN_VLESS_TAG) as Record<string, unknown> | undefined;
+  const ib =
+    (inbounds.find((x) => (x as { tag?: string }).tag === TZADMIN_VLESS_TAG) as
+      | Record<string, unknown>
+      | undefined) ??
+    (inbounds.find((x) => String((x as { protocol?: string }).protocol ?? "").toLowerCase() === "vless") as
+      | Record<string, unknown>
+      | undefined);
   if (!ib) return out;
 
-  const net = str(ib.protocol).toLowerCase() || "tcp";
+  const ss = (ib.streamSettings as Record<string, unknown>) || {};
+  const net = str(ss.network).toLowerCase() || "tcp";
   out.sub_network = net;
   out.sub_type = net === "tcp" ? "tcp" : net;
 
-  const ss = (ib.streamSettings as Record<string, unknown>) || {};
   const secRaw = str(ss.security).toLowerCase();
   out.sub_security = secRaw;
 
