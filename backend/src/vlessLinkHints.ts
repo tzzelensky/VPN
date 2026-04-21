@@ -1,3 +1,4 @@
+import { x25519 } from "@noble/curves/ed25519.js";
 import { TZADMIN_VLESS_TAG } from "./ssh.js";
 
 export type ServerLinkHints = {
@@ -157,4 +158,38 @@ export function extractRealityPrivateKeyFromConfig(
   const rs = (ss.realitySettings as Record<string, unknown>) || {};
   const rsSettings = asRecord(rs.settings);
   return str(rs.privateKey) || str(rsSettings.privateKey);
+}
+
+/** 32 байта: hex (64 символа) или base64 / base64url (как в JSON xray / x-ui). */
+function decodeRealityKey32(raw: string): Uint8Array | null {
+  const t = raw.trim();
+  if (!t) return null;
+  if (/^[0-9a-fA-F]{64}$/.test(t)) {
+    return Uint8Array.from(Buffer.from(t, "hex"));
+  }
+  let b64 = t.replace(/-/g, "+").replace(/_/g, "/");
+  const pad = b64.length % 4;
+  if (pad) b64 += "=".repeat(4 - pad);
+  try {
+    const buf = Buffer.from(b64, "base64");
+    if (buf.length === 32) return new Uint8Array(buf);
+  } catch {
+    /* ignore */
+  }
+  return null;
+}
+
+/**
+ * Локальный pbk из privateKey конфига (если на ноде не сработал `xray x25519` по SSH).
+ * Кодируем как base64url без padding — как в типичных VLESS Reality URI.
+ */
+export function deriveRealityPublicKeyFromPrivateLocal(privateKey: string): string {
+  const sk = decodeRealityKey32(privateKey);
+  if (!sk) return "";
+  try {
+    const pk = x25519.getPublicKey(sk);
+    return Buffer.from(pk).toString("base64url");
+  } catch {
+    return "";
+  }
 }
