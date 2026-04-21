@@ -58,6 +58,20 @@ function str(v: unknown): string {
   return typeof v === "string" ? v.trim() : "";
 }
 
+/** x-ui иногда кладёт `settings` строкой JSON. */
+function asRecord(v: unknown): Record<string, unknown> {
+  if (v && typeof v === "object" && !Array.isArray(v)) return v as Record<string, unknown>;
+  if (typeof v === "string") {
+    try {
+      const o = JSON.parse(v) as unknown;
+      if (o && typeof o === "object" && !Array.isArray(o)) return o as Record<string, unknown>;
+    } catch {
+      /* ignore */
+    }
+  }
+  return {};
+}
+
 function firstStr(v: unknown): string {
   if (typeof v === "string") return v.trim();
   if (Array.isArray(v) && v.length > 0 && typeof v[0] === "string") return v[0].trim();
@@ -117,7 +131,7 @@ export function extractVlessLinkHintsFromConfig(
     out.sub_allow_insecure = tls.allowInsecure === true || tls.allowInsecure === 1 || tls.allowInsecure === "1" ? 1 : 0;
   } else if (secRaw === "reality") {
     const rs = (ss.realitySettings as Record<string, unknown>) || {};
-    const rsSettings = (rs.settings as Record<string, unknown>) || {};
+    const rsSettings = asRecord(rs.settings);
     out.sub_reality_pbk = str(rs.publicKey) || str(rsSettings.publicKey);
     out.sub_reality_sid = str(rs.shortId) || firstStr(rs.shortIds);
     out.sub_reality_spx = str(rs.spiderX) || str(rsSettings.spiderX) || "/";
@@ -141,6 +155,6 @@ export function extractRealityPrivateKeyFromConfig(
   const secRaw = str(ss.security).toLowerCase();
   if (secRaw !== "reality") return "";
   const rs = (ss.realitySettings as Record<string, unknown>) || {};
-  const rsSettings = (rs.settings as Record<string, unknown>) || {};
+  const rsSettings = asRecord(rs.settings);
   return str(rs.privateKey) || str(rsSettings.privateKey);
 }

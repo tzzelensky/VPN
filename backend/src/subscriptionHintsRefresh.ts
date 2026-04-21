@@ -36,25 +36,33 @@ function hasAnyExtractedHints(h: ReturnType<typeof extractVlessLinkHintsFromConf
   );
 }
 
-function shellQuote(s: string): string {
-  return `'${s.replace(/'/g, `'\\''`)}'`;
-}
-
 async function deriveRealityPublicKeyFromPrivateOnServer(
   cfg: SshConfig,
   privateKey: string,
   log?: SshLog,
 ): Promise<string> {
-  const cmd =
-    "PATH=/usr/local/bin:/usr/bin:$PATH; " +
-    "X=$(command -v xray 2>/dev/null || echo /usr/local/bin/xray); " +
-    '"$X" x25519 -i ' +
-    shellQuote(privateKey) +
-    " 2>/dev/null || true";
-  const r = await sshExecCommand(cfg, cmd, log);
+  const qpk = privateKey.replace(/'/g, `'\\''`);
+  const script =
+    `PATH=/usr/local/bin:/usr/bin:/usr/local/x-ui/bin:$PATH; ` +
+    `X=/usr/local/x-ui/bin/xray-linux-amd64; ` +
+    `[ ! -x "$X" ] && X=/usr/local/bin/xray; ` +
+    `[ ! -x "$X" ] && X=/usr/bin/xray; ` +
+    `[ ! -x "$X" ] && X=$(command -v xray 2>/dev/null || true); ` +
+    `[ -z "$X" ] && exit 0; ` +
+    `"$X" x25519 -i '${qpk}' 2>&1 || true`;
+  const r = await sshExecCommand(cfg, `bash -lc ${JSON.stringify(script)}`, log);
   const text = `${r.stdout}\n${r.stderr}`;
-  const m = text.match(/Public key:\s*([A-Za-z0-9_-]{20,})/i);
-  return m?.[1]?.trim() ?? "";
+  const patterns = [
+    /Public key:\s*([A-Za-z0-9_-]{20,})/i,
+    /PublicKey:\s*([A-Za-z0-9_-]{20,})/i,
+    /^([A-Za-z0-9_-]{40,80})$/m,
+  ];
+  for (const re of patterns) {
+    const m = text.match(re);
+    if (m?.[1]?.trim()) return m[1].trim();
+  }
+  log?.(`x25519: не удалось разобрать public key (фрагмент): ${text.slice(0, 200)}`);
+  return "";
 }
 
 async function refreshOneServerHints(row: ServerRow, log?: SshLog): Promise<void> {
@@ -129,13 +137,20 @@ export async function refreshMissingSubscriptionHintsIfDue(log?: SshLog): Promis
     await inflight.catch(() => {});
     return;
   }
-  if (now - lastRefreshAttemptMs < REFRESH_MIN_MS) return;
 
   const targets = listDeployedServers().filter((s) => !hasUsableHints(s));
   if (targets.length === 0) {
     lastRefreshAttemptMs = now;
     return;
   }
+
+  /** Reality без pbk — клиенты получают security=none; такие запросы нельзя откладывать на 45s. */
+  const realityMissingPbk = targets.some(
+    (s) =>
+      String(s.sub_security ?? "").trim().toLowerCase() === "reality" &&
+      !String(s.sub_reality_pbk ?? "").trim(),
+  );
+  if (!realityMissingPbk && now - lastRefreshAttemptMs < REFRESH_MIN_MS) return;
 
   const job = (async () => {
     for (const row of targets) {
