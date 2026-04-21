@@ -598,7 +598,7 @@ export function createUser(input: CreateUserInput = {}): UserRow {
         if (requestedMode !== "legacy") connection_profile = "reality";
       }
     }
-    if (connection_profile === "legacy" && (process.env.AUTO_REALITY_FOR_NEW_USERS ?? "1") === "1") {
+    if (connection_profile === "legacy" && (process.env.AUTO_REALITY_FOR_NEW_USERS ?? "0") === "1") {
       if (reality_pbk && reality_sid && reality_sni) connection_profile = "reality";
     }
     created = normalizeUser({
