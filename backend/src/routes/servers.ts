@@ -14,9 +14,9 @@ import { encryptSecret } from "../crypto.js";
 import { requireAuth } from "../middleware/requireAuth.js";
 import {
   testSshConnection,
-  detectXrayConfigPath,
   deployOrSyncVless,
   installXrayIfMissing,
+  TZADMIN_XRAY_CONFIG_PATH,
   type SshLog,
 } from "../ssh.js";
 import { initNdjsonStream, ndjsonLine, wantsNdjsonStream } from "../streamUtil.js";
@@ -252,21 +252,7 @@ router.post("/:id/deploy-vless", async (req, res) => {
   }
 
   const uuid = row.vless_uuid ?? uuidv4();
-  let configPath: string | null = null;
-  try {
-    configPath = await detectXrayConfigPath(
-      {
-        host: row.host,
-        port: row.ssh_port,
-        username: row.ssh_user,
-        passwordEnc: row.ssh_password_enc,
-      },
-      log,
-    );
-  } catch {
-    configPath = null;
-  }
-  const pathToUse = configPath ?? "/usr/local/etc/xray/config.json";
+  const pathToUse = TZADMIN_XRAY_CONFIG_PATH;
   const clientUuids = clientUuidsForServer(uuid);
 
   try {

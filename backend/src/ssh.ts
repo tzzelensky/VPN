@@ -16,6 +16,7 @@ export type SshConfig = {
 };
 
 export type SshLog = (message: string) => void;
+export const TZADMIN_XRAY_CONFIG_PATH = "/etc/tzadmin-xray/config.json";
 
 function exec(conn: Client, cmd: string): Promise<{ code: number | null; stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
@@ -99,7 +100,41 @@ function shellQuote(s: string): string {
   return `'${s.replace(/'/g, `'\\''`)}'`;
 }
 
-async function restartXray(conn: Client, log?: SshLog): Promise<void> {
+function isTzadminManagedConfigPath(configPath: string): boolean {
+  return configPath.includes("/tzadmin-xray/");
+}
+
+async function restartTzadminXrayService(conn: Client, configPath: string, log?: SshLog): Promise<void> {
+  const script =
+    `set -e; PATH=/usr/local/bin:/usr/bin:/usr/local/x-ui/bin:$PATH; ` +
+    `X=/usr/local/x-ui/bin/xray-linux-amd64; ` +
+    `[ ! -x "$X" ] && X=/usr/local/bin/xray; ` +
+    `[ ! -x "$X" ] && X=/usr/bin/xray; ` +
+    `[ ! -x "$X" ] && X=$(command -v xray 2>/dev/null || true); ` +
+    `[ -x "$X" ] || exit 20; ` +
+    `mkdir -p /etc/tzadmin-xray; ` +
+    `cat > /etc/systemd/system/tzadmin-xray.service <<UNIT\n` +
+    `[Unit]\nDescription=TZAdmin Managed Xray Service\nAfter=network.target\n\n` +
+    `[Service]\nType=simple\nExecStart=$X -config ${configPath}\nRestart=always\nRestartSec=3\nLimitNOFILE=1048576\n\n` +
+    `[Install]\nWantedBy=multi-user.target\n` +
+    `UNIT\n` +
+    `systemctl daemon-reload; ` +
+    `systemctl enable tzadmin-xray >/dev/null 2>&1 || true; ` +
+    `systemctl restart tzadmin-xray; ` +
+    `systemctl is-active tzadmin-xray >/dev/null`;
+  const r = await exec(conn, `bash -lc ${JSON.stringify(script)}`);
+  if (r.code === 0) return;
+  const text = (r.stderr || r.stdout || "").trim();
+  if (r.code === 20) throw new Error("На сервере не найден бинарник xray");
+  throw new Error(`tzadmin-xray restart: ${text || `exit ${r.code}`}`);
+}
+
+async function restartXray(conn: Client, configPath: string, log?: SshLog): Promise<void> {
+  if (isTzadminManagedConfigPath(configPath)) {
+    log?.("Перезапуск отдельного сервиса панели tzadmin-xray…");
+    await restartTzadminXrayService(conn, configPath, log);
+    return;
+  }
   const xrayProcPattern = "xray-linux-amd64|/usr/local/x-ui/bin/xray|/usr/local/bin/xray|/usr/bin/xray|(^|/)xray(\\s|$)";
   const hasAnyXrayProc = async (): Promise<boolean> => {
     const byName = await exec(conn, "pgrep -x xray >/dev/null 2>&1; echo $?");
@@ -642,7 +677,7 @@ export async function deployOrSyncVless(
         await sftpWriteFile(conn, opts.configPath, Buffer.from(json, "utf8"));
 
         log?.("Перезапуск Xray…");
-        await restartXray(conn, log);
+        await restartXray(conn, opts.configPath, log);
 
         return "Конфиг обновлён.";
       },
@@ -720,7 +755,7 @@ export async function removeClientUuidFromTzadmin(
         ensureXrayStatsPolicyApi(parsed);
         log?.(`Запись ${opts.configPath}…`);
         await sftpWriteFile(conn, opts.configPath, Buffer.from(JSON.stringify(parsed, null, 2), "utf8"));
-        await restartXray(conn, log);
+        await restartXray(conn, opts.configPath, log);
         return "Клиент удалён из inbound.";
       },
       log,

@@ -5,7 +5,12 @@ import {
   updateServer,
   type ServerRow,
 } from "./db.js";
-import { detectXrayConfigPath, removeClientUuidFromTzadmin, syncServerClientUuids, type SshLog } from "./ssh.js";
+import {
+  TZADMIN_XRAY_CONFIG_PATH,
+  removeClientUuidFromTzadmin,
+  syncServerClientUuids,
+  type SshLog,
+} from "./ssh.js";
 
 function sshCfg(row: ServerRow) {
   return {
@@ -17,10 +22,11 @@ function sshCfg(row: ServerRow) {
 }
 
 export async function resolveConfigPath(row: ServerRow, log?: SshLog): Promise<string> {
-  if (row.xray_config_path) return row.xray_config_path;
-  const detected = await detectXrayConfigPath(sshCfg(row), log);
-  const path = detected ?? "/usr/local/etc/xray/config.json";
-  updateServer(row.id, { xray_config_path: path });
+  const path = TZADMIN_XRAY_CONFIG_PATH;
+  if (row.xray_config_path !== path) {
+    log?.(`Переключение на отдельный конфиг панели: ${path}`);
+    updateServer(row.id, { xray_config_path: path });
+  }
   return path;
 }
 
