@@ -373,6 +373,46 @@ function buildMinimalConfig(clientUuids: string[], vlessPort: number): Record<st
   return cfg;
 }
 
+function buildManagedInbound(clientUuids: string[], vlessPort: number): Record<string, unknown> {
+  const clients = [...new Set(clientUuids.filter(Boolean))].map((id) => ({
+    id,
+    email: id,
+    level: 0,
+  }));
+  return {
+    listen: "0.0.0.0",
+    port: vlessPort,
+    protocol: "vless",
+    settings: {
+      clients,
+      decryption: "none",
+    },
+    streamSettings: {
+      network: "tcp",
+      security: "none",
+    },
+    tag: TZADMIN_VLESS_TAG,
+  };
+}
+
+function chooseManagedPort(inbounds: Record<string, unknown>[], preferredPort: number): number {
+  const occupied = new Set<number>();
+  for (const ib of inbounds) {
+    if (String(ib.protocol ?? "").toLowerCase() !== "vless") continue;
+    if (String(ib.tag ?? "") === TZADMIN_VLESS_TAG) continue;
+    const p = Number(ib.port);
+    if (Number.isFinite(p) && p > 0) occupied.add(p);
+  }
+  if (!occupied.has(preferredPort)) return preferredPort;
+  const candidates = [8433, 8443, 2053, 2083, 2087, 2096];
+  for (const p of candidates) {
+    if (!occupied.has(p)) return p;
+  }
+  let p = preferredPort + 1;
+  while (p < 65535 && occupied.has(p)) p++;
+  return p < 65535 ? p : preferredPort;
+}
+
 export async function testSshConnection(
   cfg: SshConfig,
   log?: SshLog,
@@ -491,53 +531,36 @@ export async function deployOrSyncVless(
               const ib = inbounds[idx] as Record<string, unknown>;
               const settings = (ib.settings as Record<string, unknown>) ?? {};
               const prevList = (settings.clients as Array<Record<string, unknown>>) ?? [];
-              const defaultFlow = defaultClientFlowForInbound(ib, prevList);
-              const forceFlow = shouldForceClientFlowForInbound(ib);
-              settings.clients = buildManagedClients(prevList, clientUuids, defaultFlow, forceFlow);
-              ib.settings = settings;
-              const curPort = Number(ib.port);
-              if (Number.isFinite(curPort) && curPort > 0 && curPort !== opts.vlessPort) {
+              // Управляемый inbound панели держим простым (как «рабочий» узел): VLESS TCP security=none.
+              const managedPort = chooseManagedPort(inbounds as Record<string, unknown>[], opts.vlessPort);
+              const managed = buildManagedInbound(clientUuids, managedPort);
+              managed.settings = {
+                ...(managed.settings as Record<string, unknown>),
+                clients: buildManagedClients(prevList, clientUuids, "", false),
+              };
+              if (managedPort !== opts.vlessPort) {
                 log?.(
-                  `Порт в конфиге inbound «${TZADMIN_VLESS_TAG}» = ${curPort}, в панели указано ${opts.vlessPort}. ` +
-                    `Порт в конфиге НЕ меняю (иначе ломается TLS/Reality). Исправьте порт узла в панели под фактический.`,
+                  `Порт ${opts.vlessPort} занят другим VLESS inbound, managed inbound перенесён на ${managedPort}.`,
                 );
-              } else {
-                ib.port = opts.vlessPort;
               }
-              inbounds[idx] = ib;
+              const curPort = Number(ib.port);
+              if (Number.isFinite(curPort) && curPort > 0 && curPort !== managedPort) {
+                log?.(`Обновлён порт managed inbound: ${curPort} -> ${managedPort}.`);
+              }
+              inbounds[idx] = managed;
               parsed.inbounds = inbounds;
               config = parsed;
               log?.(`Обновлён только inbound «${TZADMIN_VLESS_TAG}» (${clientUuids.length} UUID).`);
             } else {
               const rows = inbounds as Record<string, unknown>[];
-              const candIdx = findCandidateVlessInboundIndex(rows, opts.vlessPort);
-              if (candIdx >= 0) {
-                const ib = { ...(rows[candIdx] as Record<string, unknown>) };
-                const settings = (ib.settings as Record<string, unknown>) ?? {};
-                const prevList = (settings.clients as Array<Record<string, unknown>>) ?? [];
-                const defaultFlow = defaultClientFlowForInbound(ib, prevList);
-                const forceFlow = shouldForceClientFlowForInbound(ib);
-                settings.clients = buildManagedClients(prevList, clientUuids, defaultFlow, forceFlow);
-                settings.decryption = "none";
-                ib.settings = settings;
-                ib.tag = TZADMIN_VLESS_TAG;
-                const curPort = Number(ib.port);
-                if (Number.isFinite(curPort) && curPort > 0 && curPort !== opts.vlessPort) {
-                  log?.(
-                    `Взят существующий VLESS inbound (порт ${curPort}) и переименован в «${TZADMIN_VLESS_TAG}». ` +
-                      `Порт в конфиге сохранён (не меняем, чтобы не ломать TLS/Reality).`,
-                  );
-                } else {
-                  ib.port = opts.vlessPort;
-                }
-                rows[candIdx] = ib;
-                parsed.inbounds = rows;
-                config = parsed;
-                log?.(`Inbound «${TZADMIN_VLESS_TAG}» создан из существующего VLESS inbound (${clientUuids.length} UUID).`);
-              } else {
-                config = buildMinimalConfig(clientUuids, opts.vlessPort);
-                log?.(`VLESS inbound не найден — записан минимальный конфиг.`);
+              const managedPort = chooseManagedPort(rows, opts.vlessPort);
+              if (managedPort !== opts.vlessPort) {
+                log?.(`Порт ${opts.vlessPort} занят другим VLESS inbound, managed inbound создан на ${managedPort}.`);
               }
+              rows.push(buildManagedInbound(clientUuids, managedPort));
+              parsed.inbounds = rows;
+              config = parsed;
+              log?.(`Создан отдельный inbound «${TZADMIN_VLESS_TAG}» (${clientUuids.length} UUID).`);
             }
           } else {
             config = buildMinimalConfig(clientUuids, opts.vlessPort);
