@@ -23,9 +23,9 @@ export type VlessLinkServerSlice = Pick<
 >;
 
 function pickStr(serverVal: string, userVal: string): string {
-  const u = (userVal ?? "").trim();
-  if (u) return u;
-  return (serverVal ?? "").trim();
+  const s = (serverVal ?? "").trim();
+  if (s) return s;
+  return (userVal ?? "").trim();
 }
 
 /**
