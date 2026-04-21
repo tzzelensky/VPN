@@ -47,19 +47,20 @@ function pickVlessInbound(
             Number((x as { port?: unknown }).port) === preferredPort,
         ) as Record<string, unknown> | undefined)
       : undefined;
-  const firstVless = inbounds.find(
+  const vlessList = inbounds.filter(
     (x) => String((x as { protocol?: string }).protocol ?? "").toLowerCase() === "vless",
-  ) as
-      | Record<string, unknown>
-      | undefined;
-  return byTag ?? byPort ?? firstVless;
+  ) as Record<string, unknown>[];
+  /** Иначе берём первый VLESS (часто «none»), а Reality на другом порту — pbk никогда не подтянется. */
+  const realityIb = vlessList.find((ib) => streamSecurityOfInbound(ib) === "reality");
+  const firstVless = vlessList[0];
+  return byTag ?? byPort ?? realityIb ?? firstVless;
 }
 
 function str(v: unknown): string {
   return typeof v === "string" ? v.trim() : "";
 }
 
-/** x-ui иногда кладёт `settings` строкой JSON. */
+/** x-ui / 3x-ui часто кладут `streamSettings` и вложенные блоки строками JSON. */
 function asRecord(v: unknown): Record<string, unknown> {
   if (v && typeof v === "object" && !Array.isArray(v)) return v as Record<string, unknown>;
   if (typeof v === "string") {
@@ -71,6 +72,15 @@ function asRecord(v: unknown): Record<string, unknown> {
     }
   }
   return {};
+}
+
+/** Разобранные streamSettings inbound (объект независимо от того, как записано в файле). */
+export function streamSettingsOfInbound(ib: Record<string, unknown>): Record<string, unknown> {
+  return asRecord(ib.streamSettings);
+}
+
+function streamSecurityOfInbound(ib: Record<string, unknown>): string {
+  return str(streamSettingsOfInbound(ib).security).toLowerCase();
 }
 
 function firstStr(v: unknown): string {
@@ -91,7 +101,7 @@ export function extractVlessLinkHintsFromConfig(
   const ib = pickVlessInbound(inbounds, preferredPort);
   if (!ib) return out;
 
-  const ss = (ib.streamSettings as Record<string, unknown>) || {};
+  const ss = streamSettingsOfInbound(ib);
   const net = str(ss.network).toLowerCase() || "tcp";
   out.sub_network = net;
   out.sub_type = net === "tcp" ? "tcp" : net;
@@ -125,13 +135,13 @@ export function extractVlessLinkHintsFromConfig(
   }
 
   if (secRaw === "tls") {
-    const tls = (ss.tlsSettings as Record<string, unknown>) || {};
+    const tls = asRecord(ss.tlsSettings);
     out.sub_sni = str(tls.serverName);
     out.sub_alpn = firstStr(tls.alpn);
     out.sub_fp = str(tls.fingerprint);
     out.sub_allow_insecure = tls.allowInsecure === true || tls.allowInsecure === 1 || tls.allowInsecure === "1" ? 1 : 0;
   } else if (secRaw === "reality") {
-    const rs = (ss.realitySettings as Record<string, unknown>) || {};
+    const rs = asRecord(ss.realitySettings);
     const rsSettings = asRecord(rs.settings);
     out.sub_reality_pbk = str(rs.publicKey) || str(rsSettings.publicKey);
     out.sub_reality_sid = str(rs.shortId) || firstStr(rs.shortIds);
@@ -152,17 +162,17 @@ export function extractRealityPrivateKeyFromConfig(
   if (!Array.isArray(inbounds)) return "";
   const ib = pickVlessInbound(inbounds, preferredPort);
   if (!ib) return "";
-  const ss = (ib.streamSettings as Record<string, unknown>) || {};
+  const ss = streamSettingsOfInbound(ib);
   const secRaw = str(ss.security).toLowerCase();
   if (secRaw !== "reality") return "";
-  const rs = (ss.realitySettings as Record<string, unknown>) || {};
+  const rs = asRecord(ss.realitySettings);
   const rsSettings = asRecord(rs.settings);
   return str(rs.privateKey) || str(rsSettings.privateKey);
 }
 
 /** 32 байта: hex (64 символа) или base64 / base64url (как в JSON xray / x-ui). */
 function decodeRealityKey32(raw: string): Uint8Array | null {
-  const t = raw.trim();
+  const t = raw.replace(/\s+/g, "").trim();
   if (!t) return null;
   if (/^[0-9a-fA-F]{64}$/.test(t)) {
     return Uint8Array.from(Buffer.from(t, "hex"));
@@ -192,4 +202,18 @@ export function deriveRealityPublicKeyFromPrivateLocal(privateKey: string): stri
   } catch {
     return "";
   }
+}
+
+/** Если Reality без publicKey в конфиге — дописать sub_reality_pbk из privateKey (локально). */
+export function ensureRealityPublicKeyOnHintsFromConfig(
+  config: Record<string, unknown>,
+  hints: ServerLinkHints,
+  preferredPort?: number,
+): void {
+  if ((hints.sub_security ?? "").toLowerCase() !== "reality") return;
+  if (String(hints.sub_reality_pbk ?? "").trim()) return;
+  const priv = extractRealityPrivateKeyFromConfig(config, preferredPort);
+  if (!priv) return;
+  const pbk = deriveRealityPublicKeyFromPrivateLocal(priv);
+  if (pbk) hints.sub_reality_pbk = pbk;
 }

@@ -1,7 +1,7 @@
 import { listDeployedServers, updateServer, type ServerRow } from "./db.js";
 import { detectXrayConfigPath, sshExecCommand, sshReadRemoteFile, type SshConfig, type SshLog } from "./ssh.js";
 import {
-  deriveRealityPublicKeyFromPrivateLocal,
+  ensureRealityPublicKeyOnHintsFromConfig,
   extractRealityPrivateKeyFromConfig,
   extractVlessLinkHintsFromConfig,
 } from "./vlessLinkHints.js";
@@ -108,10 +108,10 @@ async function refreshOneServerHints(row: ServerRow, log?: SshLog): Promise<void
   if ((hints.sub_security ?? "").toLowerCase() === "reality" && !hints.sub_reality_pbk) {
     const priv = extractRealityPrivateKeyFromConfig(parsed, row.vless_port);
     if (priv) {
-      let pbk = await deriveRealityPublicKeyFromPrivateOnServer(cfg, priv, log);
-      if (!pbk) pbk = deriveRealityPublicKeyFromPrivateLocal(priv);
+      const pbk = await deriveRealityPublicKeyFromPrivateOnServer(cfg, priv, log);
       if (pbk) hints.sub_reality_pbk = pbk;
     }
+    ensureRealityPublicKeyOnHintsFromConfig(parsed, hints, row.vless_port);
   }
   if (!hasAnyExtractedHints(hints)) return;
 

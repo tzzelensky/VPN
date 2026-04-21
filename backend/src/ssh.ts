@@ -1,6 +1,11 @@
 import { Client } from "ssh2";
 import { decryptSecret } from "./crypto.js";
-import { extractVlessLinkHintsFromConfig, type ServerLinkHints } from "./vlessLinkHints.js";
+import {
+  ensureRealityPublicKeyOnHintsFromConfig,
+  extractVlessLinkHintsFromConfig,
+  streamSettingsOfInbound,
+  type ServerLinkHints,
+} from "./vlessLinkHints.js";
 import path from "node:path";
 
 export type SshConfig = {
@@ -289,8 +294,7 @@ function findCandidateVlessInboundIndex(
   if (samePort) return samePort.i;
 
   const secure = vlessIdx.find(({ ib }) => {
-    const ss = (ib.streamSettings as Record<string, unknown>) || {};
-    const sec = String(ss.security ?? "").toLowerCase();
+    const sec = String(streamSettingsOfInbound(ib as Record<string, unknown>).security ?? "").toLowerCase();
     return sec === "reality" || sec === "tls";
   });
   if (secure) return secure.i;
@@ -518,6 +522,7 @@ export async function deployOrSyncVless(
         ensureXrayStatsPolicyApi(config);
 
         hints = extractVlessLinkHintsFromConfig(config, opts.vlessPort);
+        ensureRealityPublicKeyOnHintsFromConfig(config, hints, opts.vlessPort);
 
         const json = JSON.stringify(config, null, 2);
         log?.(`Запись ${opts.configPath} (${json.length} байт)…`);
