@@ -100,6 +100,7 @@ function shellQuote(s: string): string {
 }
 
 async function restartXray(conn: Client, log?: SshLog): Promise<void> {
+  const xrayProcPattern = "xray-linux-amd64|/usr/local/x-ui/bin/xray|/usr/local/bin/xray|/usr/bin/xray";
   const unitPath = await exec(
     conn,
     "systemctl show -p FragmentPath --value x-ui.service 2>/dev/null || true",
@@ -118,14 +119,25 @@ async function restartXray(conn: Client, log?: SshLog): Promise<void> {
 
   if (shouldUseXui) {
     log?.("Обнаружен x-ui: шлём SIGHUP в xray (без reload/restart x-ui, чтобы x-ui не перетёр config.json).");
-    const hup = await exec(conn, "pkill -HUP -f 'xray-linux-amd64|/usr/local/bin/xray|/usr/bin/xray' 2>/dev/null || true");
+    const hup = await exec(conn, `pkill -HUP -f '${xrayProcPattern}' 2>/dev/null || true`);
     if (hup.code === 0) {
-      const ok = await exec(conn, "pgrep -f 'xray-linux-amd64|/usr/local/bin/xray|/usr/bin/xray' >/dev/null 2>&1; echo $?");
+      const ok = await exec(conn, `pgrep -f '${xrayProcPattern}' >/dev/null 2>&1; echo $?`);
       if (ok.stdout.trim() === "0") return;
-      log?.("SIGHUP отправлен, но процесс xray не найден; пробуем обычный xray.service…");
+      log?.("SIGHUP отправлен, но процесс xray не найден; пробуем reload/restart только x-ui.");
+      const rel = await exec(conn, "systemctl reload x-ui 2>/dev/null || systemctl reload x-ui.service 2>/dev/null || true");
+      if (rel.code === 0) {
+        const afterReload = await exec(conn, `pgrep -f '${xrayProcPattern}' >/dev/null 2>&1; echo $?`);
+        if (afterReload.stdout.trim() === "0") return;
+      }
+      const rst = await exec(conn, "systemctl restart x-ui 2>/dev/null || systemctl restart x-ui.service 2>/dev/null || true");
+      if (rst.code === 0) {
+        const afterRestart = await exec(conn, `pgrep -f '${xrayProcPattern}' >/dev/null 2>&1; echo $?`);
+        if (afterRestart.stdout.trim() === "0") return;
+      }
+      throw new Error("x-ui активен, но процесс xray не найден после HUP/reload/restart x-ui");
     } else {
       const err = (hup.stderr || hup.stdout || "").trim();
-      log?.(`Не удалось отправить SIGHUP в xray (${err || "no output"}), пробуем обычный xray.service…`);
+      throw new Error(`Не удалось отправить SIGHUP в xray под x-ui (${err || "no output"})`);
     }
   }
 
