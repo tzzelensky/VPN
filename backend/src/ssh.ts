@@ -111,6 +111,14 @@ async function restartTzadminXrayService(conn: Client, configPath: string, log?:
     `[ -z "$PID" ] && PID=$(pgrep -f 'xray-linux-amd64|/usr/local/x-ui/bin/xray|/usr/local/bin/xray|/usr/bin/xray' 2>/dev/null | head -n1 || true); ` +
     `X=''; ` +
     `[ -n "$PID" ] && X=$(readlink -f "/proc/$PID/exe" 2>/dev/null || true); ` +
+    `if [ ! -x "$X" ] && [ -n "$PID" ]; then ` +
+    `CWD=$(readlink -f "/proc/$PID/cwd" 2>/dev/null || true); ` +
+    `BIN=$(tr '\\000' ' ' < "/proc/$PID/cmdline" 2>/dev/null | awk '{print $1}'); ` +
+    `if [ -n "$BIN" ]; then ` +
+    `case "$BIN" in /*) CAND="$BIN" ;; *) CAND="$CWD/$BIN" ;; esac; ` +
+    `[ -x "$CAND" ] && X="$CAND"; ` +
+    `fi; ` +
+    `fi; ` +
     `[ ! -x "$X" ] && X=/usr/local/x-ui/bin/xray-linux-amd64; ` +
     `[ ! -x "$X" ] && X=/usr/local/x-ui/bin/xray; ` +
     `[ ! -x "$X" ] && X=/usr/local/sbin/xray; ` +
