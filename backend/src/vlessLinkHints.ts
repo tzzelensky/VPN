@@ -83,24 +83,33 @@ function streamSecurityOfInbound(ib: Record<string, unknown>): string {
   return str(streamSettingsOfInbound(ib).security).toLowerCase();
 }
 
+function listVlessInbounds(inbounds: unknown[]): Record<string, unknown>[] {
+  return inbounds.filter(
+    (x) => String((x as { protocol?: string }).protocol ?? "").toLowerCase() === "vless",
+  ) as Record<string, unknown>[];
+}
+
+function hintScore(h: ServerLinkHints): number {
+  const sec = (h.sub_security ?? "").toLowerCase();
+  let s = 0;
+  if (sec === "reality") s += 200;
+  if (sec === "tls") s += 100;
+  if (String(h.sub_reality_pbk ?? "").trim()) s += 80;
+  if (String(h.sub_sni ?? "").trim()) s += 20;
+  if (String(h.sub_reality_sid ?? "").trim()) s += 15;
+  if (String(h.sub_network ?? "").trim()) s += 1;
+  return s;
+}
+
 function firstStr(v: unknown): string {
   if (typeof v === "string") return v.trim();
   if (Array.isArray(v) && v.length > 0 && typeof v[0] === "string") return v[0].trim();
   return "";
 }
 
-/** Вытащить параметры для VLESS URI из inbound после деплоя (x-ui Reality/TLS/WS и т.д.). */
-export function extractVlessLinkHintsFromConfig(
-  config: Record<string, unknown>,
-  preferredPort?: number,
-): ServerLinkHints {
+/** Параметры подписки из одного VLESS inbound. */
+function extractVlessLinkHintsFromInbound(ib: Record<string, unknown>): ServerLinkHints {
   const out = emptyHints();
-  const inbounds = config.inbounds;
-  if (!Array.isArray(inbounds)) return out;
-
-  const ib = pickVlessInbound(inbounds, preferredPort);
-  if (!ib) return out;
-
   const ss = streamSettingsOfInbound(ib);
   const net = str(ss.network).toLowerCase() || "tcp";
   out.sub_network = net;
@@ -110,7 +119,7 @@ export function extractVlessLinkHintsFromConfig(
   out.sub_security = secRaw;
 
   if (net === "tcp") {
-    const tcp = (ss.tcpSettings as Record<string, unknown>) || {};
+    const tcp = asRecord(ss.tcpSettings);
     const hdr = (tcp.header as Record<string, unknown>) || {};
     const typ = str(hdr.type).toLowerCase();
     if (typ === "http") {
@@ -122,13 +131,13 @@ export function extractVlessLinkHintsFromConfig(
       out.sub_type = "http";
     }
   } else if (net === "ws") {
-    const ws = (ss.wsSettings as Record<string, unknown>) || {};
+    const ws = asRecord(ss.wsSettings);
     const wh = (ws.headers as Record<string, unknown> | undefined) ?? {};
     out.sub_host = str(wh.Host) || str(wh.host);
     out.sub_path = str(ws.path);
     out.sub_type = "ws";
   } else if (net === "grpc") {
-    const g = (ss.grpcSettings as Record<string, unknown>) || {};
+    const g = asRecord(ss.grpcSettings);
     out.sub_path = str(g.serviceName);
     out.sub_type = "grpc";
     out.sub_host = str(g.authority);
@@ -153,6 +162,60 @@ export function extractVlessLinkHintsFromConfig(
   return out;
 }
 
+function orderedVlessInboundsForHints(
+  inbounds: unknown[],
+  preferredPort?: number,
+): Record<string, unknown>[] {
+  const vless = listVlessInbounds(inbounds);
+  const primary = pickVlessInbound(inbounds, preferredPort);
+  const ordered: Record<string, unknown>[] = [];
+  const seen = new Set<unknown>();
+  const push = (ib: Record<string, unknown> | undefined) => {
+    if (!ib || seen.has(ib)) return;
+    seen.add(ib);
+    ordered.push(ib);
+  };
+  push(primary);
+  for (const ib of vless) {
+    if (streamSecurityOfInbound(ib) === "reality") push(ib);
+  }
+  for (const ib of vless) push(ib);
+  return ordered;
+}
+
+/** Вытащить параметры для VLESS URI из inbound после деплоя (x-ui Reality/TLS/WS и т.д.). */
+export function extractVlessLinkHintsFromConfig(
+  config: Record<string, unknown>,
+  preferredPort?: number,
+): ServerLinkHints {
+  const out = emptyHints();
+  const inbounds = config.inbounds;
+  if (!Array.isArray(inbounds)) return out;
+
+  const tryIbs = orderedVlessInboundsForHints(inbounds, preferredPort);
+  if (tryIbs.length === 0) return out;
+
+  let best = emptyHints();
+  let bestScore = -1;
+  for (const ib of tryIbs) {
+    const h = extractVlessLinkHintsFromInbound(ib);
+    const sc = hintScore(h);
+    if (sc > bestScore) {
+      best = h;
+      bestScore = sc;
+    }
+    if (
+      (h.sub_security ?? "").toLowerCase() === "reality" &&
+      String(h.sub_reality_pbk ?? "").trim() &&
+      String(h.sub_sni ?? "").trim()
+    ) {
+      best = h;
+      break;
+    }
+  }
+  return best;
+}
+
 /** Нужен для случаев x-ui, где есть только realitySettings.privateKey (без publicKey). */
 export function extractRealityPrivateKeyFromConfig(
   config: Record<string, unknown>,
@@ -160,14 +223,15 @@ export function extractRealityPrivateKeyFromConfig(
 ): string {
   const inbounds = config.inbounds;
   if (!Array.isArray(inbounds)) return "";
-  const ib = pickVlessInbound(inbounds, preferredPort);
-  if (!ib) return "";
-  const ss = streamSettingsOfInbound(ib);
-  const secRaw = str(ss.security).toLowerCase();
-  if (secRaw !== "reality") return "";
-  const rs = asRecord(ss.realitySettings);
-  const rsSettings = asRecord(rs.settings);
-  return str(rs.privateKey) || str(rsSettings.privateKey);
+  for (const ib of orderedVlessInboundsForHints(inbounds, preferredPort)) {
+    const ss = streamSettingsOfInbound(ib);
+    if (str(ss.security).toLowerCase() !== "reality") continue;
+    const rs = asRecord(ss.realitySettings);
+    const rsSettings = asRecord(rs.settings);
+    const pk = str(rs.privateKey) || str(rsSettings.privateKey);
+    if (pk) return pk;
+  }
+  return "";
 }
 
 /** 32 байта: hex (64 символа) или base64 / base64url (как в JSON xray / x-ui). */

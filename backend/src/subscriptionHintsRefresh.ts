@@ -31,6 +31,19 @@ function hasUsableHints(row: ServerRow): boolean {
   return true;
 }
 
+/**
+ * Раньше в БД мог остаться sub_security=none при Reality на узле — hasUsableHints=true и SSH-опрос не шёл.
+ * SNI без pbk при типе не «tls» тоже перепроверяем.
+ */
+function needsSubscriptionHintsRefresh(row: ServerRow): boolean {
+  if (!hasUsableHints(row)) return true;
+  const sec = String(row.sub_security ?? "").trim().toLowerCase();
+  const pbk = String(row.sub_reality_pbk ?? "").trim();
+  const sni = String(row.sub_sni ?? "").trim();
+  if (!pbk && sni && sec !== "tls") return true;
+  return false;
+}
+
 function hasAnyExtractedHints(h: ReturnType<typeof extractVlessLinkHintsFromConfig>): boolean {
   return Boolean(
     (h.sub_security ?? "").trim() ||
@@ -143,19 +156,22 @@ export async function refreshMissingSubscriptionHintsIfDue(log?: SshLog): Promis
     return;
   }
 
-  const targets = listDeployedServers().filter((s) => !hasUsableHints(s));
+  const targets = listDeployedServers().filter((s) => needsSubscriptionHintsRefresh(s));
   if (targets.length === 0) {
     lastRefreshAttemptMs = now;
     return;
   }
 
-  /** Reality без pbk — клиенты получают security=none; такие запросы нельзя откладывать на 45s. */
-  const realityMissingPbk = targets.some(
-    (s) =>
-      String(s.sub_security ?? "").trim().toLowerCase() === "reality" &&
-      !String(s.sub_reality_pbk ?? "").trim(),
-  );
-  if (!realityMissingPbk && now - lastRefreshAttemptMs < REFRESH_MIN_MS) return;
+  /** Пустой pbk при Reality или «подозрительном» none+sni — не откладывать на 45s. */
+  const urgentPbk = targets.some((s) => {
+    const sec = String(s.sub_security ?? "").trim().toLowerCase();
+    const pbk = String(s.sub_reality_pbk ?? "").trim();
+    if (pbk) return false;
+    if (sec === "reality") return true;
+    const sni = String(s.sub_sni ?? "").trim();
+    return Boolean(sni && sec !== "tls");
+  });
+  if (!urgentPbk && now - lastRefreshAttemptMs < REFRESH_MIN_MS) return;
 
   const job = (async () => {
     for (const row of targets) {
