@@ -117,27 +117,15 @@ async function restartXray(conn: Client, log?: SshLog): Promise<void> {
     (hasXuiBin && xuiProc.stdout.trim() === "0");
 
   if (shouldUseXui) {
-    log?.(
-      "Обнаружен x-ui: применяем конфиг через x-ui (reload → при необходимости restart), не трогаем отдельный xray.service.",
-    );
-    let r = { code: 1 as number | null, stdout: "", stderr: "" };
-    if (hasXuiUnit) {
-      const reload = await exec(conn, "systemctl reload x-ui 2>/dev/null || systemctl reload x-ui.service 2>/dev/null");
-      r = reload;
-      if (reload.code !== 0) {
-        r = await exec(conn, "systemctl restart x-ui 2>/dev/null || systemctl restart x-ui.service 2>/dev/null");
-      }
-    } else {
-      // Нет systemd unit, но процесс x-ui запущен — шлём USR1 как у ExecReload в типовом unit.
-      r = await exec(conn, "pkill -USR1 -f '/usr/local/x-ui/x-ui' 2>/dev/null || true");
-    }
-    if (r.code !== 0) {
-      const err = (r.stderr || r.stdout || "").trim();
-      log?.(`x-ui reload/restart не удался (${err || "no output"}), пробуем обычный xray.service…`);
-    } else {
-      const ok = await exec(conn, "pgrep -f 'xray-linux-amd64|/usr/local/bin/xray' >/dev/null 2>&1; echo $?");
+    log?.("Обнаружен x-ui: шлём SIGHUP в xray (без reload/restart x-ui, чтобы x-ui не перетёр config.json).");
+    const hup = await exec(conn, "pkill -HUP -f 'xray-linux-amd64|/usr/local/bin/xray|/usr/bin/xray' 2>/dev/null || true");
+    if (hup.code === 0) {
+      const ok = await exec(conn, "pgrep -f 'xray-linux-amd64|/usr/local/bin/xray|/usr/bin/xray' >/dev/null 2>&1; echo $?");
       if (ok.stdout.trim() === "0") return;
-      log?.("x-ui перезапущен, но процесс xray не найден — пробуем обычный xray.service…");
+      log?.("SIGHUP отправлен, но процесс xray не найден; пробуем обычный xray.service…");
+    } else {
+      const err = (hup.stderr || hup.stdout || "").trim();
+      log?.(`Не удалось отправить SIGHUP в xray (${err || "no output"}), пробуем обычный xray.service…`);
     }
   }
 
