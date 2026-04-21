@@ -189,24 +189,31 @@ function sshCfg(row: ServerRow): SshConfig {
 
 function buildStatsQueryCommand(apiListen: string): string {
   const srv = shellQuote(apiListen);
-  return (
-    "PATH=/usr/local/bin:/usr/bin:$PATH " +
-    "X=$(command -v xray 2>/dev/null || echo /usr/local/bin/xray); " +
-    '"$X" api statsquery --server=' +
-    srv
-  );
+  return [
+    "PATH=/usr/local/bin:/usr/bin:/usr/local/x-ui/bin:$PATH",
+    "X=$(command -v xray 2>/dev/null || true)",
+    '[ -z "$X" ] && [ -x /usr/local/x-ui/bin/xray-linux-amd64 ] && X=/usr/local/x-ui/bin/xray-linux-amd64',
+    '[ -z "$X" ] && [ -x /usr/local/x-ui/bin/xray ] && X=/usr/local/x-ui/bin/xray',
+    '[ -z "$X" ] && [ -x /usr/local/bin/xray ] && X=/usr/local/bin/xray',
+    '[ -z "$X" ] && [ -x /usr/bin/xray ] && X=/usr/bin/xray',
+    '[ -n "$X" ] || { echo "xray binary not found for statsquery" >&2; exit 127; }',
+    `"$X" api statsquery --server=${srv}`,
+  ].join("; ");
 }
 
 /** Один вызов на узел: список онлайн-аккаунтов (Xray ≥ с RPC GetAllOnlineUsers). */
 function buildOnlineUsersCommand(apiListen: string): string {
   const srv = shellQuote(apiListen);
-  return (
-    'PATH=/usr/local/bin:/usr/bin:$PATH ' +
-    'X=$(command -v xray 2>/dev/null || echo /usr/local/bin/xray); ' +
-    '"$X" api statsgetallonlineusers --server=' +
-    srv +
-    ' 2>/dev/null || true'
-  );
+  return [
+    "PATH=/usr/local/bin:/usr/bin:/usr/local/x-ui/bin:$PATH",
+    "X=$(command -v xray 2>/dev/null || true)",
+    '[ -z "$X" ] && [ -x /usr/local/x-ui/bin/xray-linux-amd64 ] && X=/usr/local/x-ui/bin/xray-linux-amd64',
+    '[ -z "$X" ] && [ -x /usr/local/x-ui/bin/xray ] && X=/usr/local/x-ui/bin/xray',
+    '[ -z "$X" ] && [ -x /usr/local/bin/xray ] && X=/usr/local/bin/xray',
+    '[ -z "$X" ] && [ -x /usr/bin/xray ] && X=/usr/bin/xray',
+    '[ -n "$X" ] || exit 0',
+    `"$X" api statsgetallonlineusers --server=${srv} 2>/dev/null || true`,
+  ].join("; ");
 }
 
 const XRAY_ALT_CONFIG_PATHS_FOR_STATS = [
