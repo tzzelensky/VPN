@@ -268,6 +268,7 @@ function buildManagedClients(
   prevList: Array<Record<string, unknown>>,
   clientUuids: string[],
   defaultFlow: string,
+  forceFlow: boolean,
 ): Array<Record<string, unknown>> {
   const prevById = new Map(prevList.map((c) => [String(c.id ?? "").toLowerCase(), c]));
   return clientUuids.map((id) => {
@@ -280,7 +281,7 @@ function buildManagedClients(
       email: String(base.email ?? id).trim() || id,
       level: Number(base.level ?? 0) || 0,
     };
-    if (!flow && defaultFlow) out.flow = defaultFlow;
+    if (defaultFlow && (forceFlow || !flow)) out.flow = defaultFlow;
     return out;
   });
 }
@@ -296,6 +297,11 @@ function defaultClientFlowForInbound(
   const sec = String(streamSettingsOfInbound(ib).security ?? "").toLowerCase();
   if (sec === "reality") return "xtls-rprx-vision";
   return "";
+}
+
+function shouldForceClientFlowForInbound(ib: Record<string, unknown>): boolean {
+  const sec = String(streamSettingsOfInbound(ib).security ?? "").toLowerCase();
+  return sec === "reality";
 }
 
 function findCandidateVlessInboundIndex(
@@ -485,7 +491,8 @@ export async function deployOrSyncVless(
               const settings = (ib.settings as Record<string, unknown>) ?? {};
               const prevList = (settings.clients as Array<Record<string, unknown>>) ?? [];
               const defaultFlow = defaultClientFlowForInbound(ib, prevList);
-              settings.clients = buildManagedClients(prevList, clientUuids, defaultFlow);
+              const forceFlow = shouldForceClientFlowForInbound(ib);
+              settings.clients = buildManagedClients(prevList, clientUuids, defaultFlow, forceFlow);
               ib.settings = settings;
               const curPort = Number(ib.port);
               if (Number.isFinite(curPort) && curPort > 0 && curPort !== opts.vlessPort) {
@@ -508,7 +515,8 @@ export async function deployOrSyncVless(
                 const settings = (ib.settings as Record<string, unknown>) ?? {};
                 const prevList = (settings.clients as Array<Record<string, unknown>>) ?? [];
                 const defaultFlow = defaultClientFlowForInbound(ib, prevList);
-                settings.clients = buildManagedClients(prevList, clientUuids, defaultFlow);
+                const forceFlow = shouldForceClientFlowForInbound(ib);
+                settings.clients = buildManagedClients(prevList, clientUuids, defaultFlow, forceFlow);
                 settings.decryption = "none";
                 ib.settings = settings;
                 ib.tag = TZADMIN_VLESS_TAG;
