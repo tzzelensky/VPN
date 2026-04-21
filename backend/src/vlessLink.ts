@@ -60,8 +60,13 @@ export function buildVlessUriForUser(
   const fp = pickStr(server?.sub_fp ?? "", user.reality_fp) || "chrome";
   const spx = pickStr(server?.sub_reality_spx ?? "", user.reality_spx) || "/";
 
+  const secKnown = srvSec === "reality" || srvSec === "tls" || srvSec === "none";
+  const allowUserRealityFallback = !secKnown;
   const hasReality =
-    (srvSec === "reality" || Boolean(pbk)) && Boolean(sni) && Boolean(sid) && Boolean(pbk);
+    (srvSec === "reality" || (allowUserRealityFallback && Boolean(pbk))) &&
+    Boolean(sni) &&
+    Boolean(sid) &&
+    Boolean(pbk);
 
   if (hasReality) {
     const q = new URLSearchParams({
