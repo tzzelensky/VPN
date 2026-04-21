@@ -665,9 +665,10 @@ export function applyUsersTrafficSnapshot(
       let up = u.traffic_up;
       let down = u.traffic_down;
       if (!hasRawBaseline) {
-        // Первая инициализация после миграции: не пересчитываем прошлый трафик, только сохраняем baseline.
-        up = u.traffic_up;
-        down = u.traffic_down;
+        // Первая инициализация baseline: прибавляем текущий raw-снимок как новый сессионный прирост.
+        // Иначе первый заметный трафик после деплоя "теряется" до следующего цикла sync.
+        up = Math.max(0, Math.floor(Number(u.traffic_up) || 0) + candUp);
+        down = Math.max(0, Math.floor(Number(u.traffic_down) || 0) + candDown);
       } else {
         const addUp = candUp >= prevRawUp ? candUp - prevRawUp : candUp;
         const addDown = candDown >= prevRawDown ? candDown - prevRawDown : candDown;
