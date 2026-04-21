@@ -107,6 +107,45 @@ function firstStr(v: unknown): string {
   return "";
 }
 
+function firstRealityShortId(rs: Record<string, unknown>): string {
+  const one = str(rs.shortId);
+  if (one) return one;
+  const raw = rs.shortIds;
+  if (typeof raw === "string") {
+    const t = raw.trim();
+    if (t.startsWith("[")) {
+      try {
+        const a = JSON.parse(t) as unknown;
+        if (Array.isArray(a) && a.length > 0 && typeof a[0] === "string") return a[0].trim();
+      } catch {
+        /* ignore */
+      }
+    }
+    if (/^[0-9a-f]+$/i.test(t) || /^[a-zA-Z0-9_-]+$/.test(t)) return t;
+  }
+  return firstStr(raw);
+}
+
+function realityPrivateKeyFromBlocks(rs: Record<string, unknown>, rsSettings: Record<string, unknown>): string {
+  for (const k of ["privateKey", "private_key", "PrivateKey"] as const) {
+    const a = str((rs as Record<string, unknown>)[k]);
+    if (a) return a;
+    const b = str((rsSettings as Record<string, unknown>)[k]);
+    if (b) return b;
+  }
+  return "";
+}
+
+function realityPublicKeyFromBlocks(rs: Record<string, unknown>, rsSettings: Record<string, unknown>): string {
+  for (const k of ["publicKey", "public_key", "PublicKey"] as const) {
+    const a = str((rs as Record<string, unknown>)[k]);
+    if (a) return a;
+    const b = str((rsSettings as Record<string, unknown>)[k]);
+    if (b) return b;
+  }
+  return "";
+}
+
 /** Параметры подписки из одного VLESS inbound. */
 function extractVlessLinkHintsFromInbound(ib: Record<string, unknown>): ServerLinkHints {
   const out = emptyHints();
@@ -152,8 +191,8 @@ function extractVlessLinkHintsFromInbound(ib: Record<string, unknown>): ServerLi
   } else if (secRaw === "reality") {
     const rs = asRecord(ss.realitySettings);
     const rsSettings = asRecord(rs.settings);
-    out.sub_reality_pbk = str(rs.publicKey) || str(rsSettings.publicKey);
-    out.sub_reality_sid = str(rs.shortId) || firstStr(rs.shortIds);
+    out.sub_reality_pbk = realityPublicKeyFromBlocks(rs, rsSettings);
+    out.sub_reality_sid = firstRealityShortId(rs);
     out.sub_reality_spx = str(rs.spiderX) || str(rsSettings.spiderX) || "/";
     out.sub_sni = str(rs.serverName) || firstStr(rs.serverNames);
     out.sub_fp = str(rs.fingerprint) || str(rsSettings.fingerprint) || "chrome";
@@ -228,7 +267,7 @@ export function extractRealityPrivateKeyFromConfig(
     if (str(ss.security).toLowerCase() !== "reality") continue;
     const rs = asRecord(ss.realitySettings);
     const rsSettings = asRecord(rs.settings);
-    const pk = str(rs.privateKey) || str(rsSettings.privateKey);
+    const pk = realityPrivateKeyFromBlocks(rs, rsSettings);
     if (pk) return pk;
   }
   return "";
@@ -236,10 +275,17 @@ export function extractRealityPrivateKeyFromConfig(
 
 /** 32 байта: hex (64 символа) или base64 / base64url (как в JSON xray / x-ui). */
 function decodeRealityKey32(raw: string): Uint8Array | null {
-  const t = raw.replace(/\s+/g, "").trim();
+  let t = raw.replace(/\s+/g, "").trim();
   if (!t) return null;
+  if (t.startsWith("0x") || t.startsWith("0X")) t = t.slice(2);
   if (/^[0-9a-fA-F]{64}$/.test(t)) {
     return Uint8Array.from(Buffer.from(t, "hex"));
+  }
+  try {
+    const bufUrl = Buffer.from(t, "base64url");
+    if (bufUrl.length === 32) return new Uint8Array(bufUrl);
+  } catch {
+    /* ignore */
   }
   let b64 = t.replace(/-/g, "+").replace(/_/g, "/");
   const pad = b64.length % 4;

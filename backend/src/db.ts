@@ -370,6 +370,30 @@ export function serversForUserSubscription(user: UserRow): ServerRow[] {
   return rows.slice(0, lim);
 }
 
+/**
+ * Как в 3x-ui: один Reality-inbound — pbk/sni/sid общие. Подписка подставляет их из карточки
+ * пользователя в sub_* сервера, если SSH так и не вытащил ключ из JSON.
+ */
+export function backfillDeployedServerRealityFromUser(user: UserRow): void {
+  const pbk = (user.reality_pbk ?? "").trim();
+  const sid = (user.reality_sid ?? "").trim();
+  const sni = (user.reality_sni ?? "").trim();
+  const fp = (user.reality_fp ?? "").trim();
+  const spx = (user.reality_spx ?? "").trim();
+  if (!pbk && !sid && !sni && !fp) return;
+
+  for (const r of serversForUserSubscription(user)) {
+    if (String(r.sub_security ?? "").trim().toLowerCase() !== "reality") continue;
+    const patch: Partial<ServerRow> = {};
+    if (pbk && !String(r.sub_reality_pbk ?? "").trim()) patch.sub_reality_pbk = pbk;
+    if (sid && !String(r.sub_reality_sid ?? "").trim()) patch.sub_reality_sid = sid;
+    if (sni && !String(r.sub_sni ?? "").trim()) patch.sub_sni = sni;
+    if (fp && !String(r.sub_fp ?? "").trim()) patch.sub_fp = fp;
+    if (spx && spx !== "/" && !String(r.sub_reality_spx ?? "").trim()) patch.sub_reality_spx = spx;
+    if (Object.keys(patch).length > 0) updateServer(r.id, patch);
+  }
+}
+
 export function getServer(id: number): ServerRow | undefined {
   return readStore().servers.find((s) => s.id === id);
 }

@@ -1,6 +1,7 @@
 import { Router } from "express";
 import {
   applyUsersTrafficSnapshot,
+  backfillDeployedServerRealityFromUser,
   coerceExpiryTimeMs,
   createUser,
   deleteUser,
@@ -21,6 +22,7 @@ import { parseXuiInboundImport } from "../xuiImport.js";
 import { generateX25519RealityKeyPair } from "../realityKeygen.js";
 import { sendExpiryRenewalReminder } from "../telegram/expiryNotify.js";
 import { pullTrafficFromAllDeployedServers } from "../xrayStatsPull.js";
+import { refreshMissingSubscriptionHintsIfDue } from "../subscriptionHintsRefresh.js";
 
 const router = Router();
 
@@ -260,6 +262,7 @@ router.patch("/:id(\\d+)", async (req, res) => {
     res.status(404).json({ error: "not_found" });
     return;
   }
+  backfillDeployedServerRealityFromUser(u);
   try {
     await pushClientListToAllDeployedServers();
     res.json({ user: userDto(u) });
@@ -307,7 +310,7 @@ router.get("/:id(\\d+)/subscription", (req, res) => {
   res.json({ url: publicSubUrl(u.sub_token) });
 });
 
-router.get("/:id(\\d+)/preview", (req, res) => {
+router.get("/:id(\\d+)/preview", async (req, res) => {
   const id = Number(req.params.id);
   const u = getUser(id);
   if (!u) {
@@ -318,7 +321,14 @@ router.get("/:id(\\d+)/preview", (req, res) => {
     res.json({ count: 0, links: [], base64: buildSubscriptionPayload([]) });
     return;
   }
-  const links = subscriptionVlessLinksForUser(u);
+  try {
+    await refreshMissingSubscriptionHintsIfDue();
+  } catch {
+    /* ignore */
+  }
+  backfillDeployedServerRealityFromUser(u);
+  const fresh = getUser(id) ?? u;
+  const links = subscriptionVlessLinksForUser(fresh);
   res.json({ count: links.length, links, base64: buildSubscriptionPayload(links) });
 });
 

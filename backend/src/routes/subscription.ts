@@ -1,5 +1,11 @@
 import { Router } from "express";
-import { getUserBySubToken, listUsers, userAllowedOnServers, type UserRow } from "../db.js";
+import {
+  backfillDeployedServerRealityFromUser,
+  getUserBySubToken,
+  listUsers,
+  userAllowedOnServers,
+  type UserRow,
+} from "../db.js";
 import { buildSubscriptionPayload } from "../vlessLink.js";
 import { subscriptionVlessLinksForUser } from "../subscriptionLinks.js";
 import { setSubscriptionUserHeaders } from "../subscriptionMeta.js";
@@ -34,6 +40,7 @@ router.get("/:token", async (req, res) => {
 
     const base = getUserBySubToken(user.sub_token) ?? user;
     await refreshMissingSubscriptionHintsIfDue();
+    backfillDeployedServerRealityFromUser(base);
     let headerUser: UserRow = base;
     try {
       const peek = await peekUserTrafficForSubscription(user);

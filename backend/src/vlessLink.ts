@@ -66,6 +66,7 @@ export function buildVlessUriForUser(
   if (hasReality) {
     const q = new URLSearchParams({
       type: "tcp",
+      encryption: "none",
       security: "reality",
       pbk,
       fp,
@@ -93,11 +94,11 @@ export function buildVlessUriForUser(
 
   if (useTls) {
     const q = new URLSearchParams({
+      type: srvType && srvType !== "tcp" ? srvType : "tcp",
       encryption: "none",
       security: "tls",
       sni: tlsSni,
       fp: tlsFp,
-      type: srvType && srvType !== "tcp" ? srvType : "tcp",
     });
     if (tlsAlpn) q.set("alpn", tlsAlpn);
     if (insecure === 1) q.set("allowInsecure", "1");
