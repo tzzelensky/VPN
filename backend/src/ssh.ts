@@ -267,18 +267,35 @@ export function ensureXrayStatsPolicyApi(config: Record<string, unknown>): void 
 function buildManagedClients(
   prevList: Array<Record<string, unknown>>,
   clientUuids: string[],
+  defaultFlow: string,
 ): Array<Record<string, unknown>> {
   const prevById = new Map(prevList.map((c) => [String(c.id ?? "").toLowerCase(), c]));
   return clientUuids.map((id) => {
     const prev = prevById.get(id.toLowerCase());
     const base: Record<string, unknown> = prev && typeof prev === "object" ? { ...prev } : {};
-    return {
+    const flow = String(base.flow ?? "").trim();
+    const out: Record<string, unknown> = {
       ...base,
       id,
       email: String(base.email ?? id).trim() || id,
       level: Number(base.level ?? 0) || 0,
     };
+    if (!flow && defaultFlow) out.flow = defaultFlow;
+    return out;
   });
+}
+
+function defaultClientFlowForInbound(
+  ib: Record<string, unknown>,
+  prevList: Array<Record<string, unknown>>,
+): string {
+  for (const c of prevList) {
+    const f = String(c?.flow ?? "").trim();
+    if (f) return f;
+  }
+  const sec = String(streamSettingsOfInbound(ib).security ?? "").toLowerCase();
+  if (sec === "reality") return "xtls-rprx-vision";
+  return "";
 }
 
 function findCandidateVlessInboundIndex(
@@ -467,7 +484,8 @@ export async function deployOrSyncVless(
               const ib = inbounds[idx] as Record<string, unknown>;
               const settings = (ib.settings as Record<string, unknown>) ?? {};
               const prevList = (settings.clients as Array<Record<string, unknown>>) ?? [];
-              settings.clients = buildManagedClients(prevList, clientUuids);
+              const defaultFlow = defaultClientFlowForInbound(ib, prevList);
+              settings.clients = buildManagedClients(prevList, clientUuids, defaultFlow);
               ib.settings = settings;
               const curPort = Number(ib.port);
               if (Number.isFinite(curPort) && curPort > 0 && curPort !== opts.vlessPort) {
@@ -489,7 +507,8 @@ export async function deployOrSyncVless(
                 const ib = { ...(rows[candIdx] as Record<string, unknown>) };
                 const settings = (ib.settings as Record<string, unknown>) ?? {};
                 const prevList = (settings.clients as Array<Record<string, unknown>>) ?? [];
-                settings.clients = buildManagedClients(prevList, clientUuids);
+                const defaultFlow = defaultClientFlowForInbound(ib, prevList);
+                settings.clients = buildManagedClients(prevList, clientUuids, defaultFlow);
                 settings.decryption = "none";
                 ib.settings = settings;
                 ib.tag = TZADMIN_VLESS_TAG;
