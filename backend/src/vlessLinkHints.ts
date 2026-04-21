@@ -235,6 +235,15 @@ export function extractVlessLinkHintsFromConfig(
   const inbounds = config.inbounds;
   if (!Array.isArray(inbounds)) return out;
 
+  // Если панельный inbound уже есть, используем строго его:
+  // иначе можно "перепрыгнуть" на более "богатый" Reality inbound x-ui.
+  const tagged = inbounds.find(
+    (x) =>
+      String((x as { protocol?: string }).protocol ?? "").toLowerCase() === "vless" &&
+      (x as { tag?: string }).tag === TZADMIN_VLESS_TAG,
+  ) as Record<string, unknown> | undefined;
+  if (tagged) return extractVlessLinkHintsFromInbound(tagged);
+
   const tryIbs = orderedVlessInboundsForHints(inbounds, preferredPort);
   if (tryIbs.length === 0) return out;
 
