@@ -105,7 +105,13 @@ function hintScore(h: ServerLinkHints): number {
 
 function firstStr(v: unknown): string {
   if (typeof v === "string") return v.trim();
-  if (Array.isArray(v) && v.length > 0 && typeof v[0] === "string") return v[0].trim();
+  if (Array.isArray(v)) {
+    for (const item of v) {
+      if (typeof item !== "string") continue;
+      const t = item.trim();
+      if (t) return t;
+    }
+  }
   return "";
 }
 
