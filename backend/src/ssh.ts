@@ -100,7 +100,13 @@ function shellQuote(s: string): string {
 }
 
 async function restartXray(conn: Client, log?: SshLog): Promise<void> {
-  const xrayProcPattern = "xray-linux-amd64|/usr/local/x-ui/bin/xray|/usr/local/bin/xray|/usr/bin/xray";
+  const xrayProcPattern = "xray-linux-amd64|/usr/local/x-ui/bin/xray|/usr/local/bin/xray|/usr/bin/xray|(^|/)xray(\\s|$)";
+  const hasAnyXrayProc = async (): Promise<boolean> => {
+    const byName = await exec(conn, "pgrep -x xray >/dev/null 2>&1; echo $?");
+    if (byName.stdout.trim() === "0") return true;
+    const byPath = await exec(conn, `pgrep -f '${xrayProcPattern}' >/dev/null 2>&1; echo $?`);
+    return byPath.stdout.trim() === "0";
+  };
   const unitPath = await exec(
     conn,
     "systemctl show -p FragmentPath --value x-ui.service 2>/dev/null || true",
@@ -119,11 +125,13 @@ async function restartXray(conn: Client, log?: SshLog): Promise<void> {
 
   if (shouldUseXui) {
     log?.("Обнаружен x-ui: пробуем HUP xray, затем reload x-ui (USR1), затем restart x-ui.");
-    const hup = await exec(conn, `pkill -HUP -f '${xrayProcPattern}' 2>/dev/null || true`);
+    const hup = await exec(
+      conn,
+      `pkill -HUP -x xray 2>/dev/null || pkill -HUP -f '${xrayProcPattern}' 2>/dev/null || true`,
+    );
     const hupErr = (hup.stderr || hup.stdout || "").trim();
     if (hupErr) log?.(`HUP xray: ${hupErr}`);
-    const ok = await exec(conn, `pgrep -f '${xrayProcPattern}' >/dev/null 2>&1; echo $?`);
-    if (ok.stdout.trim() === "0") return;
+    if (await hasAnyXrayProc()) return;
 
     const rel = await exec(
       conn,
@@ -131,14 +139,12 @@ async function restartXray(conn: Client, log?: SshLog): Promise<void> {
     );
     const relErr = (rel.stderr || rel.stdout || "").trim();
     if (relErr) log?.(`reload x-ui: ${relErr}`);
-    const afterReload = await exec(conn, `pgrep -f '${xrayProcPattern}' >/dev/null 2>&1; echo $?`);
-    if (afterReload.stdout.trim() === "0") return;
+    if (await hasAnyXrayProc()) return;
 
     const rst = await exec(conn, "systemctl restart x-ui 2>/dev/null || systemctl restart x-ui.service 2>/dev/null || true");
     const rstErr = (rst.stderr || rst.stdout || "").trim();
     if (rstErr) log?.(`restart x-ui: ${rstErr}`);
-    const afterRestart = await exec(conn, `pgrep -f '${xrayProcPattern}' >/dev/null 2>&1; echo $?`);
-    if (afterRestart.stdout.trim() === "0") return;
+    if (await hasAnyXrayProc()) return;
     throw new Error("x-ui активен, но процесс xray не найден после HUP/reload/restart x-ui");
   }
 
