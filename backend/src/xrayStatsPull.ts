@@ -49,20 +49,23 @@ export function buildStatKeyToUuidMap(config: Record<string, unknown>): Map<stri
   const m = new Map<string, string>();
   const inbounds = config.inbounds;
   if (!Array.isArray(inbounds)) return m;
-  const ib = inbounds.find((x) => (x as { tag?: string }).tag === TZADMIN_VLESS_TAG) as
-    | Record<string, unknown>
-    | undefined;
-  if (!ib) return m;
-  const settings = (ib.settings as Record<string, unknown>) ?? {};
-  const clients = (settings.clients as Array<Record<string, unknown>>) ?? [];
-  for (const c of clients) {
-    const id = String(c.id ?? "").trim();
-    if (!id) continue;
-    const em = String(c.email ?? id).trim() || id;
-    m.set(em, id);
-    m.set(em.toLowerCase(), id);
-    m.set(id, id);
-    m.set(id.toLowerCase(), id);
+  const vlessInbounds = inbounds.filter(
+    (x) => String((x as { protocol?: string }).protocol ?? "").toLowerCase() === "vless",
+  ) as Record<string, unknown>[];
+  const tagged = vlessInbounds.find((x) => String((x as { tag?: string }).tag ?? "") === TZADMIN_VLESS_TAG);
+  const preferred = tagged ? [tagged] : vlessInbounds;
+  for (const ib of preferred) {
+    const settings = (ib.settings as Record<string, unknown>) ?? {};
+    const clients = (settings.clients as Array<Record<string, unknown>>) ?? [];
+    for (const c of clients) {
+      const id = String(c.id ?? "").trim();
+      if (!id) continue;
+      const em = String(c.email ?? id).trim() || id;
+      m.set(em, id);
+      m.set(em.toLowerCase(), id);
+      m.set(id, id);
+      m.set(id.toLowerCase(), id);
+    }
   }
   return m;
 }
