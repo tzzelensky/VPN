@@ -109,9 +109,9 @@ async function restartTzadminXrayService(conn: Client, configPath: string, log?:
     "#!/usr/bin/env bash",
     "set -euo pipefail",
     "PATH=/usr/local/bin:/usr/bin:/usr/local/sbin:/usr/sbin:/usr/local/x-ui/bin:$PATH",
-    `CONFIG_PATH=${shellQuote(configPath)}`,
+    `CONFIG_PATH=${JSON.stringify(configPath)}`,
     "PID=$(pgrep -x xray 2>/dev/null | head -n1 || true)",
-    `[ -z "$PID" ] && PID=$(pgrep -f 'xray-linux-amd64|/usr/local/x-ui/bin/xray|/usr/local/bin/xray|/usr/bin/xray' 2>/dev/null | head -n1 || true)`,
+    `if [ -z "$PID" ]; then PID=$(pgrep -f 'xray-linux-amd64|/usr/local/x-ui/bin/xray|/usr/local/bin/xray|/usr/bin/xray' 2>/dev/null | head -n1 || true); fi`,
     'X=""',
     'CWD=""',
     'BIN=""',
@@ -130,7 +130,7 @@ async function restartTzadminXrayService(conn: Client, configPath: string, log?:
     "for CAND in /usr/local/x-ui/bin/xray-linux-amd64 /usr/local/x-ui/bin/xray /usr/local/sbin/xray /usr/local/bin/xray /usr/sbin/xray /usr/bin/xray; do",
     '  if [ ! -x "$X" ] && [ -x "$CAND" ]; then X="$CAND"; fi',
     "done",
-    `[ -x "$X" ] || X=$(command -v xray 2>/dev/null || true)`,
+    `[ -x "$X" ] || X="$(command -v xray 2>/dev/null || true)"`,
     'if [ -x "$X" ]; then',
     '  exec "$X" -config "$CONFIG_PATH"',
     "fi",
@@ -156,12 +156,14 @@ async function restartTzadminXrayService(conn: Client, configPath: string, log?:
     "[Install]",
     "WantedBy=multi-user.target",
   ].join("\n");
+  const launcherB64 = Buffer.from(launcher, "utf8").toString("base64");
+  const unitB64 = Buffer.from(unit, "utf8").toString("base64");
   const script = [
     "set -e",
     "install -d -m 0755 /etc/tzadmin-xray",
-    `cat > /etc/tzadmin-xray/launch.sh <<'LAUNCH'\n${launcher}\nLAUNCH`,
+    `printf %s ${shellQuote(launcherB64)} | base64 -d > /etc/tzadmin-xray/launch.sh`,
     "chmod 0755 /etc/tzadmin-xray/launch.sh",
-    `cat > /etc/systemd/system/tzadmin-xray.service <<'UNIT'\n${unit}\nUNIT`,
+    `printf %s ${shellQuote(unitB64)} | base64 -d > /etc/systemd/system/tzadmin-xray.service`,
     "systemctl daemon-reload",
     "systemctl unmask tzadmin-xray >/dev/null 2>&1 || true",
     "systemctl enable tzadmin-xray >/dev/null 2>&1 || true",
