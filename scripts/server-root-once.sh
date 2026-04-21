@@ -40,7 +40,7 @@ Group=www-data
 WorkingDirectory=${APP_ROOT}/backend
 EnvironmentFile=${APP_ROOT}/backend/.env
 ExecStart=/usr/bin/node dist/index.js
-Restart=on-failure
+Restart=always
 RestartSec=5
 
 [Install]

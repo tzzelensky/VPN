@@ -267,7 +267,7 @@ Group=www-data
 WorkingDirectory=/opt/vpn-admin/backend
 EnvironmentFile=/opt/vpn-admin/backend/.env
 ExecStart=/usr/bin/node dist/index.js
-Restart=on-failure
+Restart=always
 RestartSec=5
 
 [Install]
@@ -413,6 +413,19 @@ sudo systemctl restart vpn-admin-api
 sudo systemctl reload nginx
 ```
 
+### 13.1. Пересборка без обрыва SSH (`tsc` / `npm` долгие)
+
+Если сессия падает во время `npm run build`, соберите проект в фоне от root:
+
+```bash
+cd /home/vpnadm/vpn-admin-app
+chmod +x scripts/vpn-rebuild-api-nohup.sh
+nohup bash scripts/vpn-rebuild-api-nohup.sh >/dev/null 2>&1 &
+tail -f /root/vpn-rebuild-api.log
+```
+
+В конце скрипт сам делает `systemctl restart vpn-admin-api` и проверяет `/api/health`.
+
 ---
 
 ## Вариант без домена (только по IP)
@@ -428,6 +441,8 @@ sudo systemctl reload nginx
 
 | Симптом | Куда смотреть |
 |--------|----------------|
+| **`Connection refused` на `127.0.0.1:4000`** | Сервис остановлен: `systemctl status vpn-admin-api`, затем `systemctl start vpn-admin-api` (или `enable --now`). После деплоя убедитесь, что никто не выполнил `systemctl stop`. |
+| **`inactive (dead)` после сборки** | Запустите API снова; для фоновой сборки без обрыва SSH см. `scripts/vpn-rebuild-api-nohup.sh`. |
 | API не стартует | `journalctl -u vpn-admin-api -f` |
 | 502 от Nginx | `systemctl status vpn-admin-api`, `curl http://127.0.0.1:4000/api/health` |
 | Белый экран / 404 на фронте | Путь `root` в Nginx, наличие `frontend/dist`, `try_files` для SPA |
