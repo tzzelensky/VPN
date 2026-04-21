@@ -71,7 +71,9 @@ export function buildVlessUriForUser(
   const spx = pickStr(server?.sub_reality_spx ?? "", user.reality_spx) || "/";
 
   const secKnown = srvSec === "reality" || srvSec === "tls" || srvSec === "none";
-  const allowUserRealityFallback = user.connection_profile === "reality" || !secKnown;
+  // Никогда не форсируем Reality на сервере, который явно помечен как none/tls.
+  // Fallback с user.reality_* допускается только когда тип безопасности сервера ещё неизвестен.
+  const allowUserRealityFallback = !secKnown;
   const hasReality =
     (srvSec === "reality" || (allowUserRealityFallback && Boolean(pbk))) &&
     Boolean(sni) &&
