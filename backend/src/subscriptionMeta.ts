@@ -1,8 +1,12 @@
 import type { Response } from "express";
 import type { UserRow } from "./db.js";
 
-/** Лимит «как безлимит» для клиентов, где total=0 ломает отображение или считается исчерпанием. */
+type UnlimitedTotalMode = "zero" | "omit" | "maxsafe";
+const unlimitedMode = (
+  (process.env.SUBSCRIPTION_UNLIMITED_TOTAL_MODE ?? "zero").trim().toLowerCase() as UnlimitedTotalMode
+);
 const TOTAL_UNLIMITED_PLACEHOLDER = 9_007_199_254_740_991; // Number.MAX_SAFE_INTEGER
+const monotonicUsageByToken = new Map<string, { up: number; down: number }>();
 
 /**
  * Заголовки подписки (v2rayN, v2RayTun, Clash-семейство и др.):
@@ -43,14 +47,20 @@ function profileTitleWithTrafficAndExpiry(user: UserRow): string {
 }
 
 export function setSubscriptionUserHeaders(res: Response, user: UserRow): void {
-  const upload = Math.max(0, Math.trunc(Number(user.traffic_up) || 0));
-  const download = Math.max(0, Math.trunc(Number(user.traffic_down) || 0));
+  const rawUp = Math.max(0, Math.trunc(Number(user.traffic_up) || 0));
+  const rawDown = Math.max(0, Math.trunc(Number(user.traffic_down) || 0));
+  const key = String(user.sub_token ?? "").trim() || String(user.id);
+  const prev = monotonicUsageByToken.get(key);
+  const upload = prev ? Math.max(prev.up, rawUp) : rawUp;
+  const download = prev ? Math.max(prev.down, rawDown) : rawDown;
+  monotonicUsageByToken.set(key, { up: upload, down: download });
 
-  let totalBytes: number;
+  let totalBytes: number | null = null;
   if (user.total_gb > 0) {
     totalBytes = Math.round(Number(user.total_gb) * 1073741824);
   } else {
-    totalBytes = TOTAL_UNLIMITED_PLACEHOLDER;
+    if (unlimitedMode === "maxsafe") totalBytes = TOTAL_UNLIMITED_PLACEHOLDER;
+    else if (unlimitedMode === "zero") totalBytes = 0;
   }
 
   const expireSec =
@@ -58,7 +68,10 @@ export function setSubscriptionUserHeaders(res: Response, user: UserRow): void {
       ? Math.floor(Number(user.expiry_time) / 1000)
       : 0;
 
-  const plain = `upload=${upload}; download=${download}; total=${totalBytes}; expire=${expireSec}`;
+  const parts = [`upload=${upload}`, `download=${download}`];
+  if (totalBytes != null) parts.push(`total=${totalBytes}`);
+  parts.push(`expire=${expireSec}`);
+  const plain = parts.join("; ");
   res.setHeader("subscription-userinfo", plain);
 
   const rawTitle = profileTitleWithTrafficAndExpiry(user);
