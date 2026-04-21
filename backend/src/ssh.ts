@@ -107,8 +107,15 @@ function isTzadminManagedConfigPath(configPath: string): boolean {
 async function restartTzadminXrayService(conn: Client, configPath: string, log?: SshLog): Promise<void> {
   const script =
     `set -e; PATH=/usr/local/bin:/usr/bin:/usr/local/x-ui/bin:$PATH; ` +
-    `X=/usr/local/x-ui/bin/xray-linux-amd64; ` +
+    `PID=$(pgrep -x xray 2>/dev/null | head -n1 || true); ` +
+    `[ -z "$PID" ] && PID=$(pgrep -f 'xray-linux-amd64|/usr/local/x-ui/bin/xray|/usr/local/bin/xray|/usr/bin/xray' 2>/dev/null | head -n1 || true); ` +
+    `X=''; ` +
+    `[ -n "$PID" ] && X=$(readlink -f "/proc/$PID/exe" 2>/dev/null || true); ` +
+    `[ ! -x "$X" ] && X=/usr/local/x-ui/bin/xray-linux-amd64; ` +
+    `[ ! -x "$X" ] && X=/usr/local/x-ui/bin/xray; ` +
+    `[ ! -x "$X" ] && X=/usr/local/sbin/xray; ` +
     `[ ! -x "$X" ] && X=/usr/local/bin/xray; ` +
+    `[ ! -x "$X" ] && X=/usr/sbin/xray; ` +
     `[ ! -x "$X" ] && X=/usr/bin/xray; ` +
     `[ ! -x "$X" ] && X=$(command -v xray 2>/dev/null || true); ` +
     `[ -x "$X" ] || exit 20; ` +
