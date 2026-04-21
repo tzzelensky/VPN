@@ -8,6 +8,7 @@ export type VlessLinkUserSlice = Pick<
 export type VlessLinkServerSlice = Pick<
   ServerRow,
   | "vless_port"
+  | "sub_port"
   | "sub_network"
   | "sub_security"
   | "sub_type"
@@ -48,7 +49,9 @@ export function buildVlessUriForUser(
   server?: VlessLinkServerSlice,
 ): string {
   const enc = encodeURIComponent(label || "vpn");
-  const port = user.remote_port != null && user.remote_port > 0 ? user.remote_port : serverVlessPort;
+  const hintedPort =
+    server && Number(server.sub_port) > 0 ? Number(server.sub_port) : Number(serverVlessPort);
+  const port = user.remote_port != null && user.remote_port > 0 ? user.remote_port : hintedPort;
 
   const srvSec = (server?.sub_security ?? "").trim().toLowerCase();
   const srvNet = (server?.sub_network ?? "").trim().toLowerCase();

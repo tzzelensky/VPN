@@ -49,6 +49,7 @@ export async function pushClientListToAllDeployedServers(log?: SshLog): Promise<
       }
       if (r.hints) {
         updateServer(row.id, {
+          sub_port: r.hints.sub_port || row.vless_port,
           sub_network: r.hints.sub_network,
           sub_security: r.hints.sub_security,
           sub_type: r.hints.sub_type,

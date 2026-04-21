@@ -36,6 +36,7 @@ function serverToJson(r: ServerRow) {
     vless_port: r.vless_port,
     vless_uuid: r.vless_uuid,
     xray_config_path: r.xray_config_path,
+    sub_port: r.sub_port,
     sub_network: r.sub_network,
     sub_security: r.sub_security,
     sub_type: r.sub_type,
@@ -91,6 +92,7 @@ router.post("/", (req, res) => {
     vless_port: vp,
     vless_uuid: null,
     xray_config_path: null,
+    sub_port: vp,
     sub_network: "",
     sub_security: "",
     sub_type: "",
@@ -301,6 +303,7 @@ router.post("/:id/deploy-vless", async (req, res) => {
       ...(dep.hints
         ? {
             sub_network: dep.hints.sub_network,
+            sub_port: dep.hints.sub_port || row.vless_port,
             sub_security: dep.hints.sub_security,
             sub_type: dep.hints.sub_type,
             sub_host: dep.hints.sub_host,

@@ -112,6 +112,7 @@ export type ServerRow = {
   vless_uuid: string | null;
   xray_config_path: string | null;
   /** Снимок транспорта inbound tzadmin-vless для корректной подписки (заполняется при деплое). */
+  sub_port: number;
   sub_network: string;
   sub_security: string;
   sub_type: string;
@@ -237,6 +238,7 @@ export function normalizeServer(s: ServerRow): ServerRow {
     name,
     country_code: normalizeCountryCode(s.country_code),
     xray_config_path: s.xray_config_path ?? null,
+    sub_port: Number(s.sub_port) > 0 ? Number(s.sub_port) : Number(s.vless_port) || 0,
     sub_network: String(s.sub_network ?? "").trim(),
     sub_security: String(s.sub_security ?? "").trim().toLowerCase(),
     sub_type: String(s.sub_type ?? "").trim(),

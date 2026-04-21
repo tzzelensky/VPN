@@ -130,6 +130,7 @@ async function refreshOneServerHints(row: ServerRow, log?: SshLog): Promise<void
 
   updateServer(row.id, {
     xray_config_path: path || row.xray_config_path,
+    sub_port: hints.sub_port || row.vless_port,
     sub_network: hints.sub_network,
     sub_security: hints.sub_security,
     sub_type: hints.sub_type,

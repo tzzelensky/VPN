@@ -2,6 +2,7 @@ import { x25519 } from "@noble/curves/ed25519.js";
 import { TZADMIN_VLESS_TAG } from "./ssh.js";
 
 export type ServerLinkHints = {
+  sub_port: number;
   sub_network: string;
   sub_security: string;
   sub_type: string;
@@ -17,6 +18,7 @@ export type ServerLinkHints = {
 };
 
 const emptyHints = (): ServerLinkHints => ({
+  sub_port: 0,
   sub_network: "",
   sub_security: "",
   sub_type: "",
@@ -149,6 +151,8 @@ function realityPublicKeyFromBlocks(rs: Record<string, unknown>, rsSettings: Rec
 /** Параметры подписки из одного VLESS inbound. */
 function extractVlessLinkHintsFromInbound(ib: Record<string, unknown>): ServerLinkHints {
   const out = emptyHints();
+  const p = Number(ib.port);
+  out.sub_port = Number.isFinite(p) && p > 0 ? p : 0;
   const ss = streamSettingsOfInbound(ib);
   const net = str(ss.network).toLowerCase() || "tcp";
   out.sub_network = net;
