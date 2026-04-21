@@ -269,11 +269,14 @@ export function ensureXrayStatsPolicyApi(config: Record<string, unknown>): void 
   if (!config.stats) config.stats = {};
   const prevPol = (config.policy as Record<string, unknown>) || {};
   const levels = { ...((prevPol.levels as Record<string, Record<string, unknown>>) || {}) };
-  const z = { ...(levels["0"] || {}) };
-  z.statsUserUplink = true;
-  z.statsUserDownlink = true;
-  z.statsUserOnline = true;
-  levels["0"] = z;
+  const levelKeys = new Set<string>(["0", ...Object.keys(levels)]);
+  for (const k of levelKeys) {
+    const lv = { ...(levels[k] || {}) };
+    lv.statsUserUplink = true;
+    lv.statsUserDownlink = true;
+    lv.statsUserOnline = true;
+    levels[k] = lv;
+  }
   config.policy = { ...prevPol, levels };
 
   const prevApi = (config.api as Record<string, unknown>) || {};
