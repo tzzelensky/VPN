@@ -511,6 +511,7 @@ export async function deployOrSyncVless(
 ): Promise<{ ok: boolean; detail: string; backup?: string; hints?: ServerLinkHints }> {
   const backup = `${opts.configPath}.bak.${Date.now()}`;
   const clientUuids = [...new Set(opts.clientUuids.filter(Boolean))];
+  const xuiConfigMode = /\/x-ui\//.test(opts.configPath);
   let hints: ServerLinkHints | undefined;
 
   try {
@@ -533,7 +534,33 @@ export async function deployOrSyncVless(
           const inbounds = parsed.inbounds;
           if (Array.isArray(inbounds)) {
             const idx = inbounds.findIndex((ib) => (ib as { tag?: string }).tag === TZADMIN_VLESS_TAG);
-            if (idx >= 0) {
+            if (xuiConfigMode) {
+              const rows = inbounds as Record<string, unknown>[];
+              // На x-ui не держим отдельный tzadmin inbound: x-ui может удалять его при reload.
+              // Синхронизируем UUID прямо в рабочий VLESS inbound.
+              if (idx >= 0) {
+                rows.splice(idx, 1);
+                log?.("x-ui режим: удалён tzadmin-vless, используем только существующий inbound x-ui.");
+              }
+              const candIdx = findCandidateVlessInboundIndex(rows, opts.vlessPort);
+              if (candIdx >= 0) {
+                const cand = { ...(rows[candIdx] as Record<string, unknown>) };
+                const candSettings = (cand.settings as Record<string, unknown>) ?? {};
+                const candPrev = (candSettings.clients as Array<Record<string, unknown>>) ?? [];
+                const defaultFlow = defaultClientFlowForInbound(cand, candPrev);
+                const forceFlow = shouldForceClientFlowForInbound(cand);
+                candSettings.clients = buildManagedClients(candPrev, clientUuids, defaultFlow, forceFlow);
+                candSettings.decryption = "none";
+                cand.settings = candSettings;
+                rows[candIdx] = cand;
+                parsed.inbounds = rows;
+                config = parsed;
+                log?.(`x-ui режим: клиенты синхронизированы в inbound порт ${Number(cand.port) || 0}.`);
+              } else {
+                config = buildMinimalConfig(clientUuids, opts.vlessPort);
+                log?.("VLESS inbound не найден — записан минимальный конфиг.");
+              }
+            } else if (idx >= 0) {
               const ib = inbounds[idx] as Record<string, unknown>;
               const settings = (ib.settings as Record<string, unknown>) ?? {};
               const prevList = (settings.clients as Array<Record<string, unknown>>) ?? [];
