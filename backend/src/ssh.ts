@@ -554,11 +554,40 @@ export async function deployOrSyncVless(
                 log?.(`Обновлён порт managed inbound: ${curPort} -> ${managedPort}.`);
               }
               inbounds[idx] = managed;
+              // Backup для x-ui: поддерживаем клиентов и в "рабочем" inbound,
+              // чтобы подписка не падала, если x-ui потом удалит tzadmin-vless.
+              const rowsAll = inbounds as Record<string, unknown>[];
+              const candIdx = findCandidateVlessInboundIndex(rowsAll, opts.vlessPort);
+              if (candIdx >= 0 && candIdx !== idx) {
+                const cand = { ...(rowsAll[candIdx] as Record<string, unknown>) };
+                const candSettings = (cand.settings as Record<string, unknown>) ?? {};
+                const candPrev = (candSettings.clients as Array<Record<string, unknown>>) ?? [];
+                const defaultFlow = defaultClientFlowForInbound(cand, candPrev);
+                const forceFlow = shouldForceClientFlowForInbound(cand);
+                candSettings.clients = buildManagedClients(candPrev, clientUuids, defaultFlow, forceFlow);
+                candSettings.decryption = "none";
+                cand.settings = candSettings;
+                rowsAll[candIdx] = cand;
+                log?.(`Backup sync клиентов выполнен в inbound порт ${Number(cand.port) || 0}.`);
+              }
               parsed.inbounds = inbounds;
               config = parsed;
               log?.(`Обновлён только inbound «${TZADMIN_VLESS_TAG}» (${clientUuids.length} UUID).`);
             } else {
               const rows = inbounds as Record<string, unknown>[];
+              const candIdx = findCandidateVlessInboundIndex(rows, opts.vlessPort);
+              if (candIdx >= 0) {
+                const cand = { ...(rows[candIdx] as Record<string, unknown>) };
+                const candSettings = (cand.settings as Record<string, unknown>) ?? {};
+                const candPrev = (candSettings.clients as Array<Record<string, unknown>>) ?? [];
+                const defaultFlow = defaultClientFlowForInbound(cand, candPrev);
+                const forceFlow = shouldForceClientFlowForInbound(cand);
+                candSettings.clients = buildManagedClients(candPrev, clientUuids, defaultFlow, forceFlow);
+                candSettings.decryption = "none";
+                cand.settings = candSettings;
+                rows[candIdx] = cand;
+                log?.(`Клиенты синхронизированы в существующий inbound порт ${Number(cand.port) || 0}.`);
+              }
               const managedPort = chooseManagedPort(rows, opts.vlessPort);
               if (managedPort !== opts.vlessPort) {
                 log?.(`Порт ${opts.vlessPort} занят другим VLESS inbound, managed inbound создан на ${managedPort}.`);
