@@ -37,6 +37,9 @@ export type CreateUserInput = {
   /** Служебные поля синхронизации с Xray (не задавать из формы клиента). */
   online_snapshot?: number;
   stats_synced_at?: number;
+  /** Последний «сырой» снимок счётчиков Xray (для корректного инкремента после рестартов). */
+  stats_raw_up?: number;
+  stats_raw_down?: number;
 };
 
 export type UserRow = {
@@ -64,6 +67,9 @@ export type UserRow = {
   online_snapshot: number;
   /** Время последнего успешного sync трафика с узлов (ms). */
   stats_synced_at: number;
+  /** Последний «сырой» снимок uplink/downlink из Xray; -1 = ещё не инициализировано. */
+  stats_raw_up: number;
+  stats_raw_down: number;
   created_at: string;
   updated_at: string;
 };
@@ -311,6 +317,10 @@ function normalizeUser(u: UserRow): UserRow {
     stats_synced_at: Number.isFinite(Number(u.stats_synced_at))
       ? Math.max(0, Math.floor(Number(u.stats_synced_at)))
       : 0,
+    stats_raw_up: Number.isFinite(Number(u.stats_raw_up)) ? Math.max(-1, Math.floor(Number(u.stats_raw_up))) : -1,
+    stats_raw_down: Number.isFinite(Number(u.stats_raw_down))
+      ? Math.max(-1, Math.floor(Number(u.stats_raw_down)))
+      : -1,
     created_at: u.created_at ?? new Date().toISOString(),
     updated_at: u.updated_at ?? u.created_at ?? new Date().toISOString(),
   };
@@ -577,6 +587,8 @@ export function createUser(input: CreateUserInput = {}): UserRow {
       subscription_server_count: Math.max(0, Math.floor(Number(input.subscription_server_count) || 0)),
       online_snapshot: 0,
       stats_synced_at: 0,
+      stats_raw_up: -1,
+      stats_raw_down: -1,
       created_at: now,
       updated_at: now,
     });
@@ -647,13 +659,20 @@ export function applyUsersTrafficSnapshot(
       const candDown = Number.isFinite(Number(hit.traffic_down))
         ? Math.max(0, Math.floor(Number(hit.traffic_down)))
         : u.traffic_down;
-      const candSum = candUp + candDown;
-      const prevSum = u.traffic_up + u.traffic_down;
-      let up = candUp;
-      let down = candDown;
-      if (prevSum > 0 && candSum < prevSum) {
+      const prevRawUp = Number.isFinite(Number(u.stats_raw_up)) ? Number(u.stats_raw_up) : -1;
+      const prevRawDown = Number.isFinite(Number(u.stats_raw_down)) ? Number(u.stats_raw_down) : -1;
+      const hasRawBaseline = prevRawUp >= 0 && prevRawDown >= 0;
+      let up = u.traffic_up;
+      let down = u.traffic_down;
+      if (!hasRawBaseline) {
+        // Первая инициализация после миграции: не пересчитываем прошлый трафик, только сохраняем baseline.
         up = u.traffic_up;
         down = u.traffic_down;
+      } else {
+        const addUp = candUp >= prevRawUp ? candUp - prevRawUp : candUp;
+        const addDown = candDown >= prevRawDown ? candDown - prevRawDown : candDown;
+        up = Math.max(0, Math.floor(Number(u.traffic_up) || 0) + Math.max(0, addUp));
+        down = Math.max(0, Math.floor(Number(u.traffic_down) || 0) + Math.max(0, addDown));
       }
       store.users[i] = normalizeUser({
         ...u,
@@ -661,6 +680,8 @@ export function applyUsersTrafficSnapshot(
         traffic_down: down,
         online_snapshot: hit.online ? 1 : 0,
         stats_synced_at: syncedAtMs,
+        stats_raw_up: candUp,
+        stats_raw_down: candDown,
         updated_at: new Date().toISOString(),
       });
       n++;
