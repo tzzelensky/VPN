@@ -105,36 +105,69 @@ function isTzadminManagedConfigPath(configPath: string): boolean {
 }
 
 async function restartTzadminXrayService(conn: Client, configPath: string, log?: SshLog): Promise<void> {
-  const script =
-    `set -e; PATH=/usr/local/bin:/usr/bin:/usr/local/x-ui/bin:$PATH; ` +
-    `mkdir -p /etc/tzadmin-xray; ` +
-    `cat > /etc/systemd/system/tzadmin-xray.service <<UNIT\n` +
-    `[Unit]\nDescription=TZAdmin Managed Xray Service\nAfter=network.target\n\n` +
-    `[Service]\nType=simple\nExecStart=/bin/bash -lc 'PATH=/usr/local/bin:/usr/bin:/usr/local/x-ui/bin:$PATH; ` +
-    `PID=$(pgrep -x xray 2>/dev/null | head -n1 || true); ` +
-    `[ -z "$PID" ] && PID=$(pgrep -f "xray-linux-amd64|/usr/local/x-ui/bin/xray|/usr/local/bin/xray|/usr/bin/xray" 2>/dev/null | head -n1 || true); ` +
-    `CWD=""; BIN=""; X=""; ` +
-    `[ -n "$PID" ] && CWD=$(readlink -f "/proc/$PID/cwd" 2>/dev/null || true); ` +
-    `[ -n "$PID" ] && BIN=$(tr "\\000" " " < "/proc/$PID/cmdline" 2>/dev/null | awk "{print \\$1}"); ` +
-    `[ -n "$PID" ] && X=$(readlink -f "/proc/$PID/exe" 2>/dev/null || true); ` +
-    `if [ ! -x "$X" ] && [ -n "$BIN" ]; then case "$BIN" in /*) CAND="$BIN" ;; *) CAND="$CWD/$BIN" ;; esac; [ -x "$CAND" ] && X="$CAND"; fi; ` +
-    `[ ! -x "$X" ] && X=/usr/local/x-ui/bin/xray-linux-amd64; ` +
-    `[ ! -x "$X" ] && X=/usr/local/x-ui/bin/xray; ` +
-    `[ ! -x "$X" ] && X=/usr/local/sbin/xray; ` +
-    `[ ! -x "$X" ] && X=/usr/local/bin/xray; ` +
-    `[ ! -x "$X" ] && X=/usr/sbin/xray; ` +
-    `[ ! -x "$X" ] && X=/usr/bin/xray; ` +
-    `[ ! -x "$X" ] && X=$(command -v xray 2>/dev/null || true); ` +
-    `if [ -x "$X" ]; then exec "$X" -config ${configPath}; fi; ` +
-    `if [ -n "$BIN" ] && [ -n "$CWD" ]; then cd "$CWD" && exec "$BIN" -config ${configPath}; fi; ` +
-    `echo "xray binary not found"; exit 20'\n` +
-    `Restart=always\nRestartSec=3\nLimitNOFILE=1048576\n\n` +
-    `[Install]\nWantedBy=multi-user.target\n` +
-    `UNIT\n` +
-    `systemctl daemon-reload; ` +
-    `systemctl enable tzadmin-xray >/dev/null 2>&1 || true; ` +
-    `systemctl restart tzadmin-xray; ` +
-    `systemctl is-active tzadmin-xray >/dev/null`;
+  const launcher = [
+    "#!/usr/bin/env bash",
+    "set -euo pipefail",
+    "PATH=/usr/local/bin:/usr/bin:/usr/local/sbin:/usr/sbin:/usr/local/x-ui/bin:$PATH",
+    `CONFIG_PATH=${shellQuote(configPath)}`,
+    "PID=$(pgrep -x xray 2>/dev/null | head -n1 || true)",
+    `[ -z "$PID" ] && PID=$(pgrep -f 'xray-linux-amd64|/usr/local/x-ui/bin/xray|/usr/local/bin/xray|/usr/bin/xray' 2>/dev/null | head -n1 || true)`,
+    'X=""',
+    'CWD=""',
+    'BIN=""',
+    'if [ -n "$PID" ]; then',
+    '  X=$(readlink -f "/proc/$PID/exe" 2>/dev/null || true)',
+    '  CWD=$(readlink -f "/proc/$PID/cwd" 2>/dev/null || true)',
+    `  BIN=$(tr '\\000' ' ' < "/proc/$PID/cmdline" 2>/dev/null | cut -d' ' -f1)`,
+    '  if [ ! -x "$X" ] && [ -n "$BIN" ]; then',
+    '    case "$BIN" in',
+    '      /*) CAND="$BIN" ;;',
+    '      *) CAND="$CWD/$BIN" ;;',
+    "    esac",
+    '    [ -x "$CAND" ] && X="$CAND"',
+    "  fi",
+    "fi",
+    "for CAND in /usr/local/x-ui/bin/xray-linux-amd64 /usr/local/x-ui/bin/xray /usr/local/sbin/xray /usr/local/bin/xray /usr/sbin/xray /usr/bin/xray; do",
+    '  if [ ! -x "$X" ] && [ -x "$CAND" ]; then X="$CAND"; fi',
+    "done",
+    `[ -x "$X" ] || X=$(command -v xray 2>/dev/null || true)`,
+    'if [ -x "$X" ]; then',
+    '  exec "$X" -config "$CONFIG_PATH"',
+    "fi",
+    'if [ -n "$BIN" ] && [ -n "$CWD" ]; then',
+    '  cd "$CWD"',
+    '  exec "$BIN" -config "$CONFIG_PATH"',
+    "fi",
+    'echo "xray binary not found" >&2',
+    "exit 20",
+  ].join("\n");
+  const unit = [
+    "[Unit]",
+    "Description=TZAdmin Managed Xray Service",
+    "After=network.target",
+    "",
+    "[Service]",
+    "Type=simple",
+    "ExecStart=/etc/tzadmin-xray/launch.sh",
+    "Restart=always",
+    "RestartSec=3",
+    "LimitNOFILE=1048576",
+    "",
+    "[Install]",
+    "WantedBy=multi-user.target",
+  ].join("\n");
+  const script = [
+    "set -e",
+    "install -d -m 0755 /etc/tzadmin-xray",
+    `cat > /etc/tzadmin-xray/launch.sh <<'LAUNCH'\n${launcher}\nLAUNCH`,
+    "chmod 0755 /etc/tzadmin-xray/launch.sh",
+    `cat > /etc/systemd/system/tzadmin-xray.service <<'UNIT'\n${unit}\nUNIT`,
+    "systemctl daemon-reload",
+    "systemctl unmask tzadmin-xray >/dev/null 2>&1 || true",
+    "systemctl enable tzadmin-xray >/dev/null 2>&1 || true",
+    "systemctl restart tzadmin-xray",
+    "systemctl is-active tzadmin-xray >/dev/null",
+  ].join("; ");
   const r = await exec(conn, `bash -lc ${JSON.stringify(script)}`);
   if (r.code === 0) return;
   const text = (r.stderr || r.stdout || "").trim();
