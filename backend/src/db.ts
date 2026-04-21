@@ -40,6 +40,8 @@ export type CreateUserInput = {
   /** Последний «сырой» снимок счётчиков Xray (для корректного инкремента после рестартов). */
   stats_raw_up?: number;
   stats_raw_down?: number;
+  /** legacy = старый plain/tls; reality = использовать Reality-профиль в ссылках. */
+  connection_profile?: "legacy" | "reality";
 };
 
 export type UserRow = {
@@ -70,6 +72,7 @@ export type UserRow = {
   /** Последний «сырой» снимок uplink/downlink из Xray; -1 = ещё не инициализировано. */
   stats_raw_up: number;
   stats_raw_down: number;
+  connection_profile: "legacy" | "reality";
   created_at: string;
   updated_at: string;
 };
@@ -292,6 +295,7 @@ function coerceTotalGbField(raw: unknown): number {
 }
 
 function normalizeUser(u: UserRow): UserRow {
+  const mode = String((u as { connection_profile?: unknown }).connection_profile ?? "legacy").toLowerCase();
   return {
     id: u.id,
     name: u.name ?? "user",
@@ -321,6 +325,7 @@ function normalizeUser(u: UserRow): UserRow {
     stats_raw_down: Number.isFinite(Number(u.stats_raw_down))
       ? Math.max(-1, Math.floor(Number(u.stats_raw_down)))
       : -1,
+    connection_profile: mode === "reality" ? "reality" : "legacy",
     created_at: u.created_at ?? new Date().toISOString(),
     updated_at: u.updated_at ?? u.created_at ?? new Date().toISOString(),
   };
@@ -529,6 +534,32 @@ function templateRealityFromPeers(users: UserRow[]): {
   return undefined;
 }
 
+function templateRealityFromServers(servers: ServerRow[]): {
+  reality_pbk: string;
+  reality_fp: string;
+  reality_sni: string;
+  reality_sid: string;
+  reality_spx: string;
+  remote_port: number | null;
+} | undefined {
+  for (const s of servers) {
+    if (String(s.sub_security ?? "").trim().toLowerCase() !== "reality") continue;
+    const pbk = String(s.sub_reality_pbk ?? "").trim();
+    const sid = String(s.sub_reality_sid ?? "").trim();
+    const sni = String(s.sub_sni ?? "").trim();
+    if (!pbk || !sid || !sni) continue;
+    return {
+      reality_pbk: pbk,
+      reality_fp: String(s.sub_fp ?? "").trim() || "chrome",
+      reality_sni: sni,
+      reality_sid: sid,
+      reality_spx: String(s.sub_reality_spx ?? "").trim() || "/",
+      remote_port: Number(s.sub_port) > 0 ? Number(s.sub_port) : Number(s.vless_port) || null,
+    };
+  }
+  return undefined;
+}
+
 export function createUser(input: CreateUserInput = {}): UserRow {
   const now = new Date().toISOString();
   let created: UserRow | undefined;
@@ -548,13 +579,15 @@ export function createUser(input: CreateUserInput = {}): UserRow {
     const name = (input.name ?? "").trim() || `user-${id}`;
     let remote_port: number | null =
       input.remote_port != null && Number(input.remote_port) > 0 ? Number(input.remote_port) : null;
+    const requestedMode = String(input.connection_profile ?? "").toLowerCase();
+    let connection_profile: "legacy" | "reality" = requestedMode === "reality" ? "reality" : "legacy";
     let reality_pbk = (input.reality_pbk ?? "").trim();
     let reality_fp = (input.reality_fp ?? "").trim() || "chrome";
     let reality_sni = (input.reality_sni ?? "").trim() || defaultRealitySni();
     let reality_sid = (input.reality_sid ?? "").trim() || randomRealityShortId();
     let reality_spx = (input.reality_spx ?? "").trim() || "/";
     if (!reality_pbk) {
-      const tmpl = templateRealityFromPeers(store.users);
+      const tmpl = templateRealityFromServers(store.servers) ?? templateRealityFromPeers(store.users);
       if (tmpl) {
         reality_pbk = tmpl.reality_pbk;
         reality_fp = tmpl.reality_fp;
@@ -562,7 +595,11 @@ export function createUser(input: CreateUserInput = {}): UserRow {
         reality_sid = tmpl.reality_sid;
         reality_spx = tmpl.reality_spx;
         if (tmpl.remote_port != null) remote_port = tmpl.remote_port;
+        if (requestedMode !== "legacy") connection_profile = "reality";
       }
+    }
+    if (connection_profile === "legacy" && (process.env.AUTO_REALITY_FOR_NEW_USERS ?? "1") === "1") {
+      if (reality_pbk && reality_sid && reality_sni) connection_profile = "reality";
     }
     created = normalizeUser({
       id,
@@ -589,6 +626,7 @@ export function createUser(input: CreateUserInput = {}): UserRow {
       stats_synced_at: 0,
       stats_raw_up: -1,
       stats_raw_down: -1,
+      connection_profile,
       created_at: now,
       updated_at: now,
     });

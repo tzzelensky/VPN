@@ -124,6 +124,7 @@ function userDto(u: UserRow) {
     subscription_server_count: u.subscription_server_count,
     online: deriveOnlineFromRow(u),
     stats_synced_at: u.stats_synced_at,
+    connection_profile: u.connection_profile,
     created_at: u.created_at,
     updated_at: u.updated_at,
   };
@@ -165,6 +166,8 @@ function parseCreateBody(req: import("express").Request): CreateUserInput & { na
     reality_spx: b.reality_spx != null ? String(b.reality_spx) : undefined,
     subscription_server_count:
       b.subscription_server_count != null ? Number(b.subscription_server_count) : undefined,
+    connection_profile:
+      b.connection_profile != null && String(b.connection_profile).toLowerCase() === "reality" ? "reality" : undefined,
   };
 }
 

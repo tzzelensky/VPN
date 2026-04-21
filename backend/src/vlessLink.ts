@@ -2,7 +2,14 @@ import type { ServerRow, UserRow } from "./db.js";
 
 export type VlessLinkUserSlice = Pick<
   UserRow,
-  "flow" | "remote_port" | "reality_pbk" | "reality_fp" | "reality_sni" | "reality_sid" | "reality_spx"
+  | "flow"
+  | "remote_port"
+  | "reality_pbk"
+  | "reality_fp"
+  | "reality_sni"
+  | "reality_sid"
+  | "reality_spx"
+  | "connection_profile"
 >;
 
 export type VlessLinkServerSlice = Pick<
@@ -64,7 +71,7 @@ export function buildVlessUriForUser(
   const spx = pickStr(server?.sub_reality_spx ?? "", user.reality_spx) || "/";
 
   const secKnown = srvSec === "reality" || srvSec === "tls" || srvSec === "none";
-  const allowUserRealityFallback = !secKnown;
+  const allowUserRealityFallback = user.connection_profile === "reality" || !secKnown;
   const hasReality =
     (srvSec === "reality" || (allowUserRealityFallback && Boolean(pbk))) &&
     Boolean(sni) &&
@@ -168,6 +175,7 @@ export function buildVlessUri(host: string, port: number, uuid: string, name: st
     reality_sni: "",
     reality_sid: "",
     reality_spx: "/",
+    connection_profile: "legacy",
   });
 }
 
