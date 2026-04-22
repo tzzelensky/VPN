@@ -72,13 +72,6 @@ router.post("/sync-stats", async (_req, res) => {
           traffic_down: agg.down,
           online: agg.online > 0,
         });
-      } else {
-        rows.push({
-          vless_uuid: u.vless_uuid,
-          traffic_up: u.traffic_up,
-          traffic_down: u.traffic_down,
-          online: false,
-        });
       }
     }
     const updated = applyUsersTrafficSnapshot(rows, Date.now());

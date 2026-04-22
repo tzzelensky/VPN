@@ -1,5 +1,5 @@
 import type { ServerRow, UserRow } from "./db.js";
-import { applyUsersTrafficSnapshot, getUser, listDeployedServers, updateServer } from "./db.js";
+import { applyUsersTrafficSnapshot, getUser, listDeployedServers, updateServer, updateUserRow } from "./db.js";
 import {
   TZADMIN_VLESS_TAG,
   sshExecCommand,
@@ -445,17 +445,12 @@ export async function refreshUserTrafficFromServersIfDue(user: UserRow, log?: Ss
         Date.now(),
       );
     } else {
-      applyUsersTrafficSnapshot(
-        [
-          {
-            vless_uuid: fresh.vless_uuid,
-            traffic_up: fresh.traffic_up,
-            traffic_down: fresh.traffic_down,
-            online: false,
-          },
-        ],
-        Date.now(),
-      );
+      // Нет raw-снимка с узлов: не трогаем traffic_up/down, чтобы не "накручивать"
+      // накопленные значения в дельту. Обновляем только онлайн-снимок и метку sync.
+      updateUserRow(fresh.id, {
+        online_snapshot: 0,
+        stats_synced_at: Date.now(),
+      });
     }
     subTrafficLastAttempt.set(key, Date.now());
   })();
