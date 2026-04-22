@@ -24,6 +24,7 @@ import { sendExpiryRenewalReminder } from "../telegram/expiryNotify.js";
 import { runAutoTrafficNotificationsOnce } from "../telegram/trafficNotify.js";
 import { peekUserTrafficFromServers, pullTrafficFromAllDeployedServers } from "../xrayStatsPull.js";
 import { refreshMissingSubscriptionHintsIfDue } from "../subscriptionHintsRefresh.js";
+import { clearSubscriptionUsageMonotonic } from "../subscriptionMeta.js";
 
 const router = Router();
 
@@ -344,6 +345,7 @@ router.post("/:id(\\d+)/reset-traffic", async (req, res) => {
     res.status(404).json({ error: "not_found" });
     return;
   }
+  clearSubscriptionUsageMonotonic(next);
   res.json({ ok: true, user: userDto(next) });
 });
 

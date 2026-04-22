@@ -15,6 +15,28 @@ import { refreshMissingSubscriptionHintsIfDue } from "../subscriptionHintsRefres
 
 const router = Router();
 
+function deriveUsageForHeader(
+  base: UserRow,
+  peek: { up: number; down: number },
+): { up: number; down: number } {
+  const rawUp = Math.max(0, Math.floor(Number(peek.up) || 0));
+  const rawDown = Math.max(0, Math.floor(Number(peek.down) || 0));
+  const prevRawUp = Number.isFinite(Number(base.stats_raw_up)) ? Math.max(0, Math.floor(Number(base.stats_raw_up))) : -1;
+  const prevRawDown = Number.isFinite(Number(base.stats_raw_down))
+    ? Math.max(0, Math.floor(Number(base.stats_raw_down)))
+    : -1;
+  const hasRaw = prevRawUp >= 0 && prevRawDown >= 0;
+  if (!hasRaw) {
+    return { up: Math.max(0, rawUp), down: Math.max(0, rawDown) };
+  }
+  const addUp = rawUp >= prevRawUp ? rawUp - prevRawUp : rawUp;
+  const addDown = rawDown >= prevRawDown ? rawDown - prevRawDown : rawDown;
+  return {
+    up: Math.max(0, Math.floor(Number(base.traffic_up) || 0) + Math.max(0, addUp)),
+    down: Math.max(0, Math.floor(Number(base.traffic_down) || 0) + Math.max(0, addDown)),
+  };
+}
+
 function resolveSubscriptionUser(rawToken: string): UserRow | undefined {
   const token = decodeURIComponent(String(rawToken ?? "").trim());
   const byToken = token ? getUserBySubToken(token) : undefined;
@@ -44,10 +66,11 @@ router.get("/:token", async (req, res) => {
     let headerUser: UserRow = base;
     try {
       const peek = await peekUserTrafficForSubscription(user);
+      const headerUsage = deriveUsageForHeader(base, peek);
       headerUser = {
         ...base,
-        traffic_up: Math.max(base.traffic_up, peek.up),
-        traffic_down: Math.max(base.traffic_down, peek.down),
+        traffic_up: headerUsage.up,
+        traffic_down: headerUsage.down,
       };
     } catch (e) {
       console.error("[subscription] peek traffic:", e instanceof Error ? e.message : e);

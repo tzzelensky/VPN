@@ -8,6 +8,11 @@ const unlimitedMode = (
 const TOTAL_UNLIMITED_PLACEHOLDER = 9_007_199_254_740_991; // Number.MAX_SAFE_INTEGER
 const monotonicUsageByToken = new Map<string, { up: number; down: number }>();
 
+export function clearSubscriptionUsageMonotonic(user: Pick<UserRow, "id" | "sub_token">): void {
+  const key = String(user.sub_token ?? "").trim() || String(user.id);
+  monotonicUsageByToken.delete(key);
+}
+
 /**
  * Заголовки подписки (v2rayN, v2RayTun, Clash-семейство и др.):
  * - subscription-userinfo — `upload=…; download=…; total=…; expire=…` (пробел после `;`, expire в unix **секундах**).
