@@ -472,6 +472,7 @@ function buildManagedInbound(clientUuids: string[], vlessPort: number): Record<s
     id,
     email: id,
     level: 0,
+    flow: "xtls-rprx-vision",
   }));
   const sni = (process.env.TZADMIN_REALITY_SNI ?? "www.oracle.com").trim() || "www.oracle.com";
   const sid = (process.env.TZADMIN_REALITY_SID ?? randomRealityShortId()).trim() || randomRealityShortId();
@@ -707,9 +708,11 @@ export async function deployOrSyncVless(
               const managedPort = chooseManagedPort(inbounds as Record<string, unknown>[], opts.vlessPort);
               const rp = realityFromInboundOrNew(ib);
               const managed = buildManagedInbound(clientUuids, managedPort);
+              const defaultFlow = defaultClientFlowForInbound(managed, prevList) || "xtls-rprx-vision";
+              const forceFlow = shouldForceClientFlowForInbound(managed);
               managed.settings = {
                 ...(managed.settings as Record<string, unknown>),
-                clients: buildManagedClients(prevList, clientUuids, "", false),
+                clients: buildManagedClients(prevList, clientUuids, defaultFlow, forceFlow),
               };
               managed.streamSettings = {
                 network: "tcp",
