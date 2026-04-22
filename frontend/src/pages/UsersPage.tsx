@@ -7,6 +7,7 @@ import {
   notifyUserExpiring,
   patchUser,
   pushAllUserClients,
+  resetUserTraffic,
   syncUserStatsFromServers,
   type CreateUserPayload,
   type ServerDto,
@@ -101,6 +102,16 @@ function IconBell(p: SVGProps<SVGSVGElement>) {
   );
 }
 
+function IconResetTraffic(p: SVGProps<SVGSVGElement>) {
+  return (
+    <svg width={18} height={18} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden {...p}>
+      <path d="M3 12a9 9 0 1 0 3-6.7" />
+      <path d="M3 4v5h5" />
+      <path d="M9 12h6" />
+    </svg>
+  );
+}
+
 type UserModalState = { kind: "closed" } | { kind: "create" } | { kind: "edit"; user: UserDto };
 
 export default function UsersPage({ onLogout }: { onLogout: () => void }) {
@@ -115,9 +126,11 @@ export default function UsersPage({ onLogout }: { onLogout: () => void }) {
   const [deleteBusyId, setDeleteBusyId] = useState<number | null>(null);
   const [copyBusyId, setCopyBusyId] = useState<number | null>(null);
   const [notifyBusyId, setNotifyBusyId] = useState<number | null>(null);
+  const [resetBusyId, setResetBusyId] = useState<number | null>(null);
   const [syncBusy, setSyncBusy] = useState(false);
 
-  const tableLocked = refreshing || deleteBusyId !== null || notifyBusyId !== null || syncBusy;
+  const tableLocked =
+    refreshing || deleteBusyId !== null || notifyBusyId !== null || resetBusyId !== null || syncBusy;
 
   const refresh = useCallback(async () => {
     setRefreshing(true);
@@ -306,6 +319,31 @@ export default function UsersPage({ onLogout }: { onLogout: () => void }) {
                             onClick={() => void onPushAll()}
                           >
                             <IconSync />
+                          </button>
+                          <button
+                            type="button"
+                            className="ud-tool"
+                            title="Обнулить трафик"
+                            aria-label="Обнулить трафик"
+                            disabled={resetBusyId === u.id || tableLocked}
+                            onClick={() => {
+                              if (!confirm(`Обнулить трафик у «${u.name}»?`)) return;
+                              void (async () => {
+                                setResetBusyId(u.id);
+                                setMsg(null);
+                                try {
+                                  await resetUserTraffic(u.id);
+                                  setMsg({ type: "ok", text: `Трафик «${u.name}» обнулён.` });
+                                  await refresh();
+                                } catch (err) {
+                                  setMsg({ type: "err", text: String(err) });
+                                } finally {
+                                  setResetBusyId(null);
+                                }
+                              })();
+                            }}
+                          >
+                            {resetBusyId === u.id ? <Spinner /> : <IconResetTraffic />}
                           </button>
                           <button
                             type="button"

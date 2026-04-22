@@ -717,6 +717,30 @@ export function updateUserRow(id: number, patch: Partial<CreateUserInput>): User
         patch.subscription_server_count !== undefined
           ? Math.max(0, Math.floor(Number(patch.subscription_server_count) || 0))
           : cur.subscription_server_count,
+      online_snapshot:
+        patch.online_snapshot !== undefined
+          ? patch.online_snapshot === 1
+            ? 1
+            : 0
+          : cur.online_snapshot,
+      stats_synced_at:
+        patch.stats_synced_at !== undefined
+          ? Number.isFinite(Number(patch.stats_synced_at))
+            ? Math.max(0, Math.floor(Number(patch.stats_synced_at)))
+            : cur.stats_synced_at
+          : cur.stats_synced_at,
+      stats_raw_up:
+        patch.stats_raw_up !== undefined
+          ? Number.isFinite(Number(patch.stats_raw_up))
+            ? Math.max(-1, Math.floor(Number(patch.stats_raw_up)))
+            : cur.stats_raw_up
+          : cur.stats_raw_up,
+      stats_raw_down:
+        patch.stats_raw_down !== undefined
+          ? Number.isFinite(Number(patch.stats_raw_down))
+            ? Math.max(-1, Math.floor(Number(patch.stats_raw_down)))
+            : cur.stats_raw_down
+          : cur.stats_raw_down,
       traffic_notify_state:
         patch.traffic_notify_state !== undefined
           ? patch.traffic_notify_state === "low30" || patch.traffic_notify_state === "empty"

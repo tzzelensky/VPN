@@ -21,7 +21,7 @@ import { subscriptionVlessLinksForUser } from "../subscriptionLinks.js";
 import { parseXuiInboundImport } from "../xuiImport.js";
 import { generateX25519RealityKeyPair } from "../realityKeygen.js";
 import { sendExpiryRenewalReminder } from "../telegram/expiryNotify.js";
-import { pullTrafficFromAllDeployedServers } from "../xrayStatsPull.js";
+import { peekUserTrafficFromServers, pullTrafficFromAllDeployedServers } from "../xrayStatsPull.js";
 import { refreshMissingSubscriptionHintsIfDue } from "../subscriptionHintsRefresh.js";
 
 const router = Router();
@@ -294,6 +294,38 @@ router.post("/:id(\\d+)/notify-expiry", async (req, res) => {
     }
     res.status(502).json({ error: msg });
   }
+});
+
+router.post("/:id(\\d+)/reset-traffic", async (req, res) => {
+  const id = Number(req.params.id);
+  const u = getUser(id);
+  if (!u) {
+    res.status(404).json({ error: "not_found" });
+    return;
+  }
+  let rawUp = Number.isFinite(Number(u.stats_raw_up)) ? Math.max(0, Math.floor(Number(u.stats_raw_up))) : 0;
+  let rawDown = Number.isFinite(Number(u.stats_raw_down)) ? Math.max(0, Math.floor(Number(u.stats_raw_down))) : 0;
+  try {
+    const agg = await peekUserTrafficFromServers(u);
+    rawUp = Math.max(0, Math.floor(Number(agg.up) || 0));
+    rawDown = Math.max(0, Math.floor(Number(agg.down) || 0));
+  } catch {
+    /* узлы недоступны — используем сохранённый baseline из БД */
+  }
+  const next = updateUserRow(id, {
+    traffic_up: 0,
+    traffic_down: 0,
+    online_snapshot: 0,
+    stats_synced_at: Date.now(),
+    stats_raw_up: rawUp,
+    stats_raw_down: rawDown,
+    traffic_notify_state: "",
+  });
+  if (!next) {
+    res.status(404).json({ error: "not_found" });
+    return;
+  }
+  res.json({ ok: true, user: userDto(next) });
 });
 
 router.get("/:id(\\d+)/subscription", (req, res) => {

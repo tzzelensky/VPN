@@ -321,6 +321,16 @@ export async function notifyUserExpiring(
   return handle(res);
 }
 
+export async function resetUserTraffic(id: number): Promise<{ ok: boolean; user: UserDto }> {
+  const res = await fetch(`/api/users/${id}/reset-traffic`, {
+    method: "POST",
+    credentials: "include",
+    headers: jsonHeaders,
+    body: JSON.stringify({}),
+  });
+  return handle(res);
+}
+
 export type SubscriptionShopPlanDto = {
   id: number;
   title: string;
