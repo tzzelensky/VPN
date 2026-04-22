@@ -17,6 +17,13 @@ export const payReminderInline = {
   inline_keyboard: [[{ text: "Оплатить", callback_data: "pay" }]],
 };
 
+export const buyGbReminderInline = {
+  inline_keyboard: [
+    [{ text: "Докупить ГБ", callback_data: "buygb" }],
+    [{ text: "« В меню", callback_data: "home" }],
+  ],
+};
+
 export function pickSubscriptionKeyboard(userIds: number[]) {
   const rows: { text: string; callback_data: string }[][] = [];
   for (const id of userIds) {

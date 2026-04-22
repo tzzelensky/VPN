@@ -18,6 +18,7 @@ import {
   isTelegramWebhookEnabled,
 } from "./telegram/env.js";
 import { startTelegramLongPolling } from "./telegram/polling.js";
+import { startAutoTrafficNotifyLoop } from "./telegram/trafficNotify.js";
 
 initDb();
 
@@ -121,5 +122,8 @@ app.listen(PORT, "0.0.0.0", () => {
     void startTelegramLongPolling().catch((e) =>
       console.error("[telegram] polling crashed:", e instanceof Error ? e.message : e),
     );
+  }
+  if (getTelegramBotToken()) {
+    startAutoTrafficNotifyLoop();
   }
 });

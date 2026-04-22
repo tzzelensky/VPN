@@ -40,6 +40,8 @@ export type CreateUserInput = {
   /** Последний «сырой» снимок счётчиков Xray (для корректного инкремента после рестартов). */
   stats_raw_up?: number;
   stats_raw_down?: number;
+  /** Антиспам-состояние авто-уведомлений о трафике в Telegram. */
+  traffic_notify_state?: "" | "low30" | "empty";
   /** legacy = старый plain/tls; reality = использовать Reality-профиль в ссылках. */
   connection_profile?: "legacy" | "reality";
 };
@@ -72,6 +74,8 @@ export type UserRow = {
   /** Последний «сырой» снимок uplink/downlink из Xray; -1 = ещё не инициализировано. */
   stats_raw_up: number;
   stats_raw_down: number;
+  /** Антиспам-состояние авто-уведомлений о трафике в Telegram. */
+  traffic_notify_state: "" | "low30" | "empty";
   connection_profile: "legacy" | "reality";
   created_at: string;
   updated_at: string;
@@ -361,6 +365,8 @@ function normalizeUser(u: UserRow): UserRow {
     stats_raw_down: Number.isFinite(Number(u.stats_raw_down))
       ? Math.max(-1, Math.floor(Number(u.stats_raw_down)))
       : -1,
+    traffic_notify_state:
+      u.traffic_notify_state === "low30" || u.traffic_notify_state === "empty" ? u.traffic_notify_state : "",
     connection_profile: mode === "reality" ? "reality" : "legacy",
     created_at: u.created_at ?? new Date().toISOString(),
     updated_at: u.updated_at ?? u.created_at ?? new Date().toISOString(),
@@ -662,6 +668,7 @@ export function createUser(input: CreateUserInput = {}): UserRow {
       stats_synced_at: 0,
       stats_raw_up: -1,
       stats_raw_down: -1,
+      traffic_notify_state: "",
       connection_profile,
       created_at: now,
       updated_at: now,
@@ -710,6 +717,12 @@ export function updateUserRow(id: number, patch: Partial<CreateUserInput>): User
         patch.subscription_server_count !== undefined
           ? Math.max(0, Math.floor(Number(patch.subscription_server_count) || 0))
           : cur.subscription_server_count,
+      traffic_notify_state:
+        patch.traffic_notify_state !== undefined
+          ? patch.traffic_notify_state === "low30" || patch.traffic_notify_state === "empty"
+            ? patch.traffic_notify_state
+            : ""
+          : cur.traffic_notify_state,
       connection_profile:
         patch.connection_profile !== undefined
           ? String(patch.connection_profile).toLowerCase() === "reality"
