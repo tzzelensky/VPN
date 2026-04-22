@@ -71,9 +71,16 @@ export function buildVlessUriForUser(
   const spx = pickStr(server?.sub_reality_spx ?? "", user.reality_spx) || "/";
 
   const secKnown = srvSec === "reality" || srvSec === "tls" || srvSec === "none";
-  // Никогда не форсируем Reality на сервере, который явно помечен как none/tls.
-  // Fallback с user.reality_* допускается только когда тип безопасности сервера ещё неизвестен.
-  const allowUserRealityFallback = !secKnown;
+  const profileWantsReality = (user.connection_profile ?? "legacy") === "reality";
+  const userRealityPort =
+    user.remote_port != null && user.remote_port > 0 ? Number(user.remote_port) : 0;
+  const serverPort = Number(hintedPort) || Number(serverVlessPort) || 0;
+  // Явный opt-in: для профиля reality разрешаем fallback только на узле,
+  // чей порт совпадает с remote_port пользователя.
+  const allowProfileRealityOnThisServer =
+    profileWantsReality && userRealityPort > 0 && serverPort > 0 && userRealityPort === serverPort;
+  // На серверах с известным security=none/tls не форсируем Reality, кроме явного opt-in выше.
+  const allowUserRealityFallback = !secKnown || allowProfileRealityOnThisServer;
   const hasReality =
     (srvSec === "reality" || (allowUserRealityFallback && Boolean(pbk))) &&
     Boolean(sni) &&
