@@ -128,7 +128,7 @@ export async function sendVpnPlanPicker(chatId: number, tgUserId: number): Promi
   }
   await sendTelegramHtml(
     chatId,
-    "<b>Выберите нужную подписку</b>\n\nТарифы из настроек магазина:",
+    "<b>Выберите нужную подписку</b>\n\nТарифы магазина:",
     vpnPlansKeyboard(),
   );
 }
