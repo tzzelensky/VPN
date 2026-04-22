@@ -1,12 +1,14 @@
 import { Client } from "ssh2";
 import { decryptSecret } from "./crypto.js";
 import {
+  deriveRealityPublicKeyFromPrivateLocal,
   ensureRealityPublicKeyOnHintsFromConfig,
   extractVlessLinkHintsFromConfig,
   streamSettingsOfInbound,
   type ServerLinkHints,
 } from "./vlessLinkHints.js";
 import path from "node:path";
+import { generateX25519RealityKeyPair, randomRealityShortId } from "./realityKeygen.js";
 
 export type SshConfig = {
   host: string;
@@ -471,6 +473,9 @@ function buildManagedInbound(clientUuids: string[], vlessPort: number): Record<s
     email: id,
     level: 0,
   }));
+  const sni = (process.env.TZADMIN_REALITY_SNI ?? "www.oracle.com").trim() || "www.oracle.com";
+  const sid = (process.env.TZADMIN_REALITY_SID ?? randomRealityShortId()).trim() || randomRealityShortId();
+  const kp = generateX25519RealityKeyPair();
   return {
     listen: "0.0.0.0",
     port: vlessPort,
@@ -481,10 +486,58 @@ function buildManagedInbound(clientUuids: string[], vlessPort: number): Record<s
     },
     streamSettings: {
       network: "tcp",
-      security: "none",
+      security: "reality",
+      realitySettings: {
+        show: false,
+        dest: `${sni}:443`,
+        xver: 0,
+        serverNames: [sni],
+        privateKey: kp.privateKey,
+        publicKey: kp.publicKey,
+        shortIds: [sid],
+        fingerprint: "chrome",
+        spiderX: "/",
+      },
     },
     tag: TZADMIN_VLESS_TAG,
   };
+}
+
+function realityFromInboundOrNew(ib?: Record<string, unknown>): {
+  sni: string;
+  sid: string;
+  privateKey: string;
+  publicKey: string;
+  fingerprint: string;
+  spiderX: string;
+} {
+  const sniDefault = (process.env.TZADMIN_REALITY_SNI ?? "www.oracle.com").trim() || "www.oracle.com";
+  const sidDefault = (process.env.TZADMIN_REALITY_SID ?? randomRealityShortId()).trim() || randomRealityShortId();
+  const ss = ib ? streamSettingsOfInbound(ib) : {};
+  const rs = ((ss.realitySettings as Record<string, unknown> | undefined) ?? {}) as Record<string, unknown>;
+  const serverNames = Array.isArray(rs.serverNames) ? rs.serverNames : [];
+  const shortIds = Array.isArray(rs.shortIds) ? rs.shortIds : [];
+  const sni =
+    (typeof rs.serverName === "string" && rs.serverName.trim()) ||
+    (typeof serverNames[0] === "string" && String(serverNames[0]).trim()) ||
+    sniDefault;
+  const sid =
+    (typeof rs.shortId === "string" && rs.shortId.trim()) ||
+    (typeof shortIds[0] === "string" && String(shortIds[0]).trim()) ||
+    sidDefault;
+  const priv = typeof rs.privateKey === "string" ? rs.privateKey.trim() : "";
+  let pub = typeof rs.publicKey === "string" ? rs.publicKey.trim() : "";
+  let privateKey = priv;
+  if (!privateKey) {
+    const kp = generateX25519RealityKeyPair();
+    privateKey = kp.privateKey;
+    pub = kp.publicKey;
+  }
+  if (!pub) pub = deriveRealityPublicKeyFromPrivateLocal(privateKey);
+  if (!pub) pub = generateX25519RealityKeyPair().publicKey;
+  const fingerprint = (typeof rs.fingerprint === "string" && rs.fingerprint.trim()) || "chrome";
+  const spiderX = (typeof rs.spiderX === "string" && rs.spiderX.trim()) || "/";
+  return { sni, sid, privateKey, publicKey: pub, fingerprint, spiderX };
 }
 
 function chooseManagedPort(inbounds: Record<string, unknown>[], preferredPort: number): number {
@@ -652,10 +705,26 @@ export async function deployOrSyncVless(
               const prevList = (settings.clients as Array<Record<string, unknown>>) ?? [];
               // Управляемый inbound панели держим простым (как «рабочий» узел): VLESS TCP security=none.
               const managedPort = chooseManagedPort(inbounds as Record<string, unknown>[], opts.vlessPort);
+              const rp = realityFromInboundOrNew(ib);
               const managed = buildManagedInbound(clientUuids, managedPort);
               managed.settings = {
                 ...(managed.settings as Record<string, unknown>),
                 clients: buildManagedClients(prevList, clientUuids, "", false),
+              };
+              managed.streamSettings = {
+                network: "tcp",
+                security: "reality",
+                realitySettings: {
+                  show: false,
+                  dest: `${rp.sni}:443`,
+                  xver: 0,
+                  serverNames: [rp.sni],
+                  privateKey: rp.privateKey,
+                  publicKey: rp.publicKey,
+                  shortIds: [rp.sid],
+                  fingerprint: rp.fingerprint,
+                  spiderX: rp.spiderX,
+                },
               };
               if (managedPort !== opts.vlessPort) {
                 log?.(
