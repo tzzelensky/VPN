@@ -21,6 +21,7 @@ import { subscriptionVlessLinksForUser } from "../subscriptionLinks.js";
 import { parseXuiInboundImport } from "../xuiImport.js";
 import { generateX25519RealityKeyPair } from "../realityKeygen.js";
 import { sendExpiryRenewalReminder } from "../telegram/expiryNotify.js";
+import { runAutoTrafficNotificationsOnce } from "../telegram/trafficNotify.js";
 import { peekUserTrafficFromServers, pullTrafficFromAllDeployedServers } from "../xrayStatsPull.js";
 import { refreshMissingSubscriptionHintsIfDue } from "../subscriptionHintsRefresh.js";
 
@@ -55,6 +56,8 @@ router.post("/push-all", async (_req, res) => {
 router.post("/sync-stats", async (_req, res) => {
   const t0 = Date.now();
   try {
+    const beforeUsers = listUsers();
+    const wasAllowed = new Map<number, boolean>(beforeUsers.map((u) => [u.id, userAllowedOnServers(u)]));
     const { byUuid, errors, warns } = await pullTrafficFromAllDeployedServers();
     const rows: Array<{
       vless_uuid: string;
@@ -75,6 +78,22 @@ router.post("/sync-stats", async (_req, res) => {
       }
     }
     const updated = applyUsersTrafficSnapshot(rows, Date.now());
+    const afterUsers = listUsers();
+    const accessChanged = afterUsers.some((u) => (wasAllowed.get(u.id) ?? false) !== userAllowedOnServers(u));
+    if (accessChanged) {
+      try {
+        // Если лимит исчерпан (или, наоборот, снова появился доступ), сразу синхронизируем UUID на узлы.
+        await pushClientListToAllDeployedServers();
+      } catch (e) {
+        warns.push(`push-after-sync: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
+    try {
+      // Не ждём фонового интервала: уведомляем о low/empty сразу после актуализации счётчиков.
+      await runAutoTrafficNotificationsOnce();
+    } catch (e) {
+      warns.push(`traffic-notify: ${e instanceof Error ? e.message : String(e)}`);
+    }
     res.json({
       ok: errors.length === 0,
       updated,
