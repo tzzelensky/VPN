@@ -674,6 +674,12 @@ export function updateUserRow(id: number, patch: Partial<CreateUserInput>): User
         patch.subscription_server_count !== undefined
           ? Math.max(0, Math.floor(Number(patch.subscription_server_count) || 0))
           : cur.subscription_server_count,
+      connection_profile:
+        patch.connection_profile !== undefined
+          ? String(patch.connection_profile).toLowerCase() === "reality"
+            ? "reality"
+            : "legacy"
+          : cur.connection_profile,
       updated_at: new Date().toISOString(),
     });
     store.users[i] = merged;
