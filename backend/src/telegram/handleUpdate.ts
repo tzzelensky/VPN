@@ -9,10 +9,12 @@ import {
   publicSubscriptionUrl,
 } from "./keyboards.js";
 import {
+  onGbTopUpPlanChosen,
   onAdminPaymentConfirm,
   onAdminPaymentReject,
   onPaymentProofPhoto,
   onVpnPlanChosen,
+  sendGbTopUpPlanPicker,
   sendVpnPlanPicker,
 } from "./paymentFlow.js";
 import type { PaymentPlanId } from "../db.js";
@@ -133,6 +135,12 @@ async function handleCallback(q: CallbackQuery): Promise<void> {
       return;
     }
 
+    if (data === "buygb") {
+      await answerCallbackQuery(q.id);
+      await sendGbTopUpPlanPicker(chatId, fromId);
+      return;
+    }
+
     if (data === "sub") {
       await answerCallbackQuery(q.id);
       if (linked.length === 0) {
@@ -166,6 +174,14 @@ async function handleCallback(q: CallbackQuery): Promise<void> {
       const planId = Number(pp[1]) as PaymentPlanId;
       await answerCallbackQuery(q.id);
       await onVpnPlanChosen(chatId, fromId, planId, q.from);
+      return;
+    }
+
+    const gp = /^gplan:([123])$/.exec(data);
+    if (gp) {
+      const planId = Number(gp[1]) as PaymentPlanId;
+      await answerCallbackQuery(q.id);
+      await onGbTopUpPlanChosen(chatId, fromId, planId, q.from);
       return;
     }
 

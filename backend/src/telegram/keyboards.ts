@@ -8,6 +8,7 @@ export const mainMenuInline = {
     [{ text: "Статистика по подписке", callback_data: "stats" }],
     [{ text: "Подписка", callback_data: "sub" }],
     [{ text: "Оплата подписки", callback_data: "pay" }],
+    [{ text: "Докупить ГБ", callback_data: "buygb" }],
   ],
 };
 

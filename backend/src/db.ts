@@ -83,6 +83,7 @@ export type PaymentSessionRow = {
   id: string;
   tg_chat_id: number;
   tg_user_id: number;
+  kind: "subscription" | "topup";
   plan_id: PaymentPlanId;
   created_at: string;
   status: "awaiting_proof" | "pending_admin";
@@ -100,12 +101,20 @@ export type SubscriptionShopPlanRow = {
   price_rub: number;
 };
 
+export type TopUpShopPlanRow = {
+  id: PaymentPlanId;
+  title: string;
+  add_gb: number;
+  price_rub: number;
+};
+
 /** Магазин в боте: цены, ссылка на оплату, отключение продажи новым клиентам. */
 export type SubscriptionShopConfig = {
   sales_disabled: boolean;
   /** Пусто — взять из TELEGRAM_PAYMENT_URL / дефолт. */
   payment_url: string;
   plans: SubscriptionShopPlanRow[];
+  topup_plans: TopUpShopPlanRow[];
 };
 
 export type ServerRow = {
@@ -159,6 +168,11 @@ function defaultSubscriptionShop(): SubscriptionShopConfig {
       { id: 2, title: "Трафик 250 ГБ/мес, 30 дней", total_gb: 250, days: 30, price_rub: 115 },
       { id: 3, title: "Трафик безлимит, 30 дней", total_gb: 0, days: 30, price_rub: 155 },
     ],
+    topup_plans: [
+      { id: 1, title: "Докупить 25 ГБ", add_gb: 25, price_rub: 35 },
+      { id: 2, title: "Докупить 60 ГБ", add_gb: 60, price_rub: 75 },
+      { id: 3, title: "Докупить 120 ГБ", add_gb: 120, price_rub: 140 },
+    ],
   };
 }
 
@@ -181,8 +195,11 @@ export function normalizeSubscriptionShop(raw: unknown): SubscriptionShopConfig 
   const sales_disabled = o.sales_disabled === true || o.sales_disabled === 1 || o.sales_disabled === "1";
   const payment_url = String(o.payment_url ?? "").trim();
   const plansIn = Array.isArray(o.plans) ? o.plans : [];
+  const topupIn = Array.isArray(o.topup_plans) ? o.topup_plans : [];
   const byId = new Map<PaymentPlanId, SubscriptionShopPlanRow>();
+  const topupById = new Map<PaymentPlanId, TopUpShopPlanRow>();
   for (const p of base.plans) byId.set(p.id, { ...p });
+  for (const p of base.topup_plans) topupById.set(p.id, { ...p });
   for (const rawPlan of plansIn) {
     if (!rawPlan || typeof rawPlan !== "object") continue;
     const pl = rawPlan as Record<string, unknown>;
@@ -201,10 +218,27 @@ export function normalizeSubscriptionShop(raw: unknown): SubscriptionShopConfig 
       price_rub: Number.isFinite(price_rub) ? price_rub : cur.price_rub,
     });
   }
+  for (const rawPlan of topupIn) {
+    if (!rawPlan || typeof rawPlan !== "object") continue;
+    const pl = rawPlan as Record<string, unknown>;
+    const id = Number(pl.id) as PaymentPlanId;
+    if (id !== 1 && id !== 2 && id !== 3) continue;
+    const cur = topupById.get(id)!;
+    const title = pl.title != null ? String(pl.title).trim() : cur.title;
+    const add_gb = pl.add_gb != null ? Math.max(1, Math.floor(Number(pl.add_gb))) : cur.add_gb;
+    const price_rub = pl.price_rub != null ? Math.max(0, Math.floor(Number(pl.price_rub))) : cur.price_rub;
+    topupById.set(id, {
+      id,
+      title: title || cur.title,
+      add_gb: Number.isFinite(add_gb) ? add_gb : cur.add_gb,
+      price_rub: Number.isFinite(price_rub) ? price_rub : cur.price_rub,
+    });
+  }
   return {
     sales_disabled,
     payment_url,
     plans: ([1, 2, 3] as const).map((id) => byId.get(id)!),
+    topup_plans: ([1, 2, 3] as const).map((id) => topupById.get(id)!),
   };
 }
 
@@ -218,10 +252,12 @@ function normalizePaymentSession(raw: unknown): PaymentSessionRow | null {
   const usr = Number(o.tg_user_id);
   if (!Number.isFinite(chat) || !Number.isFinite(usr)) return null;
   const st = o.status === "pending_admin" ? "pending_admin" : "awaiting_proof";
+  const kind = o.kind === "topup" ? "topup" : "subscription";
   return {
     id,
     tg_chat_id: chat,
     tg_user_id: usr,
+    kind,
     plan_id: plan as PaymentPlanId,
     created_at: String(o.created_at ?? new Date().toISOString()),
     status: st,
@@ -821,6 +857,7 @@ export function startPaymentAwaitingProof(
   tg_chat_id: number,
   tg_user_id: number,
   plan_id: PaymentPlanId,
+  kind: "subscription" | "topup" = "subscription",
   tgProfile?: { username?: string; first_name?: string },
 ): string {
   const id = randomBytes(8).toString("hex");
@@ -833,6 +870,7 @@ export function startPaymentAwaitingProof(
       id,
       tg_chat_id,
       tg_user_id,
+      kind,
       plan_id,
       created_at: new Date().toISOString(),
       status: "awaiting_proof",

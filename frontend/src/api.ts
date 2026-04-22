@@ -329,10 +329,18 @@ export type SubscriptionShopPlanDto = {
   price_rub: number;
 };
 
+export type TopUpShopPlanDto = {
+  id: number;
+  title: string;
+  add_gb: number;
+  price_rub: number;
+};
+
 export type SubscriptionShopDto = {
   sales_disabled: boolean;
   payment_url: string;
   plans: SubscriptionShopPlanDto[];
+  topup_plans: TopUpShopPlanDto[];
 };
 
 export async function loadSubscriptionShop(): Promise<SubscriptionShopDto> {

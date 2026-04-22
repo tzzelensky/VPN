@@ -4,6 +4,7 @@ import {
   saveSubscriptionShop,
   type SubscriptionShopDto,
   type SubscriptionShopPlanDto,
+  type TopUpShopPlanDto,
 } from "../api";
 import DashboardLayout from "../components/DashboardLayout";
 import Spinner from "../components/Spinner";
@@ -13,6 +14,7 @@ function cloneShop(s: SubscriptionShopDto): SubscriptionShopDto {
     sales_disabled: s.sales_disabled,
     payment_url: s.payment_url,
     plans: s.plans.map((p) => ({ ...p })),
+    topup_plans: s.topup_plans.map((p) => ({ ...p })),
   };
 }
 
@@ -45,6 +47,16 @@ export default function SubscriptionShopPage({ onLogout }: { onLogout: () => voi
       return {
         ...prev,
         plans: prev.plans.map((p) => (p.id === id ? { ...p, ...patch } : p)),
+      };
+    });
+  }
+
+  function updateTopUpPlan(id: number, patch: Partial<TopUpShopPlanDto>) {
+    setShop((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        topup_plans: prev.topup_plans.map((p) => (p.id === id ? { ...p, ...patch } : p)),
       };
     });
   }
@@ -164,6 +176,43 @@ export default function SubscriptionShopPage({ onLogout }: { onLogout: () => voi
                         inputMode="numeric"
                         value={p.price_rub}
                         onChange={(e) => updatePlan(p.id, { price_rub: Math.max(0, Math.floor(Number(e.target.value) || 0)) })}
+                      />
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+
+          <section className="panel">
+            <h2 style={{ fontSize: "1rem", marginTop: 0 }}>Докупить ГБ (кнопки 1, 2, 3 в боте)</h2>
+            <p className="sub" style={{ marginTop: 0 }}>
+              Эти пакеты используются в действии бота «Докупить ГБ». После подтверждения оплаты ГБ прибавляются к текущему
+              лимиту клиента.
+            </p>
+            <div className="shop-plans-grid">
+              {shop.topup_plans.map((p) => (
+                <div key={p.id} className="user-modal-card shop-plan-card">
+                  <h3 className="user-modal-section-title">Докупка #{p.id}</h3>
+                  <div className="user-form-grid">
+                    <div className="form-field form-field-span-2">
+                      <label>Название</label>
+                      <input value={p.title} onChange={(e) => updateTopUpPlan(p.id, { title: e.target.value })} />
+                    </div>
+                    <div className="form-field">
+                      <label>Добавить ГБ</label>
+                      <input
+                        inputMode="numeric"
+                        value={p.add_gb}
+                        onChange={(e) => updateTopUpPlan(p.id, { add_gb: Math.max(1, Math.floor(Number(e.target.value) || 1)) })}
+                      />
+                    </div>
+                    <div className="form-field">
+                      <label>Цена, ₽</label>
+                      <input
+                        inputMode="numeric"
+                        value={p.price_rub}
+                        onChange={(e) => updateTopUpPlan(p.id, { price_rub: Math.max(0, Math.floor(Number(e.target.value) || 0)) })}
                       />
                     </div>
                   </div>

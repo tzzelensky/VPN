@@ -13,6 +13,7 @@ import {
   type PaymentPlanId,
   type PaymentSessionRow,
   type SubscriptionShopPlanRow,
+  type TopUpShopPlanRow,
 } from "../db.js";
 import { pushClientListToAllDeployedServers } from "../userSync.js";
 import { answerCallbackQuery, sendTelegramHtml, sendTelegramPhoto } from "./api.js";
@@ -27,6 +28,12 @@ export type PlanRuntimeMeta = {
   priceRub: number;
 };
 
+export type TopUpPlanRuntimeMeta = {
+  title: string;
+  add_gb: number;
+  priceRub: number;
+};
+
 export function getPlanRuntimeMeta(planId: PaymentPlanId): PlanRuntimeMeta {
   const row = getSubscriptionShop().plans.find((p) => p.id === planId);
   if (!row) {
@@ -36,6 +43,18 @@ export function getPlanRuntimeMeta(planId: PaymentPlanId): PlanRuntimeMeta {
     title: row.title,
     total_gb: row.total_gb,
     days: row.days,
+    priceRub: row.price_rub,
+  };
+}
+
+export function getTopUpPlanRuntimeMeta(planId: PaymentPlanId): TopUpPlanRuntimeMeta {
+  const row = getSubscriptionShop().topup_plans.find((p) => p.id === planId);
+  if (!row) {
+    return { title: "Докупка", add_gb: 0, priceRub: 0 };
+  }
+  return {
+    title: row.title,
+    add_gb: row.add_gb,
     priceRub: row.price_rub,
   };
 }
@@ -53,9 +72,22 @@ function planPickerButtonLabel(p: SubscriptionShopPlanRow): string {
   return t;
 }
 
+function topupPickerButtonLabel(p: TopUpShopPlanRow): string {
+  let t = `${p.id} — +${p.add_gb} ГБ — ${p.price_rub} ₽`;
+  if (t.length > 58) t = `${t.slice(0, 55)}…`;
+  return t;
+}
+
 export function vpnPlansKeyboard() {
   const shop = getSubscriptionShop();
   const rows = shop.plans.map((p) => [{ text: planPickerButtonLabel(p), callback_data: `pplan:${p.id}` }]);
+  rows.push([{ text: "« Главное меню", callback_data: "home" }]);
+  return { inline_keyboard: rows };
+}
+
+export function gbTopUpPlansKeyboard() {
+  const shop = getSubscriptionShop();
+  const rows = shop.topup_plans.map((p) => [{ text: topupPickerButtonLabel(p), callback_data: `gplan:${p.id}` }]);
   rows.push([{ text: "« Главное меню", callback_data: "home" }]);
   return { inline_keyboard: rows };
 }
@@ -101,6 +133,23 @@ export async function sendVpnPlanPicker(chatId: number, tgUserId: number): Promi
   );
 }
 
+export async function sendGbTopUpPlanPicker(chatId: number, tgUserId: number): Promise<void> {
+  const linked = findUsersByTelegramChatId(tgUserId);
+  if (linked.length === 0) {
+    await sendTelegramHtml(
+      chatId,
+      "<b>Докупка ГБ недоступна.</b>\n\nСначала нужна привязанная подписка в панели. После привязки появится это действие.",
+      newUserKeyboard(getSubscriptionShop().sales_disabled),
+    );
+    return;
+  }
+  await sendTelegramHtml(
+    chatId,
+    "<b>Выберите пакет докупки</b>\n\nГБ добавятся к текущему лимиту после подтверждения оплаты:",
+    gbTopUpPlansKeyboard(),
+  );
+}
+
 type TgFromLite = { id: number; username?: string; first_name?: string };
 
 export async function onVpnPlanChosen(
@@ -121,7 +170,7 @@ export async function onVpnPlanChosen(
   }
   const meta = getPlanRuntimeMeta(planId);
   const payUrl = effectivePaymentUrl();
-  startPaymentAwaitingProof(chatId, tgUserId, planId, {
+  startPaymentAwaitingProof(chatId, tgUserId, planId, "subscription", {
     username: from?.username,
     first_name: from?.first_name,
   });
@@ -133,6 +182,38 @@ export async function onVpnPlanChosen(
     `В комментарии к переводу укажите <b>только номер тарифа</b>: <code>1</code>, <code>2</code> или <code>3</code> ` +
     `(как выбрали выше).\n\n` +
     `После оплаты пришлите в этот чат <b>скриншот или фото подтверждения перевода</b> — мы проверим и подключим или продлим доступ.`;
+  await sendTelegramHtml(chatId, body, backHomeRow);
+}
+
+export async function onGbTopUpPlanChosen(
+  chatId: number,
+  tgUserId: number,
+  planId: PaymentPlanId,
+  from?: TgFromLite,
+): Promise<void> {
+  const linked = findUsersByTelegramChatId(tgUserId);
+  if (linked.length === 0) {
+    await sendTelegramHtml(
+      chatId,
+      "<b>Докупка ГБ недоступна.</b> Нет привязанной подписки.",
+      newUserKeyboard(getSubscriptionShop().sales_disabled),
+    );
+    return;
+  }
+  const meta = getTopUpPlanRuntimeMeta(planId);
+  const payUrl = effectivePaymentUrl();
+  startPaymentAwaitingProof(chatId, tgUserId, planId, "topup", {
+    username: from?.username,
+    first_name: from?.first_name,
+  });
+  const linkEsc = escHtml(payUrl);
+  const body =
+    `<b>Выбрано:</b> ${escHtml(meta.title)}\n` +
+    `<b>Пополнение:</b> +${meta.add_gb} ГБ\n` +
+    `<b>Сумма к оплате:</b> ${meta.priceRub} ₽\n\n` +
+    `<b>Ссылка для оплаты:</b>\n<a href="${linkEsc}">${linkEsc}</a>\n\n` +
+    `В комментарии к переводу укажите <b>номер пакета докупки</b>: <code>1</code>, <code>2</code> или <code>3</code>.\n\n` +
+    `После оплаты пришлите в этот чат <b>скриншот или фото подтверждения перевода</b> — администратор проверит и начислит ГБ.`;
   await sendTelegramHtml(chatId, body, backHomeRow);
 }
 
@@ -159,7 +240,9 @@ export async function onPaymentProofPhoto(msg: PhotoMsg): Promise<boolean> {
   const photos = msg.photo;
   if (!photos?.length) return false;
   const fileId = photos[photos.length - 1]!.file_id;
-  const meta = getPlanRuntimeMeta(sess.plan_id);
+  const subMeta = getPlanRuntimeMeta(sess.plan_id);
+  const topupMeta = getTopUpPlanRuntimeMeta(sess.plan_id);
+  const isTopUp = sess.kind === "topup";
   const admins = getTelegramPaymentNotifyChatIds();
   const linked = findUsersByTelegramChatId(chatId);
   const payerTag =
@@ -168,8 +251,11 @@ export async function onPaymentProofPhoto(msg: PhotoMsg): Promise<boolean> {
       : sess.tg_first_name && String(sess.tg_first_name).trim()
         ? escHtml(String(sess.tg_first_name).trim())
         : "";
-  const linkedBrief =
-    linked.length === 0
+  const linkedBrief = isTopUp
+    ? linked.length === 0
+      ? "<b>Внимание:</b> для докупки нужен привязанный клиент в панели. Эту заявку нужно отклонить."
+      : `Привязано клиентов в панели: <b>${linked.length}</b> (id: ${linked.map((u) => u.id).join(", ")}).`
+    : linked.length === 0
       ? "<b>Новый клиент:</b> в панели записи с этим Telegram id нет — при «Подтвердить» будет <b>создан</b> клиент с оплаченным тарифом."
       : `Привязано клиентов в панели: <b>${linked.length}</b> (id: ${linked.map((u) => u.id).join(", ")}).`;
 
@@ -177,8 +263,10 @@ export async function onPaymentProofPhoto(msg: PhotoMsg): Promise<boolean> {
     `<b>Чек на оплату VPN</b>\n` +
     `Сессия: <code>${escHtml(sess.id)}</code>\n` +
     (payerTag ? `Плательщик: <b>${payerTag}</b> (chat <code>${sess.tg_chat_id}</code>)\n` : `Чат: <code>${sess.tg_chat_id}</code>\n`) +
-    `Тариф: <b>${sess.plan_id}</b> — ${escHtml(meta.title)}\n` +
-    `Сумма: <b>${meta.priceRub} ₽</b>\n\n` +
+    (isTopUp
+      ? `Пакет докупки: <b>${sess.plan_id}</b> — ${escHtml(topupMeta.title)} (+${topupMeta.add_gb} ГБ)\n`
+      : `Тариф: <b>${sess.plan_id}</b> — ${escHtml(subMeta.title)}\n`) +
+    `Сумма: <b>${isTopUp ? topupMeta.priceRub : subMeta.priceRub} ₽</b>\n\n` +
     `${linkedBrief}`;
 
   let anyOk = false;
@@ -223,22 +311,24 @@ export async function onAdminPaymentConfirm(
     await answerCallbackQuery(callbackQueryId, { text: "Заявка не найдена или уже обработана.", show_alert: true });
     return;
   }
-  const meta = getPlanRuntimeMeta(sess.plan_id);
+  const isTopUp = sess.kind === "topup";
+  const subMeta = getPlanRuntimeMeta(sess.plan_id);
+  const topupMeta = getTopUpPlanRuntimeMeta(sess.plan_id);
   let linked = findUsersByTelegramChatId(sess.tg_chat_id);
   let autoCreated = false;
-  if (linked.length === 0) {
+  if (!isTopUp && linked.length === 0) {
     const tgKey = String(sess.tg_chat_id).trim();
-    const expiryMs = snapExpiryTimeToNoonLocal(Date.now() + meta.days * DAY_MS);
+    const expiryMs = snapExpiryTimeToNoonLocal(Date.now() + subMeta.days * DAY_MS);
     const displayName = clientDisplayNameFromSession(sess);
     try {
       createUser({
         name: displayName,
         email: `${sess.tg_chat_id}@tg.vpn`,
         tg_id: tgKey,
-        total_gb: meta.total_gb,
+        total_gb: subMeta.total_gb,
         expiry_time: expiryMs,
         enable: 1,
-        comment: `Оплата в боте, тариф #${sess.plan_id}: ${meta.title}`,
+        comment: `Оплата в боте, тариф #${sess.plan_id}: ${subMeta.title}`,
       });
       autoCreated = true;
       linked = findUsersByTelegramChatId(sess.tg_chat_id);
@@ -252,15 +342,28 @@ export async function onAdminPaymentConfirm(
       return;
     }
   }
+  if (isTopUp && linked.length === 0) {
+    await answerCallbackQuery(callbackQueryId, {
+      text: "Нет привязанной подписки для начисления.",
+      show_alert: true,
+    });
+    deletePaymentSession(sessionId);
+    return;
+  }
   await answerCallbackQuery(callbackQueryId, {
-    text: autoCreated ? "Клиент создан, подписка активирована." : "Подписка продлена.",
+    text: isTopUp ? "ГБ начислены." : autoCreated ? "Клиент создан, подписка активирована." : "Подписка продлена.",
   });
-  if (!autoCreated) {
+  if (isTopUp) {
+    for (const row of linked) {
+      if (row.total_gb <= 0) continue;
+      updateUserRow(row.id, { total_gb: row.total_gb + topupMeta.add_gb });
+    }
+  } else if (!autoCreated) {
     const now = Date.now();
     for (const row of linked) {
       const base = Math.max(now, row.expiry_time > 0 ? row.expiry_time : 0);
-      const newExpiry = snapExpiryTimeToNoonLocal(base + meta.days * DAY_MS);
-      updateUserRow(row.id, { total_gb: meta.total_gb, expiry_time: newExpiry });
+      const newExpiry = snapExpiryTimeToNoonLocal(base + subMeta.days * DAY_MS);
+      updateUserRow(row.id, { total_gb: subMeta.total_gb, expiry_time: newExpiry });
     }
   }
   try {
@@ -269,21 +372,26 @@ export async function onAdminPaymentConfirm(
     console.error("[telegram] push after payment confirm:", e);
   }
   deletePaymentSession(sessionId);
-  const trafficNote = meta.total_gb > 0 ? `${meta.total_gb} ГБ/мес` : "безлимит по трафику";
+  const trafficNote = subMeta.total_gb > 0 ? `${subMeta.total_gb} ГБ/мес` : "безлимит по трафику";
   const primary = linked[0]!;
   const subUrl = publicSubscriptionUrl(primary.sub_token);
   const subCode = escUrlForCode(subUrl);
-  const body = autoCreated
+  const body = isTopUp
+    ? `<b>Оплата подтверждена.</b>\n\n` +
+      `Начислено: <b>+${topupMeta.add_gb} ГБ</b>\n` +
+      `Пакет: ${escHtml(topupMeta.title)}\n\n` +
+      `ГБ добавлены к вашему текущему балансу. Актуальные данные — в разделе «Статистика по подписке».`
+    : autoCreated
     ? `<b>Оплата подтверждена — доступ открыт.</b>\n\n` +
-      `Тариф: ${escHtml(meta.title)}\n` +
+      `Тариф: ${escHtml(subMeta.title)}\n` +
       `Лимит трафика: <b>${escHtml(trafficNote)}</b>\n` +
-      `Срок: <b>${meta.days}</b> суток с момента активации (до полудня дня окончания).\n\n` +
+      `Срок: <b>${subMeta.days}</b> суток с момента активации (до полудня дня окончания).\n\n` +
       `<b>Ссылка на подписку (добавьте в клиент):</b>\n\n<code>${subCode}</code>\n\n` +
       `Позже её можно скопировать в меню «Подписка». Статистика — в «Статистика по подписке».`
     : `<b>Оплата подтверждена.</b>\n\n` +
-      `Тариф: ${escHtml(meta.title)}\n` +
+      `Тариф: ${escHtml(subMeta.title)}\n` +
       `Лимит трафика: <b>${escHtml(trafficNote)}</b>\n` +
-      `Срок продлён на <b>${meta.days}</b> суток от вашего текущего окончания (если подписка ещё действовала — срок суммируется).\n` +
+      `Срок продлён на <b>${subMeta.days}</b> суток от вашего текущего окончания (если подписка ещё действовала — срок суммируется).\n` +
       `Актуальные дата и трафик — в разделе «Статистика по подписке».`;
   await sendTelegramHtml(sess.tg_chat_id, body, replyKeyboardForPayer(sess.tg_chat_id));
 }
@@ -318,7 +426,7 @@ export async function onAdminPaymentReject(
   deletePaymentSession(sessionId);
   await sendTelegramHtml(
     sess.tg_chat_id,
-    "<b>Платёж не подтверждён.</b>\n\nЕсли вы уже оплатили, напишите администратору и приложите чек ещё раз через «Оплата подписки» или «Купить подписку».",
+    "<b>Платёж не подтверждён.</b>\n\nЕсли вы уже оплатили, напишите администратору и приложите чек ещё раз через «Оплата подписки», «Докупить ГБ» или «Купить подписку».",
     replyKeyboardForPayer(sess.tg_chat_id),
   );
 }

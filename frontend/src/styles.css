@@ -1253,7 +1253,8 @@ th {
 }
 
 .user-modal-footer {
-  margin-top: 0;
+  margin: 0.5rem 0 0;
+  padding: 0.75rem 1rem 1rem;
 }
 
 .import-json-area {
