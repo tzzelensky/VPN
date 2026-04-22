@@ -58,7 +58,9 @@ export function buildVlessUriForUser(
   const enc = encodeURIComponent(label || "vpn");
   const hintedPort =
     server && Number(server.sub_port) > 0 ? Number(server.sub_port) : Number(serverVlessPort);
-  const port = user.remote_port != null && user.remote_port > 0 ? user.remote_port : hintedPort;
+  // В подписке по нескольким серверам нельзя глобально переопределять порт пользователя:
+  // иначе все узлы уйдут на один remote_port.
+  const port = hintedPort;
 
   const srvSec = (server?.sub_security ?? "").trim().toLowerCase();
   const srvNet = (server?.sub_network ?? "").trim().toLowerCase();
@@ -72,9 +74,13 @@ export function buildVlessUriForUser(
 
   const secKnown = srvSec === "reality" || srvSec === "tls" || srvSec === "none";
   const profileWantsReality = (user.connection_profile ?? "legacy") === "reality";
-  // Для явного профиля reality разрешаем fallback на user.reality_* даже при server security=none/tls.
-  // Это не затронет существующих legacy-пользователей.
-  const allowUserRealityFallback = !secKnown || profileWantsReality;
+  const userRealityPort = user.remote_port != null && user.remote_port > 0 ? Number(user.remote_port) : 0;
+  const serverPort = Number(hintedPort) || Number(serverVlessPort) || 0;
+  // Явный профайл reality применяем только к целевому порту (обычно NL Reality inbound),
+  // чтобы не ломать остальные узлы в подписке.
+  const allowProfileRealityOnThisServer =
+    profileWantsReality && (userRealityPort <= 0 || (serverPort > 0 && userRealityPort === serverPort));
+  const allowUserRealityFallback = !secKnown || allowProfileRealityOnThisServer;
   const hasReality =
     (srvSec === "reality" || (allowUserRealityFallback && Boolean(pbk))) &&
     Boolean(sni) &&
