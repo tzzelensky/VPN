@@ -34,16 +34,20 @@ function remainGbText(u: UserRow): string {
 }
 
 async function sendLowTrafficReminder(u: UserRow, chatId: number): Promise<void> {
+  const subLabel = `#${u.id} ${u.name}`;
   const body =
     `<b>Внимание: трафик почти закончился.</b>\n\n` +
+    `Подписка: <b>${subLabel}</b>\n` +
     `У вас осталось примерно <b>${remainGbText(u)}</b> (меньше 30 ГБ).\n\n` +
     `Чтобы не потерять доступ, докупите пакет трафика.`;
   await sendTelegramHtml(chatId, body, buyGbReminderInline);
 }
 
 async function sendEmptyTrafficReminder(u: UserRow, chatId: number): Promise<void> {
+  const subLabel = `#${u.id} ${u.name}`;
   const body =
     `<b>Трафик закончился.</b>\n\n` +
+    `Подписка: <b>${subLabel}</b>\n` +
     `Лимит по подписке исчерпан, доступ может быть ограничен.\n\n` +
     `Нажмите «Докупить ГБ», чтобы сразу пополнить баланс.`;
   await sendTelegramHtml(chatId, body, buyGbReminderInline);

@@ -106,6 +106,13 @@ export function vpnPlansKeyboard(targetUserId?: number) {
   return { inline_keyboard: rows };
 }
 
+export function vpnPlansKeyboardForNew() {
+  const shop = getSubscriptionShop();
+  const rows = shop.plans.map((p) => [{ text: planPickerButtonLabel(p), callback_data: `pplannew:${p.id}` }]);
+  rows.push([{ text: "« Главное меню", callback_data: "home" }]);
+  return { inline_keyboard: rows };
+}
+
 export function gbTopUpPlansKeyboard(targetUserId?: number) {
   const shop = getSubscriptionShop();
   const rows = shop.topup_plans.map((p) => [
@@ -138,7 +145,12 @@ function replyKeyboardForPayer(tgUserId: number) {
 
 const DAY_MS = 86_400_000;
 
-export async function sendVpnPlanPicker(chatId: number, tgUserId: number, targetUserId?: number): Promise<void> {
+export async function sendVpnPlanPicker(
+  chatId: number,
+  tgUserId: number,
+  targetUserId?: number,
+  newSubscriptionName?: string,
+): Promise<void> {
   const linked = findUsersByTelegramChatId(tgUserId);
   const shop = getSubscriptionShop();
   if (linked.length === 0 && shop.sales_disabled) {
@@ -146,6 +158,15 @@ export async function sendVpnPlanPicker(chatId: number, tgUserId: number, target
       chatId,
       "<b>Новые подписки временно недоступны.</b>\n\nОформление для новых клиентов отключено в настройках. После того как администратор привяжет ваш Telegram к аккаунту в панели, здесь можно будет продлить подписку.",
       newUserKeyboard(true),
+    );
+    return;
+  }
+  const newName = String(newSubscriptionName ?? "").trim();
+  if (newName) {
+    await sendTelegramHtml(
+      chatId,
+      `<b>Новая подписка:</b> ${escHtml(newName)}\n\nТарифы магазина:`,
+      vpnPlansKeyboardForNew(),
     );
     return;
   }
@@ -188,6 +209,7 @@ export async function onVpnPlanChosen(
   tgUserId: number,
   planId: PaymentPlanId,
   targetUserId?: number,
+  newSubscriptionName?: string,
   from?: TgFromLite,
 ): Promise<void> {
   const linked = findUsersByTelegramChatId(tgUserId);
@@ -201,20 +223,25 @@ export async function onVpnPlanChosen(
     return;
   }
   const target = resolveLinkedTarget(tgUserId, targetUserId);
-  if (linked.length > 1 && !target) {
+  const newName = String(newSubscriptionName ?? "").trim();
+  if (!newName && linked.length > 1 && !target) {
     await sendTelegramHtml(chatId, "<b>Выберите подписку, которую нужно продлить.</b>", backHomeRow);
     return;
   }
   const meta = getPlanRuntimeMeta(planId);
   const payUrl = effectivePaymentUrl();
-  startPaymentAwaitingProof(chatId, tgUserId, planId, "subscription", target?.id, {
+  startPaymentAwaitingProof(chatId, tgUserId, planId, "subscription", target?.id, newName || undefined, {
     username: from?.username,
     first_name: from?.first_name,
   });
   const linkEsc = escHtml(payUrl);
   const body =
     `<b>Выбрано:</b> ${escHtml(meta.title)}\n` +
-    (target ? `<b>Подписка:</b> ${escHtml(userTargetTitle(target))}\n` : "") +
+    (newName
+      ? `<b>Новая подписка:</b> ${escHtml(newName)}\n`
+      : target
+        ? `<b>Подписка:</b> ${escHtml(userTargetTitle(target))}\n`
+        : "") +
     `<b>Сумма к оплате:</b> ${meta.priceRub} ₽\n\n` +
     `<b>Ссылка для оплаты:</b>\n<a href="${linkEsc}">${linkEsc}</a>\n\n` +
     `В комментарии к переводу укажите <b>только номер тарифа</b>: <code>1</code>, <code>2</code> или <code>3</code> ` +
@@ -246,7 +273,7 @@ export async function onGbTopUpPlanChosen(
   }
   const meta = getTopUpPlanRuntimeMeta(planId);
   const payUrl = effectivePaymentUrl();
-  startPaymentAwaitingProof(chatId, tgUserId, planId, "topup", target?.id, {
+  startPaymentAwaitingProof(chatId, tgUserId, planId, "topup", target?.id, undefined, {
     username: from?.username,
     first_name: from?.first_name,
   });
@@ -291,6 +318,7 @@ export async function onPaymentProofPhoto(msg: PhotoMsg): Promise<boolean> {
   const admins = getTelegramPaymentNotifyChatIds();
   const linked = findUsersByTelegramChatId(chatId);
   const target = sess.target_user_id ? getUser(sess.target_user_id) : undefined;
+  const newName = String(sess.new_subscription_name ?? "").trim();
   const payerTag =
     sess.tg_username && String(sess.tg_username).trim()
       ? `@${escHtml(String(sess.tg_username).replace(/^@/, ""))}`
@@ -305,6 +333,8 @@ export async function onPaymentProofPhoto(msg: PhotoMsg): Promise<boolean> {
         : `Привязано клиентов в панели: <b>${linked.length}</b> (id: ${linked.map((u) => u.id).join(", ")}).`
     : linked.length === 0
       ? "<b>Новый клиент:</b> в панели записи с этим Telegram id нет — при «Подтвердить» будет <b>создан</b> клиент с оплаченным тарифом."
+      : newName
+        ? `Будет создана новая подписка: <b>${escHtml(newName)}</b>.`
       : target
         ? `Выбрана подписка: <b>${escHtml(userTargetTitle(target))}</b>.`
         : `Привязано клиентов в панели: <b>${linked.length}</b> (id: ${linked.map((u) => u.id).join(", ")}).`;
@@ -367,10 +397,10 @@ export async function onAdminPaymentConfirm(
   let linked = findUsersByTelegramChatId(sess.tg_chat_id);
   let autoCreated = false;
   let autoCreatedUser: UserRow | undefined;
-  if (!isTopUp && linked.length === 0) {
+  if (!isTopUp && (linked.length === 0 || String(sess.new_subscription_name ?? "").trim())) {
     const tgKey = String(sess.tg_chat_id).trim();
     const expiryMs = snapExpiryTimeToNoonLocal(Date.now() + subMeta.days * DAY_MS);
-    const displayName = clientDisplayNameFromSession(sess);
+    const displayName = String(sess.new_subscription_name ?? "").trim() || clientDisplayNameFromSession(sess);
     try {
       autoCreatedUser = createUser({
         name: displayName,

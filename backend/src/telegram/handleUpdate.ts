@@ -1,4 +1,4 @@
-import { createUser, deleteUser, findUsersByTelegramChatId, getUser, getSubscriptionShop, listUsers, updateUserRow } from "../db.js";
+import { deleteUser, findUsersByTelegramChatId, getUser, getSubscriptionShop, listUsers, updateUserRow } from "../db.js";
 import { answerCallbackQuery, sendTelegramHtml, sendTelegramPhoto } from "./api.js";
 import { escHtml, formatStatsHtml } from "./format.js";
 import {
@@ -39,7 +39,7 @@ type CallbackQuery = {
 type Update = { update_id: number; message?: Message; callback_query?: CallbackQuery };
 
 const adminComposeTargetByChat = new Map<number, number>();
-const newSubscriptionNameByChat = new Map<number, number>();
+const newSubscriptionDraftByChat = new Map<number, { ownerId: number; name?: string }>();
 
 function isAdminTg(id: number): boolean {
   return getTelegramPaymentNotifyChatIds().includes(id);
@@ -128,9 +128,27 @@ function paySubscriptionPickerKeyboard(users: ReturnType<typeof linkedUsers>) {
       callback_data: `psel:${u.id}`,
     },
   ]);
+  rows.push([{ text: "🗑 Удалить подписку", callback_data: "pdel_menu" }]);
   rows.push([{ text: "➕ Создать новую подписку", callback_data: "pnew" }]);
   rows.push([{ text: "« В меню", callback_data: "home" }]);
   return { inline_keyboard: rows };
+}
+
+function payDeletePickerKeyboard(users: ReturnType<typeof linkedUsers>) {
+  const rows = users.map((u) => [{ text: `🗑 #${u.id} ${u.name}`.slice(0, 58), callback_data: `pdelq:${u.id}` }]);
+  rows.push([{ text: "« Назад", callback_data: "pay" }]);
+  return { inline_keyboard: rows };
+}
+
+function payDeleteConfirmKeyboard(userId: number) {
+  return {
+    inline_keyboard: [
+      [
+        { text: "🟥 Да, удалить", callback_data: `pdely:${userId}` },
+        { text: "Отмена", callback_data: "pdel_menu" },
+      ],
+    ],
+  };
 }
 
 const cancelNewSubscriptionNameInline = {
@@ -212,11 +230,11 @@ export async function handleTelegramUpdate(body: unknown): Promise<void> {
     return;
   }
 
-  const pendingNewNameOwner = newSubscriptionNameByChat.get(chatId);
-  if (pendingNewNameOwner && pendingNewNameOwner === from.id) {
+  const draft = newSubscriptionDraftByChat.get(chatId);
+  if (draft && draft.ownerId === from.id) {
     const name = text.trim();
     if (name.toLowerCase() === "отмена" || name.toLowerCase() === "/cancel") {
-      newSubscriptionNameByChat.delete(chatId);
+      newSubscriptionDraftByChat.delete(chatId);
       await sendTelegramHtml(chatId, "Создание новой подписки отменено.", mainMenuInline(isAdminTg(from.id)));
       return;
     }
@@ -236,30 +254,8 @@ export async function handleTelegramUpdate(body: unknown): Promise<void> {
       );
       return;
     }
-    try {
-      const user = createUser({
-        name,
-        email: `${from.id}-${Date.now()}@tg.vpn`,
-        tg_id: String(from.id),
-        enable: 1,
-        total_gb: 1,
-        expiry_time: Date.now() - 60_000,
-        comment: "Создано из бота: новая подписка",
-      });
-      newSubscriptionNameByChat.delete(chatId);
-      await sendTelegramHtml(
-        chatId,
-        `<b>Новая подписка создана:</b> #${user.id} ${escHtml(user.name)}\n\nТеперь выберите тариф для оплаты.`,
-        backHomeRow,
-      );
-      await sendVpnPlanPicker(chatId, from.id, user.id);
-    } catch (e) {
-      await sendTelegramHtml(
-        chatId,
-        `Не удалось создать подписку: ${escHtml(e instanceof Error ? e.message : String(e))}`,
-        backHomeRow,
-      );
-    }
+    newSubscriptionDraftByChat.set(chatId, { ownerId: from.id, name });
+    await sendVpnPlanPicker(chatId, from.id, undefined, name);
     return;
   }
 
@@ -325,6 +321,7 @@ async function handleCallback(q: CallbackQuery): Promise<void> {
 
   try {
     if (data === "home") {
+      newSubscriptionDraftByChat.delete(chatId);
       await answerCallbackQuery(q.id);
       await sendWelcome(chatId, q.from);
       return;
@@ -395,7 +392,7 @@ async function handleCallback(q: CallbackQuery): Promise<void> {
 
     if (data === "pnew") {
       await answerCallbackQuery(q.id);
-      newSubscriptionNameByChat.set(chatId, fromId);
+      newSubscriptionDraftByChat.set(chatId, { ownerId: fromId });
       await sendTelegramHtml(
         chatId,
         "Введите название для новой подписки (до <b>25</b> символов).\n\nПример: <b>Для мамы</b>",
@@ -406,8 +403,61 @@ async function handleCallback(q: CallbackQuery): Promise<void> {
 
     if (data === "pnew_cancel") {
       await answerCallbackQuery(q.id);
-      newSubscriptionNameByChat.delete(chatId);
+      newSubscriptionDraftByChat.delete(chatId);
       await sendTelegramHtml(chatId, "Создание новой подписки отменено.", mainMenuInline(isAdminTg(fromId)));
+      return;
+    }
+
+    if (data === "pdel_menu") {
+      await answerCallbackQuery(q.id);
+      if (linked.length === 0) {
+        await sendTelegramHtml(chatId, "У вас нет подписок для удаления.", mainMenuInline(isAdminTg(fromId)));
+        return;
+      }
+      await sendTelegramHtml(chatId, "<b>Выберите подписку для удаления:</b>", payDeletePickerKeyboard(linked));
+      return;
+    }
+
+    const pdelq = /^pdelq:(\d+)$/.exec(data);
+    if (pdelq) {
+      const userId = Number(pdelq[1]);
+      const row = getUser(userId);
+      const tgKey = String(fromId).trim();
+      if (!row || String(row.tg_id ?? "").trim() !== tgKey) {
+        await answerCallbackQuery(q.id, { text: "Нет доступа к этой подписке.", show_alert: true });
+        return;
+      }
+      await answerCallbackQuery(q.id);
+      await sendTelegramHtml(
+        chatId,
+        `Удалить подписку <b>#${row.id} ${escHtml(row.name)}</b>?`,
+        payDeleteConfirmKeyboard(row.id),
+      );
+      return;
+    }
+
+    const pdely = /^pdely:(\d+)$/.exec(data);
+    if (pdely) {
+      const userId = Number(pdely[1]);
+      const row = getUser(userId);
+      const tgKey = String(fromId).trim();
+      if (!row || String(row.tg_id ?? "").trim() !== tgKey) {
+        await answerCallbackQuery(q.id, { text: "Нет доступа к этой подписке.", show_alert: true });
+        return;
+      }
+      const own = linkedUsers(fromId);
+      if (own.length <= 1) {
+        await answerCallbackQuery(q.id, { text: "Нельзя удалить последнюю подписку.", show_alert: true });
+        return;
+      }
+      try {
+        await removeUserUuidFromAllServers(row.vless_uuid);
+      } catch (e) {
+        console.error("[telegram] self delete remove uuid:", e);
+      }
+      deleteUser(userId);
+      await answerCallbackQuery(q.id, { text: "Подписка удалена." });
+      await sendTelegramHtml(chatId, "Подписка удалена.", mainMenuInline(isAdminTg(fromId)));
       return;
     }
 
@@ -468,7 +518,21 @@ async function handleCallback(q: CallbackQuery): Promise<void> {
       const planId = Number(pp[1]) as PaymentPlanId;
       const targetUserId = pp[2] ? Number(pp[2]) : undefined;
       await answerCallbackQuery(q.id);
-      await onVpnPlanChosen(chatId, fromId, planId, targetUserId, q.from);
+      await onVpnPlanChosen(chatId, fromId, planId, targetUserId, undefined, q.from);
+      return;
+    }
+
+    const ppn = /^pplannew:([123])$/.exec(data);
+    if (ppn) {
+      const planId = Number(ppn[1]) as PaymentPlanId;
+      const draftName = newSubscriptionDraftByChat.get(chatId);
+      if (!draftName || draftName.ownerId !== fromId || !String(draftName.name ?? "").trim()) {
+        await answerCallbackQuery(q.id, { text: "Сначала задайте название новой подписки.", show_alert: true });
+        return;
+      }
+      await answerCallbackQuery(q.id);
+      await onVpnPlanChosen(chatId, fromId, planId, undefined, String(draftName.name).trim(), q.from);
+      newSubscriptionDraftByChat.delete(chatId);
       return;
     }
 
