@@ -133,6 +133,13 @@ function paySubscriptionPickerKeyboard(users: ReturnType<typeof linkedUsers>) {
   return { inline_keyboard: rows };
 }
 
+const cancelNewSubscriptionNameInline = {
+  inline_keyboard: [
+    [{ text: "Отмена", callback_data: "pnew_cancel" }],
+    [{ text: "« В меню", callback_data: "home" }],
+  ],
+};
+
 async function sendAdminUserCard(chatId: number, userId: number): Promise<void> {
   const row = getUser(userId);
   if (!row) {
@@ -208,15 +215,24 @@ export async function handleTelegramUpdate(body: unknown): Promise<void> {
   const pendingNewNameOwner = newSubscriptionNameByChat.get(chatId);
   if (pendingNewNameOwner && pendingNewNameOwner === from.id) {
     const name = text.trim();
+    if (name.toLowerCase() === "отмена" || name.toLowerCase() === "/cancel") {
+      newSubscriptionNameByChat.delete(chatId);
+      await sendTelegramHtml(chatId, "Создание новой подписки отменено.", mainMenuInline(isAdminTg(from.id)));
+      return;
+    }
     if (!name) {
-      await sendTelegramHtml(chatId, "Введите название новой подписки (до 25 символов).", backHomeRow);
+      await sendTelegramHtml(
+        chatId,
+        "Введите название новой подписки (до 25 символов) или нажмите «Отмена».",
+        cancelNewSubscriptionNameInline,
+      );
       return;
     }
     if (name.length > 25) {
       await sendTelegramHtml(
         chatId,
         "Слишком длинное название. Максимум <b>25</b> символов.\nПример: <b>Для мамы</b>",
-        backHomeRow,
+        cancelNewSubscriptionNameInline,
       );
       return;
     }
@@ -383,8 +399,15 @@ async function handleCallback(q: CallbackQuery): Promise<void> {
       await sendTelegramHtml(
         chatId,
         "Введите название для новой подписки (до <b>25</b> символов).\n\nПример: <b>Для мамы</b>",
-        backHomeRow,
+        cancelNewSubscriptionNameInline,
       );
+      return;
+    }
+
+    if (data === "pnew_cancel") {
+      await answerCallbackQuery(q.id);
+      newSubscriptionNameByChat.delete(chatId);
+      await sendTelegramHtml(chatId, "Создание новой подписки отменено.", mainMenuInline(isAdminTg(fromId)));
       return;
     }
 
