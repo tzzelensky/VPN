@@ -44,6 +44,35 @@ function isAdminTg(id: number): boolean {
   return getTelegramPaymentNotifyChatIds().includes(id);
 }
 
+function describeAdminForwardError(e: unknown): { text: string; clearCompose: boolean } {
+  const raw = e instanceof Error ? e.message : String(e);
+  const msg = raw.toLowerCase();
+  if (msg.includes("bots can't send messages to bots")) {
+    return {
+      text:
+        "Не удалось отправить: у клиента указан Telegram ID бота.\n\n" +
+        "Укажите в карточке клиента обычный user chat id (числовой), затем повторите отправку.",
+      clearCompose: true,
+    };
+  }
+  if (msg.includes("bot was blocked by the user")) {
+    return {
+      text: "Не удалось отправить: пользователь заблокировал бота. Попросите его снова нажать /start в боте.",
+      clearCompose: true,
+    };
+  }
+  if (msg.includes("chat not found")) {
+    return {
+      text: "Не удалось отправить: chat id неверный или пользователь ещё не запускал бота (/start).",
+      clearCompose: true,
+    };
+  }
+  return {
+    text: `Не удалось отправить сообщение: ${escHtml(raw)}`,
+    clearCompose: false,
+  };
+}
+
 function adminClientsKeyboard() {
   const rows: { text: string; callback_data: string }[][] = [];
   for (const u of listUsers()) {
@@ -179,9 +208,13 @@ export async function handleTelegramUpdate(body: unknown): Promise<void> {
       adminComposeTargetByChat.delete(chatId);
       await sendTelegramHtml(chatId, "Сообщение отправлено пользователю.", mainMenuInline(true));
     } catch (e) {
+      const friendly = describeAdminForwardError(e);
+      if (friendly.clearCompose) {
+        adminComposeTargetByChat.delete(chatId);
+      }
       await sendTelegramHtml(
         chatId,
-        `Не удалось отправить сообщение: ${escHtml(e instanceof Error ? e.message : String(e))}`,
+        friendly.text,
         adminUserActionsKeyboard(target.id, target.enable === 1),
       );
     }

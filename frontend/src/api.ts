@@ -395,3 +395,42 @@ export async function saveSubscriptionShop(body: SubscriptionShopDto): Promise<S
   });
   return handle(res);
 }
+
+export type CommunicationTargetDto = {
+  id: number;
+  name: string;
+  tg_id: string;
+  enable: boolean;
+};
+
+export async function listCommunicationTargets(): Promise<{ users: CommunicationTargetDto[] }> {
+  const res = await fetch("/api/communications/targets", { credentials: "include" });
+  return handle(res);
+}
+
+export type SendCommunicationPayload = {
+  mode: "global" | "single";
+  text: string;
+  user_id?: number;
+  photo_base64?: string;
+  photo_mime?: string;
+  photo_name?: string;
+};
+
+export type SendCommunicationResult = {
+  ok: boolean;
+  sent: number;
+  attempted: number;
+  failed: number;
+  failures: Array<{ user_id: number; user_name: string; error: string }>;
+};
+
+export async function sendCommunication(payload: SendCommunicationPayload): Promise<SendCommunicationResult> {
+  const res = await fetch("/api/communications/send", {
+    method: "POST",
+    credentials: "include",
+    headers: jsonHeaders,
+    body: JSON.stringify(payload),
+  });
+  return handle(res);
+}

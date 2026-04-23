@@ -6,6 +6,7 @@ import session from "express-session";
 import authRouter from "./routes/auth.js";
 import serversRouter from "./routes/servers.js";
 import usersRouter from "./routes/users.js";
+import communicationsRouter from "./routes/communications.js";
 import subscriptionShopRouter from "./routes/subscriptionShop.js";
 import subscriptionRouter from "./routes/subscription.js";
 import telegramRouter from "./routes/telegram.js";
@@ -69,7 +70,7 @@ app.use(
     credentials: true,
   }),
 );
-app.use(express.json());
+app.use(express.json({ limit: "12mb" }));
 app.use(cookieParser());
 app.use(
   session({
@@ -102,6 +103,7 @@ app.get("/comfort", (_req, res) => {
 app.use("/api/auth", authRouter);
 app.use("/api/servers", serversRouter);
 app.use("/api/users", usersRouter);
+app.use("/api/communications", communicationsRouter);
 app.use("/api/subscription-shop", subscriptionShopRouter);
 app.use("/sub", subscriptionRouter);
 app.use("/api/sub", subscriptionRouter);

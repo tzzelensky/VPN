@@ -34,6 +34,12 @@ export default function DashboardLayout({
           >
             Подписки
           </NavLink>
+          <NavLink
+            to="/communications"
+            className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}
+          >
+            Коммуникации
+          </NavLink>
         </nav>
         <button type="button" className="ghost" onClick={() => void doLogout()}>
           Выйти

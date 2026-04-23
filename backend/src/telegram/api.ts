@@ -31,6 +31,34 @@ async function tgCall<T>(method: string, body: Record<string, unknown>): Promise
   return data;
 }
 
+async function tgMultipartCall<T>(method: string, form: FormData): Promise<TelegramOk<T>> {
+  const token = getTelegramBotToken();
+  if (!token) return { ok: false, description: "no_token" };
+  const url = `https://api.telegram.org/bot${token}/${method}`;
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      method: "POST",
+      body: form,
+    });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error(`[telegram] fetch ${method}:`, msg);
+    return { ok: false, description: `network: ${msg}` };
+  }
+  let data: TelegramOk<T>;
+  try {
+    data = (await res.json()) as TelegramOk<T>;
+  } catch {
+    console.error(`[telegram] ${method}: non-JSON response`, res.status);
+    return { ok: false, description: "invalid_response" };
+  }
+  if (!data.ok) {
+    console.error(`[telegram] ${method} failed:`, data.description ?? res.status);
+  }
+  return data;
+}
+
 export async function sendTelegramMessage(chatId: number, text: string): Promise<void> {
   const r = await tgCall<unknown>("sendMessage", {
     chat_id: chatId,
@@ -87,6 +115,22 @@ export async function sendTelegramPhoto(
     parse_mode: opts?.parse_mode ?? "HTML",
     ...(opts?.reply_markup ? { reply_markup: opts.reply_markup } : {}),
   });
+  if (!r.ok) throw new Error(r.description ?? "sendPhoto failed");
+}
+
+export async function sendTelegramPhotoBinary(
+  chatId: number,
+  bytes: Uint8Array,
+  opts?: { caption?: string; mimeType?: string; filename?: string; parse_mode?: "HTML" },
+): Promise<void> {
+  const form = new FormData();
+  form.set("chat_id", String(chatId));
+  if (opts?.caption) form.set("caption", opts.caption);
+  form.set("parse_mode", opts?.parse_mode ?? "HTML");
+  const mime = (opts?.mimeType ?? "image/jpeg").trim() || "image/jpeg";
+  const filename = (opts?.filename ?? "photo.jpg").trim() || "photo.jpg";
+  form.set("photo", new Blob([Buffer.from(bytes)], { type: mime }), filename);
+  const r = await tgMultipartCall<unknown>("sendPhoto", form);
   if (!r.ok) throw new Error(r.description ?? "sendPhoto failed");
 }
 
