@@ -4,6 +4,7 @@ import {
   findAwaitingProofSessionByChat,
   findPendingAdminSessionByChat,
   findUsersByTelegramChatId,
+  getUser,
   getPaymentSession,
   getSubscriptionShop,
   markPaymentSessionPendingAdmin,
@@ -14,6 +15,7 @@ import {
   type PaymentSessionRow,
   type SubscriptionShopPlanRow,
   type TopUpShopPlanRow,
+  type UserRow,
 } from "../db.js";
 import { pushClientListToAllDeployedServers } from "../userSync.js";
 import { answerCallbackQuery, sendTelegramHtml, sendTelegramPhoto } from "./api.js";
@@ -78,16 +80,37 @@ function topupPickerButtonLabel(p: TopUpShopPlanRow): string {
   return t;
 }
 
-export function vpnPlansKeyboard() {
+function expiryDateText(expiryMs: number): string {
+  if (!expiryMs) return "без срока";
+  return new Date(expiryMs).toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric" });
+}
+
+function userTargetTitle(u: Pick<UserRow, "id" | "name" | "expiry_time">): string {
+  return `#${u.id} ${u.name} (до ${expiryDateText(u.expiry_time)})`;
+}
+
+function resolveLinkedTarget(tgUserId: number, targetUserId?: number): UserRow | undefined {
+  if (!targetUserId || targetUserId <= 0) return undefined;
+  const row = getUser(targetUserId);
+  if (!row) return undefined;
+  const key = String(tgUserId).trim();
+  return String(row.tg_id ?? "").trim() === key ? row : undefined;
+}
+
+export function vpnPlansKeyboard(targetUserId?: number) {
   const shop = getSubscriptionShop();
-  const rows = shop.plans.map((p) => [{ text: planPickerButtonLabel(p), callback_data: `pplan:${p.id}` }]);
+  const rows = shop.plans.map((p) => [
+    { text: planPickerButtonLabel(p), callback_data: targetUserId ? `pplan:${p.id}:${targetUserId}` : `pplan:${p.id}` },
+  ]);
   rows.push([{ text: "« Главное меню", callback_data: "home" }]);
   return { inline_keyboard: rows };
 }
 
-export function gbTopUpPlansKeyboard() {
+export function gbTopUpPlansKeyboard(targetUserId?: number) {
   const shop = getSubscriptionShop();
-  const rows = shop.topup_plans.map((p) => [{ text: topupPickerButtonLabel(p), callback_data: `gplan:${p.id}` }]);
+  const rows = shop.topup_plans.map((p) => [
+    { text: topupPickerButtonLabel(p), callback_data: targetUserId ? `gplan:${p.id}:${targetUserId}` : `gplan:${p.id}` },
+  ]);
   rows.push([{ text: "« Главное меню", callback_data: "home" }]);
   return { inline_keyboard: rows };
 }
@@ -115,7 +138,7 @@ function replyKeyboardForPayer(tgUserId: number) {
 
 const DAY_MS = 86_400_000;
 
-export async function sendVpnPlanPicker(chatId: number, tgUserId: number): Promise<void> {
+export async function sendVpnPlanPicker(chatId: number, tgUserId: number, targetUserId?: number): Promise<void> {
   const linked = findUsersByTelegramChatId(tgUserId);
   const shop = getSubscriptionShop();
   if (linked.length === 0 && shop.sales_disabled) {
@@ -126,14 +149,14 @@ export async function sendVpnPlanPicker(chatId: number, tgUserId: number): Promi
     );
     return;
   }
-  await sendTelegramHtml(
-    chatId,
-    "<b>Выберите нужную подписку</b>\n\nТарифы магазина:",
-    vpnPlansKeyboard(),
-  );
+  const target = resolveLinkedTarget(tgUserId, targetUserId);
+  const prefix = target
+    ? `<b>Продление подписки:</b> ${escHtml(userTargetTitle(target))}\n\n`
+    : "<b>Выберите нужную подписку</b>\n\n";
+  await sendTelegramHtml(chatId, `${prefix}Тарифы магазина:`, vpnPlansKeyboard(target?.id));
 }
 
-export async function sendGbTopUpPlanPicker(chatId: number, tgUserId: number): Promise<void> {
+export async function sendGbTopUpPlanPicker(chatId: number, tgUserId: number, targetUserId?: number): Promise<void> {
   const linked = findUsersByTelegramChatId(tgUserId);
   if (linked.length === 0) {
     await sendTelegramHtml(
@@ -143,10 +166,18 @@ export async function sendGbTopUpPlanPicker(chatId: number, tgUserId: number): P
     );
     return;
   }
+  const target = resolveLinkedTarget(tgUserId, targetUserId);
+  if (linked.length > 1 && !target) {
+    await sendTelegramHtml(chatId, "<b>Сначала выберите подписку для докупки ГБ.</b>", backHomeRow);
+    return;
+  }
+  const prefix = target
+    ? `<b>Докупка для подписки:</b> ${escHtml(userTargetTitle(target))}\n\n`
+    : "<b>Выберите пакет докупки</b>\n\n";
   await sendTelegramHtml(
     chatId,
-    "<b>Выберите пакет докупки</b>\n\nГБ добавятся к текущему лимиту после подтверждения оплаты:",
-    gbTopUpPlansKeyboard(),
+    `${prefix}ГБ добавятся к текущему лимиту после подтверждения оплаты:`,
+    gbTopUpPlansKeyboard(target?.id),
   );
 }
 
@@ -156,6 +187,7 @@ export async function onVpnPlanChosen(
   chatId: number,
   tgUserId: number,
   planId: PaymentPlanId,
+  targetUserId?: number,
   from?: TgFromLite,
 ): Promise<void> {
   const linked = findUsersByTelegramChatId(tgUserId);
@@ -168,15 +200,21 @@ export async function onVpnPlanChosen(
     );
     return;
   }
+  const target = resolveLinkedTarget(tgUserId, targetUserId);
+  if (linked.length > 1 && !target) {
+    await sendTelegramHtml(chatId, "<b>Выберите подписку, которую нужно продлить.</b>", backHomeRow);
+    return;
+  }
   const meta = getPlanRuntimeMeta(planId);
   const payUrl = effectivePaymentUrl();
-  startPaymentAwaitingProof(chatId, tgUserId, planId, "subscription", {
+  startPaymentAwaitingProof(chatId, tgUserId, planId, "subscription", target?.id, {
     username: from?.username,
     first_name: from?.first_name,
   });
   const linkEsc = escHtml(payUrl);
   const body =
     `<b>Выбрано:</b> ${escHtml(meta.title)}\n` +
+    (target ? `<b>Подписка:</b> ${escHtml(userTargetTitle(target))}\n` : "") +
     `<b>Сумма к оплате:</b> ${meta.priceRub} ₽\n\n` +
     `<b>Ссылка для оплаты:</b>\n<a href="${linkEsc}">${linkEsc}</a>\n\n` +
     `В комментарии к переводу укажите <b>только номер тарифа</b>: <code>1</code>, <code>2</code> или <code>3</code> ` +
@@ -189,6 +227,7 @@ export async function onGbTopUpPlanChosen(
   chatId: number,
   tgUserId: number,
   planId: PaymentPlanId,
+  targetUserId?: number,
   from?: TgFromLite,
 ): Promise<void> {
   const linked = findUsersByTelegramChatId(tgUserId);
@@ -200,15 +239,21 @@ export async function onGbTopUpPlanChosen(
     );
     return;
   }
+  const target = resolveLinkedTarget(tgUserId, targetUserId);
+  if (linked.length > 1 && !target) {
+    await sendTelegramHtml(chatId, "<b>Выберите подписку, к которой нужно докупить ГБ.</b>", backHomeRow);
+    return;
+  }
   const meta = getTopUpPlanRuntimeMeta(planId);
   const payUrl = effectivePaymentUrl();
-  startPaymentAwaitingProof(chatId, tgUserId, planId, "topup", {
+  startPaymentAwaitingProof(chatId, tgUserId, planId, "topup", target?.id, {
     username: from?.username,
     first_name: from?.first_name,
   });
   const linkEsc = escHtml(payUrl);
   const body =
     `<b>Выбрано:</b> ${escHtml(meta.title)}\n` +
+    (target ? `<b>Подписка:</b> ${escHtml(userTargetTitle(target))}\n` : "") +
     `<b>Пополнение:</b> +${meta.add_gb} ГБ\n` +
     `<b>Сумма к оплате:</b> ${meta.priceRub} ₽\n\n` +
     `<b>Ссылка для оплаты:</b>\n<a href="${linkEsc}">${linkEsc}</a>\n\n` +
@@ -245,6 +290,7 @@ export async function onPaymentProofPhoto(msg: PhotoMsg): Promise<boolean> {
   const isTopUp = sess.kind === "topup";
   const admins = getTelegramPaymentNotifyChatIds();
   const linked = findUsersByTelegramChatId(chatId);
+  const target = sess.target_user_id ? getUser(sess.target_user_id) : undefined;
   const payerTag =
     sess.tg_username && String(sess.tg_username).trim()
       ? `@${escHtml(String(sess.tg_username).replace(/^@/, ""))}`
@@ -254,10 +300,14 @@ export async function onPaymentProofPhoto(msg: PhotoMsg): Promise<boolean> {
   const linkedBrief = isTopUp
     ? linked.length === 0
       ? "<b>Внимание:</b> для докупки нужен привязанный клиент в панели. Эту заявку нужно отклонить."
-      : `Привязано клиентов в панели: <b>${linked.length}</b> (id: ${linked.map((u) => u.id).join(", ")}).`
+      : target
+        ? `Выбрана подписка: <b>${escHtml(userTargetTitle(target))}</b>.`
+        : `Привязано клиентов в панели: <b>${linked.length}</b> (id: ${linked.map((u) => u.id).join(", ")}).`
     : linked.length === 0
       ? "<b>Новый клиент:</b> в панели записи с этим Telegram id нет — при «Подтвердить» будет <b>создан</b> клиент с оплаченным тарифом."
-      : `Привязано клиентов в панели: <b>${linked.length}</b> (id: ${linked.map((u) => u.id).join(", ")}).`;
+      : target
+        ? `Выбрана подписка: <b>${escHtml(userTargetTitle(target))}</b>.`
+        : `Привязано клиентов в панели: <b>${linked.length}</b> (id: ${linked.map((u) => u.id).join(", ")}).`;
 
   const caption =
     `<b>Чек на оплату VPN</b>\n` +
@@ -316,12 +366,13 @@ export async function onAdminPaymentConfirm(
   const topupMeta = getTopUpPlanRuntimeMeta(sess.plan_id);
   let linked = findUsersByTelegramChatId(sess.tg_chat_id);
   let autoCreated = false;
+  let autoCreatedUser: UserRow | undefined;
   if (!isTopUp && linked.length === 0) {
     const tgKey = String(sess.tg_chat_id).trim();
     const expiryMs = snapExpiryTimeToNoonLocal(Date.now() + subMeta.days * DAY_MS);
     const displayName = clientDisplayNameFromSession(sess);
     try {
-      createUser({
+      autoCreatedUser = createUser({
         name: displayName,
         email: `${sess.tg_chat_id}@tg.vpn`,
         tg_id: tgKey,
@@ -331,7 +382,7 @@ export async function onAdminPaymentConfirm(
         comment: `Оплата в боте, тариф #${sess.plan_id}: ${subMeta.title}`,
       });
       autoCreated = true;
-      linked = findUsersByTelegramChatId(sess.tg_chat_id);
+      linked = autoCreatedUser ? [autoCreatedUser] : findUsersByTelegramChatId(sess.tg_chat_id);
     } catch (e) {
       console.error("[telegram] createUser after payment:", e);
       await answerCallbackQuery(callbackQueryId, {
@@ -350,22 +401,57 @@ export async function onAdminPaymentConfirm(
     deletePaymentSession(sessionId);
     return;
   }
-  await answerCallbackQuery(callbackQueryId, {
-    text: isTopUp ? "ГБ начислены." : autoCreated ? "Клиент создан, подписка активирована." : "Подписка продлена.",
-  });
+  const explicitTarget = sess.target_user_id ? linked.find((u) => u.id === sess.target_user_id) : undefined;
+  if (sess.target_user_id && !explicitTarget && linked.length > 0) {
+    await answerCallbackQuery(callbackQueryId, {
+      text: "Выбранная подписка не найдена или уже отвязана.",
+      show_alert: true,
+    });
+    deletePaymentSession(sessionId);
+    return;
+  }
+  const targets: UserRow[] = isTopUp
+    ? explicitTarget
+      ? [explicitTarget]
+      : linked
+    : explicitTarget
+      ? [explicitTarget]
+      : autoCreatedUser
+        ? [autoCreatedUser]
+        : linked;
+
+  const affected: UserRow[] = [];
+  const skippedUnlimited: UserRow[] = [];
   if (isTopUp) {
-    for (const row of linked) {
-      if (row.total_gb <= 0) continue;
-      updateUserRow(row.id, { total_gb: row.total_gb + topupMeta.add_gb });
+    for (const row of targets) {
+      if (row.total_gb <= 0) {
+        skippedUnlimited.push(row);
+        continue;
+      }
+      const next = updateUserRow(row.id, { total_gb: row.total_gb + topupMeta.add_gb });
+      if (next) affected.push(next);
     }
   } else if (!autoCreated) {
     const now = Date.now();
-    for (const row of linked) {
+    for (const row of targets) {
       const base = Math.max(now, row.expiry_time > 0 ? row.expiry_time : 0);
       const newExpiry = snapExpiryTimeToNoonLocal(base + subMeta.days * DAY_MS);
-      updateUserRow(row.id, { total_gb: subMeta.total_gb, expiry_time: newExpiry });
+      const next = updateUserRow(row.id, { total_gb: subMeta.total_gb, expiry_time: newExpiry });
+      if (next) affected.push(next);
     }
+  } else if (autoCreatedUser) {
+    affected.push(autoCreatedUser);
   }
+
+  await answerCallbackQuery(callbackQueryId, {
+    text: isTopUp
+      ? affected.length > 0
+        ? "ГБ начислены."
+        : "Изменений нет (безлимитные подписки)."
+      : autoCreated
+        ? "Клиент создан, подписка активирована."
+        : "Подписка продлена.",
+  });
   try {
     await pushClientListToAllDeployedServers();
   } catch (e) {
@@ -373,14 +459,31 @@ export async function onAdminPaymentConfirm(
   }
   deletePaymentSession(sessionId);
   const trafficNote = subMeta.total_gb > 0 ? `${subMeta.total_gb} ГБ/мес` : "безлимит по трафику";
-  const primary = linked[0]!;
+  const primary = affected[0] ?? linked[0];
+  if (!primary) return;
   const subUrl = publicSubscriptionUrl(primary.sub_token);
   const subCode = escUrlForCode(subUrl);
+  const affectedList =
+    affected.length > 0
+      ? affected.map((u) => `• #${u.id} ${escHtml(u.name)} — до <b>${escHtml(expiryDateText(u.expiry_time))}</b>`).join("\n")
+      : "";
+  const topupList =
+    affected.length > 0
+      ? affected
+          .map((u) => `• #${u.id} ${escHtml(u.name)} — новый лимит <b>${u.total_gb > 0 ? `${u.total_gb} ГБ` : "∞"}</b>`)
+          .join("\n")
+      : "";
+  const skippedUnlimitedText =
+    skippedUnlimited.length > 0
+      ? `\n\nНе изменены (безлимит): ${skippedUnlimited.map((u) => `#${u.id} ${u.name}`).join(", ")}.`
+      : "";
   const body = isTopUp
     ? `<b>Оплата подтверждена.</b>\n\n` +
       `Начислено: <b>+${topupMeta.add_gb} ГБ</b>\n` +
       `Пакет: ${escHtml(topupMeta.title)}\n\n` +
-      `ГБ добавлены к вашему текущему балансу. Актуальные данные — в разделе «Статистика по подписке».`
+      (topupList ? `<b>Подписки, к которым применена докупка:</b>\n${topupList}` : "Начисление не применено.") +
+      `${skippedUnlimitedText}\n\n` +
+      `Актуальные данные — в разделе «Статистика по подписке».`
     : autoCreated
     ? `<b>Оплата подтверждена — доступ открыт.</b>\n\n` +
       `Тариф: ${escHtml(subMeta.title)}\n` +
@@ -391,7 +494,8 @@ export async function onAdminPaymentConfirm(
     : `<b>Оплата подтверждена.</b>\n\n` +
       `Тариф: ${escHtml(subMeta.title)}\n` +
       `Лимит трафика: <b>${escHtml(trafficNote)}</b>\n` +
-      `Срок продлён на <b>${subMeta.days}</b> суток от вашего текущего окончания (если подписка ещё действовала — срок суммируется).\n` +
+      `Срок продлён на <b>${subMeta.days}</b> суток.\n` +
+      (affectedList ? `\n<b>Обновлённые подписки:</b>\n${affectedList}\n` : "") +
       `Актуальные дата и трафик — в разделе «Статистика по подписке».`;
   await sendTelegramHtml(sess.tg_chat_id, body, replyKeyboardForPayer(sess.tg_chat_id));
 }

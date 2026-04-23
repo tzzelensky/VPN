@@ -106,6 +106,20 @@ function adminDeleteConfirmKeyboard(userId: number) {
   };
 }
 
+function paymentTargetKeyboard(
+  users: ReturnType<typeof linkedUsers>,
+  kind: "pay" | "gb",
+): { inline_keyboard: Array<Array<{ text: string; callback_data: string }>> } {
+  const rows = users.map((u) => [
+    {
+      text: `#${u.id} ${u.name}`.slice(0, 58),
+      callback_data: kind === "pay" ? `psel:${u.id}` : `gsel:${u.id}`,
+    },
+  ]);
+  rows.push([{ text: "« В меню", callback_data: "home" }]);
+  return { inline_keyboard: rows };
+}
+
 async function sendAdminUserCard(chatId: number, userId: number): Promise<void> {
   const row = getUser(userId);
   if (!row) {
@@ -254,19 +268,71 @@ async function handleCallback(q: CallbackQuery): Promise<void> {
 
     if (data === "pay") {
       await answerCallbackQuery(q.id);
-      await sendVpnPlanPicker(chatId, fromId);
+      if (linked.length > 1) {
+        await sendTelegramHtml(
+          chatId,
+          "<b>Выберите подписку для продления:</b>",
+          paymentTargetKeyboard(linked, "pay"),
+        );
+        return;
+      }
+      await sendVpnPlanPicker(chatId, fromId, linked[0]?.id);
       return;
     }
 
     if (data === "buynew") {
       await answerCallbackQuery(q.id);
-      await sendVpnPlanPicker(chatId, fromId);
+      if (linked.length > 1) {
+        await sendTelegramHtml(
+          chatId,
+          "<b>Выберите подписку для продления:</b>",
+          paymentTargetKeyboard(linked, "pay"),
+        );
+        return;
+      }
+      await sendVpnPlanPicker(chatId, fromId, linked[0]?.id);
       return;
     }
 
     if (data === "buygb") {
       await answerCallbackQuery(q.id);
-      await sendGbTopUpPlanPicker(chatId, fromId);
+      if (linked.length > 1) {
+        await sendTelegramHtml(
+          chatId,
+          "<b>Выберите подписку для докупки ГБ:</b>",
+          paymentTargetKeyboard(linked, "gb"),
+        );
+        return;
+      }
+      await sendGbTopUpPlanPicker(chatId, fromId, linked[0]?.id);
+      return;
+    }
+
+    const psel = /^psel:(\d+)$/.exec(data);
+    if (psel) {
+      const userId = Number(psel[1]);
+      const row = getUser(userId);
+      const tgKey = String(fromId).trim();
+      if (!row || String(row.tg_id ?? "").trim() !== tgKey) {
+        await answerCallbackQuery(q.id, { text: "Нет доступа к этой подписке.", show_alert: true });
+        return;
+      }
+      await answerCallbackQuery(q.id);
+      await sendVpnPlanPicker(chatId, fromId, userId);
+      return;
+    }
+
+    const gsel = /^gsel:(\d+)$/.exec(data);
+    if (gsel) {
+      const userId = Number(gsel[1]);
+      const row = getUser(userId);
+      const tgKey = String(fromId).trim();
+      if (!row || String(row.tg_id ?? "").trim() !== tgKey) {
+        await answerCallbackQuery(q.id, { text: "Нет доступа к этой подписке.", show_alert: true });
+        return;
+      }
+      await answerCallbackQuery(q.id);
+      await sendGbTopUpPlanPicker(chatId, fromId, userId);
       return;
     }
 
@@ -308,19 +374,21 @@ async function handleCallback(q: CallbackQuery): Promise<void> {
       return;
     }
 
-    const pp = /^pplan:([123])$/.exec(data);
+    const pp = /^pplan:([123])(?::(\d+))?$/.exec(data);
     if (pp) {
       const planId = Number(pp[1]) as PaymentPlanId;
+      const targetUserId = pp[2] ? Number(pp[2]) : undefined;
       await answerCallbackQuery(q.id);
-      await onVpnPlanChosen(chatId, fromId, planId, q.from);
+      await onVpnPlanChosen(chatId, fromId, planId, targetUserId, q.from);
       return;
     }
 
-    const gp = /^gplan:([123])$/.exec(data);
+    const gp = /^gplan:([123])(?::(\d+))?$/.exec(data);
     if (gp) {
       const planId = Number(gp[1]) as PaymentPlanId;
+      const targetUserId = gp[2] ? Number(gp[2]) : undefined;
       await answerCallbackQuery(q.id);
-      await onGbTopUpPlanChosen(chatId, fromId, planId, q.from);
+      await onGbTopUpPlanChosen(chatId, fromId, planId, targetUserId, q.from);
       return;
     }
 

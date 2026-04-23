@@ -87,6 +87,7 @@ export type PaymentSessionRow = {
   id: string;
   tg_chat_id: number;
   tg_user_id: number;
+  target_user_id?: number;
   kind: "subscription" | "topup";
   plan_id: PaymentPlanId;
   created_at: string;
@@ -261,6 +262,10 @@ function normalizePaymentSession(raw: unknown): PaymentSessionRow | null {
     id,
     tg_chat_id: chat,
     tg_user_id: usr,
+    target_user_id:
+      Number.isFinite(Number(o.target_user_id)) && Number(o.target_user_id) > 0
+        ? Math.floor(Number(o.target_user_id))
+        : undefined,
     kind,
     plan_id: plan as PaymentPlanId,
     created_at: String(o.created_at ?? new Date().toISOString()),
@@ -895,6 +900,7 @@ export function startPaymentAwaitingProof(
   tg_user_id: number,
   plan_id: PaymentPlanId,
   kind: "subscription" | "topup" = "subscription",
+  target_user_id?: number,
   tgProfile?: { username?: string; first_name?: string },
 ): string {
   const id = randomBytes(8).toString("hex");
@@ -907,6 +913,7 @@ export function startPaymentAwaitingProof(
       id,
       tg_chat_id,
       tg_user_id,
+      ...(target_user_id && target_user_id > 0 ? { target_user_id: Math.floor(target_user_id) } : {}),
       kind,
       plan_id,
       created_at: new Date().toISOString(),
