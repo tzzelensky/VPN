@@ -1,4 +1,4 @@
-import { deleteUser, findUsersByTelegramChatId, getUser, getSubscriptionShop, listUsers, updateUserRow } from "../db.js";
+import { createUser, deleteUser, findUsersByTelegramChatId, getUser, getSubscriptionShop, listUsers, updateUserRow } from "../db.js";
 import { answerCallbackQuery, sendTelegramHtml, sendTelegramPhoto } from "./api.js";
 import { escHtml, formatStatsHtml } from "./format.js";
 import {
@@ -39,6 +39,7 @@ type CallbackQuery = {
 type Update = { update_id: number; message?: Message; callback_query?: CallbackQuery };
 
 const adminComposeTargetByChat = new Map<number, number>();
+const newSubscriptionNameByChat = new Map<number, number>();
 
 function isAdminTg(id: number): boolean {
   return getTelegramPaymentNotifyChatIds().includes(id);
@@ -120,6 +121,18 @@ function paymentTargetKeyboard(
   return { inline_keyboard: rows };
 }
 
+function paySubscriptionPickerKeyboard(users: ReturnType<typeof linkedUsers>) {
+  const rows = users.map((u) => [
+    {
+      text: `#${u.id} ${u.name}`.slice(0, 58),
+      callback_data: `psel:${u.id}`,
+    },
+  ]);
+  rows.push([{ text: "➕ Создать новую подписку", callback_data: "pnew" }]);
+  rows.push([{ text: "« В меню", callback_data: "home" }]);
+  return { inline_keyboard: rows };
+}
+
 async function sendAdminUserCard(chatId: number, userId: number): Promise<void> {
   const row = getUser(userId);
   if (!row) {
@@ -189,6 +202,48 @@ export async function handleTelegramUpdate(body: unknown): Promise<void> {
   const t = text.toLowerCase();
   if (t === "/help" || t.startsWith("/start")) {
     await sendWelcome(chatId, from);
+    return;
+  }
+
+  const pendingNewNameOwner = newSubscriptionNameByChat.get(chatId);
+  if (pendingNewNameOwner && pendingNewNameOwner === from.id) {
+    const name = text.trim();
+    if (!name) {
+      await sendTelegramHtml(chatId, "Введите название новой подписки (до 25 символов).", backHomeRow);
+      return;
+    }
+    if (name.length > 25) {
+      await sendTelegramHtml(
+        chatId,
+        "Слишком длинное название. Максимум <b>25</b> символов.\nПример: <b>Для мамы</b>",
+        backHomeRow,
+      );
+      return;
+    }
+    try {
+      const user = createUser({
+        name,
+        email: `${from.id}-${Date.now()}@tg.vpn`,
+        tg_id: String(from.id),
+        enable: 1,
+        total_gb: 1,
+        expiry_time: Date.now() - 60_000,
+        comment: "Создано из бота: новая подписка",
+      });
+      newSubscriptionNameByChat.delete(chatId);
+      await sendTelegramHtml(
+        chatId,
+        `<b>Новая подписка создана:</b> #${user.id} ${escHtml(user.name)}\n\nТеперь выберите тариф для оплаты.`,
+        backHomeRow,
+      );
+      await sendVpnPlanPicker(chatId, from.id, user.id);
+    } catch (e) {
+      await sendTelegramHtml(
+        chatId,
+        `Не удалось создать подписку: ${escHtml(e instanceof Error ? e.message : String(e))}`,
+        backHomeRow,
+      );
+    }
     return;
   }
 
@@ -268,29 +323,29 @@ async function handleCallback(q: CallbackQuery): Promise<void> {
 
     if (data === "pay") {
       await answerCallbackQuery(q.id);
-      if (linked.length > 1) {
+      if (linked.length > 0) {
         await sendTelegramHtml(
           chatId,
-          "<b>Выберите подписку для продления:</b>",
-          paymentTargetKeyboard(linked, "pay"),
+          "<b>Выберите подписку для оплаты/продления:</b>",
+          paySubscriptionPickerKeyboard(linked),
         );
         return;
       }
-      await sendVpnPlanPicker(chatId, fromId, linked[0]?.id);
+      await sendVpnPlanPicker(chatId, fromId);
       return;
     }
 
     if (data === "buynew") {
       await answerCallbackQuery(q.id);
-      if (linked.length > 1) {
+      if (linked.length > 0) {
         await sendTelegramHtml(
           chatId,
-          "<b>Выберите подписку для продления:</b>",
-          paymentTargetKeyboard(linked, "pay"),
+          "<b>Выберите подписку для оплаты/продления:</b>",
+          paySubscriptionPickerKeyboard(linked),
         );
         return;
       }
-      await sendVpnPlanPicker(chatId, fromId, linked[0]?.id);
+      await sendVpnPlanPicker(chatId, fromId);
       return;
     }
 
@@ -319,6 +374,17 @@ async function handleCallback(q: CallbackQuery): Promise<void> {
       }
       await answerCallbackQuery(q.id);
       await sendVpnPlanPicker(chatId, fromId, userId);
+      return;
+    }
+
+    if (data === "pnew") {
+      await answerCallbackQuery(q.id);
+      newSubscriptionNameByChat.set(chatId, fromId);
+      await sendTelegramHtml(
+        chatId,
+        "Введите название для новой подписки (до <b>25</b> символов).\n\nПример: <b>Для мамы</b>",
+        backHomeRow,
+      );
       return;
     }
 
