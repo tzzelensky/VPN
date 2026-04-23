@@ -13,12 +13,24 @@ export async function authMe(): Promise<{ ok: boolean }> {
   return handle(res);
 }
 
-export async function login(username: string, password: string): Promise<{ ok: boolean }> {
+export type LoginStepOneResponse = { ok: true } | { ok: false; requires_code: true };
+
+export async function login(username: string, password: string): Promise<LoginStepOneResponse> {
   const res = await fetch("/api/auth/login", {
     method: "POST",
     credentials: "include",
     headers: jsonHeaders,
     body: JSON.stringify({ username, password }),
+  });
+  return handle(res);
+}
+
+export async function loginVerifyCode(code: string): Promise<{ ok: boolean }> {
+  const res = await fetch("/api/auth/login/verify", {
+    method: "POST",
+    credentials: "include",
+    headers: jsonHeaders,
+    body: JSON.stringify({ code }),
   });
   return handle(res);
 }
