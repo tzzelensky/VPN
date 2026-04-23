@@ -109,7 +109,7 @@ function isPaymentAdmin(fromId: number): boolean {
 
 function replyKeyboardForPayer(tgUserId: number) {
   const linked = findUsersByTelegramChatId(tgUserId);
-  if (linked.length > 0) return mainMenuInline;
+  if (linked.length > 0) return mainMenuInline();
   return newUserKeyboard(getSubscriptionShop().sales_disabled);
 }
 

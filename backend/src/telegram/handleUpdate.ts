@@ -1,5 +1,5 @@
-import { findUsersByTelegramChatId, getUser, getSubscriptionShop } from "../db.js";
-import { answerCallbackQuery, sendTelegramHtml } from "./api.js";
+import { deleteUser, findUsersByTelegramChatId, getUser, getSubscriptionShop, listUsers, updateUserRow } from "../db.js";
+import { answerCallbackQuery, sendTelegramHtml, sendTelegramPhoto } from "./api.js";
 import { escHtml, formatStatsHtml } from "./format.js";
 import {
   backHomeRow,
@@ -18,6 +18,8 @@ import {
   sendVpnPlanPicker,
 } from "./paymentFlow.js";
 import type { PaymentPlanId } from "../db.js";
+import { getTelegramPaymentNotifyChatIds } from "./env.js";
+import { pushClientListToAllDeployedServers, removeUserUuidFromAllServers } from "../userSync.js";
 
 type TgUser = { id: number; username?: string; first_name?: string };
 type Message = {
@@ -25,6 +27,7 @@ type Message = {
   chat: { id: number };
   from?: TgUser;
   text?: string;
+  caption?: string;
   photo?: { file_id: string }[];
 };
 type CallbackQuery = {
@@ -34,6 +37,60 @@ type CallbackQuery = {
   data?: string;
 };
 type Update = { update_id: number; message?: Message; callback_query?: CallbackQuery };
+
+const adminComposeTargetByChat = new Map<number, number>();
+
+function isAdminTg(id: number): boolean {
+  return getTelegramPaymentNotifyChatIds().includes(id);
+}
+
+function adminClientsKeyboard() {
+  const rows: { text: string; callback_data: string }[][] = [];
+  for (const u of listUsers()) {
+    const state = u.enable === 1 ? "✅" : "⛔";
+    const title = `${state} #${u.id} ${String(u.name || u.email || "user").trim()}`.slice(0, 56);
+    rows.push([{ text: title, callback_data: `admu:${u.id}` }]);
+  }
+  rows.push([{ text: "« В меню", callback_data: "home" }]);
+  return { inline_keyboard: rows };
+}
+
+function adminUserActionsKeyboard(userId: number, enabled: boolean) {
+  return {
+    inline_keyboard: [
+      [{ text: enabled ? "Выключить подписку" : "Включить подписку", callback_data: `admtoggle:${userId}` }],
+      [{ text: "Написать СМС пользователю", callback_data: `admmsg:${userId}` }],
+      [{ text: "🟥 Удалить клиента", callback_data: `admdelq:${userId}` }],
+      [{ text: "« К списку клиентов", callback_data: "admin_clients" }],
+    ],
+  };
+}
+
+function adminDeleteConfirmKeyboard(userId: number) {
+  return {
+    inline_keyboard: [
+      [
+        { text: "🟥 Да, удалить", callback_data: `admdely:${userId}` },
+        { text: "Отмена", callback_data: `admdeln:${userId}` },
+      ],
+    ],
+  };
+}
+
+async function sendAdminUserCard(chatId: number, userId: number): Promise<void> {
+  const row = getUser(userId);
+  if (!row) {
+    await sendTelegramHtml(chatId, "Клиент не найден.", backHomeRow);
+    return;
+  }
+  const text =
+    `<b>Клиент #${row.id}</b>\n` +
+    `Имя: <b>${escHtml(row.name)}</b>\n` +
+    `Email: <b>${escHtml(row.email)}</b>\n` +
+    `Статус: ${row.enable === 1 ? "✅ включен" : "⛔ выключен"}\n` +
+    `TG: <code>${escHtml(String(row.tg_id || "—"))}</code>`;
+  await sendTelegramHtml(chatId, text, adminUserActionsKeyboard(row.id, row.enable === 1));
+}
 
 function displayName(from: TgUser): string {
   return from.username ? `@${from.username}` : from.first_name || "друг";
@@ -46,7 +103,7 @@ function linkedUsers(fromId: number) {
 async function sendMainMenuLinked(chatId: number, from: TgUser): Promise<void> {
   const name = displayName(from);
   const text = `👋 <b>Привет, ${escHtml(name)}!</b>\n\n👇 <b>Выберите действие:</b>`;
-  await sendTelegramHtml(chatId, text, mainMenuInline);
+  await sendTelegramHtml(chatId, text, mainMenuInline(isAdminTg(from.id)));
 }
 
 /** /start и «Меню»: без привязки — экран покупки; с привязкой — основное меню. */
@@ -89,6 +146,45 @@ export async function handleTelegramUpdate(body: unknown): Promise<void> {
   const t = text.toLowerCase();
   if (t === "/help" || t.startsWith("/start")) {
     await sendWelcome(chatId, from);
+    return;
+  }
+
+  const pendingTarget = adminComposeTargetByChat.get(chatId);
+  if (pendingTarget && isAdminTg(from.id)) {
+    const target = getUser(pendingTarget);
+    if (!target) {
+      adminComposeTargetByChat.delete(chatId);
+      await sendTelegramHtml(chatId, "Клиент не найден.", mainMenuInline(true));
+      return;
+    }
+    const toChat = Number(String(target.tg_id ?? "").trim());
+    if (!Number.isFinite(toChat) || toChat <= 0) {
+      adminComposeTargetByChat.delete(chatId);
+      await sendTelegramHtml(chatId, "У клиента не указан Telegram Chat ID.", adminUserActionsKeyboard(target.id, target.enable === 1));
+      return;
+    }
+    const payloadText = (msg.caption ?? msg.text ?? "").trim();
+    if (!payloadText) {
+      await sendTelegramHtml(chatId, "Отправьте текст сообщения (и при желании фото).", backHomeRow);
+      return;
+    }
+    try {
+      if (msg.photo?.length) {
+        const fileId = msg.photo[msg.photo.length - 1]!.file_id;
+        const caption = `<b>Сообщение от администратора</b>\n\n${escHtml(payloadText)}`;
+        await sendTelegramPhoto(toChat, fileId, caption, { parse_mode: "HTML" });
+      } else {
+        await sendTelegramHtml(toChat, `<b>Сообщение от администратора</b>\n\n${escHtml(payloadText)}`);
+      }
+      adminComposeTargetByChat.delete(chatId);
+      await sendTelegramHtml(chatId, "Сообщение отправлено пользователю.", mainMenuInline(true));
+    } catch (e) {
+      await sendTelegramHtml(
+        chatId,
+        `Не удалось отправить сообщение: ${escHtml(e instanceof Error ? e.message : String(e))}`,
+        adminUserActionsKeyboard(target.id, target.enable === 1),
+      );
+    }
     return;
   }
 
@@ -138,6 +234,16 @@ async function handleCallback(q: CallbackQuery): Promise<void> {
     if (data === "buygb") {
       await answerCallbackQuery(q.id);
       await sendGbTopUpPlanPicker(chatId, fromId);
+      return;
+    }
+
+    if (data === "admin_clients") {
+      if (!isAdminTg(fromId)) {
+        await answerCallbackQuery(q.id, { text: "Нет прав.", show_alert: true });
+        return;
+      }
+      await answerCallbackQuery(q.id);
+      await sendTelegramHtml(chatId, "<b>Клиенты</b>\n\nВыберите клиента:", adminClientsKeyboard());
       return;
     }
 
@@ -213,6 +319,120 @@ async function handleCallback(q: CallbackQuery): Promise<void> {
         `<b>Subscription URL:</b>\n\n<code>${escUrlForCode(url)}</code>`,
         backHomeRow,
       );
+      return;
+    }
+
+    const au = /^admu:(\d+)$/.exec(data);
+    if (au) {
+      if (!isAdminTg(fromId)) {
+        await answerCallbackQuery(q.id, { text: "Нет прав.", show_alert: true });
+        return;
+      }
+      await answerCallbackQuery(q.id);
+      await sendAdminUserCard(chatId, Number(au[1]));
+      return;
+    }
+
+    const at = /^admtoggle:(\d+)$/.exec(data);
+    if (at) {
+      if (!isAdminTg(fromId)) {
+        await answerCallbackQuery(q.id, { text: "Нет прав.", show_alert: true });
+        return;
+      }
+      const userId = Number(at[1]);
+      const row = getUser(userId);
+      if (!row) {
+        await answerCallbackQuery(q.id, { text: "Клиент не найден.", show_alert: true });
+        return;
+      }
+      const nextEnable = row.enable === 1 ? 0 : 1;
+      updateUserRow(userId, { enable: nextEnable });
+      try {
+        await pushClientListToAllDeployedServers();
+      } catch (e) {
+        console.error("[telegram] admin toggle push:", e);
+      }
+      await answerCallbackQuery(q.id, { text: nextEnable === 1 ? "Подписка включена." : "Подписка выключена." });
+      await sendAdminUserCard(chatId, userId);
+      return;
+    }
+
+    const admMsg = /^admmsg:(\d+)$/.exec(data);
+    if (admMsg) {
+      if (!isAdminTg(fromId)) {
+        await answerCallbackQuery(q.id, { text: "Нет прав.", show_alert: true });
+        return;
+      }
+      const userId = Number(admMsg[1]);
+      const row = getUser(userId);
+      if (!row) {
+        await answerCallbackQuery(q.id, { text: "Клиент не найден.", show_alert: true });
+        return;
+      }
+      adminComposeTargetByChat.set(chatId, userId);
+      await answerCallbackQuery(q.id);
+      await sendTelegramHtml(
+        chatId,
+        `Отправьте текст (и при желании фото) для клиента <b>${escHtml(row.name)}</b>.\n\n` +
+          `Сообщение будет переслано пользователю и после этого откроется главное меню.`,
+        backHomeRow,
+      );
+      return;
+    }
+
+    const delAsk = /^admdelq:(\d+)$/.exec(data);
+    if (delAsk) {
+      if (!isAdminTg(fromId)) {
+        await answerCallbackQuery(q.id, { text: "Нет прав.", show_alert: true });
+        return;
+      }
+      const userId = Number(delAsk[1]);
+      const row = getUser(userId);
+      if (!row) {
+        await answerCallbackQuery(q.id, { text: "Клиент не найден.", show_alert: true });
+        return;
+      }
+      await answerCallbackQuery(q.id);
+      await sendTelegramHtml(
+        chatId,
+        `Подтвердите удаление клиента <b>${escHtml(row.name)}</b> (#${row.id}).`,
+        adminDeleteConfirmKeyboard(userId),
+      );
+      return;
+    }
+
+    const delNo = /^admdeln:(\d+)$/.exec(data);
+    if (delNo) {
+      if (!isAdminTg(fromId)) {
+        await answerCallbackQuery(q.id, { text: "Нет прав.", show_alert: true });
+        return;
+      }
+      await answerCallbackQuery(q.id, { text: "Удаление отменено." });
+      await sendAdminUserCard(chatId, Number(delNo[1]));
+      return;
+    }
+
+    const delYes = /^admdely:(\d+)$/.exec(data);
+    if (delYes) {
+      if (!isAdminTg(fromId)) {
+        await answerCallbackQuery(q.id, { text: "Нет прав.", show_alert: true });
+        return;
+      }
+      const userId = Number(delYes[1]);
+      const row = getUser(userId);
+      if (!row) {
+        await answerCallbackQuery(q.id, { text: "Клиент уже удалён." });
+        await sendTelegramHtml(chatId, "<b>Клиенты</b>\n\nВыберите клиента:", adminClientsKeyboard());
+        return;
+      }
+      try {
+        await removeUserUuidFromAllServers(row.vless_uuid);
+      } catch (e) {
+        console.error("[telegram] admin delete remove uuid:", e);
+      }
+      deleteUser(userId);
+      await answerCallbackQuery(q.id, { text: "Клиент удалён." });
+      await sendTelegramHtml(chatId, "<b>Клиенты</b>\n\nВыберите клиента:", adminClientsKeyboard());
       return;
     }
 

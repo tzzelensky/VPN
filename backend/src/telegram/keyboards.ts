@@ -3,14 +3,16 @@ export function publicSubscriptionUrl(subToken: string): string {
   return `${base}/sub/${encodeURIComponent(subToken)}`;
 }
 
-export const mainMenuInline = {
-  inline_keyboard: [
+export function mainMenuInline(isAdmin = false) {
+  const rows: { text: string; callback_data: string }[][] = [
     [{ text: "Статистика по подписке", callback_data: "stats" }],
     [{ text: "Подписка", callback_data: "sub" }],
     [{ text: "Оплата подписки", callback_data: "pay" }],
     [{ text: "Докупить ГБ", callback_data: "buygb" }],
-  ],
-};
+  ];
+  if (isAdmin) rows.push([{ text: "Клиенты", callback_data: "admin_clients" }]);
+  return { inline_keyboard: rows };
+}
 
 /** Напоминание из админки: кнопка «Оплатить» — пока тот же callback, что и в меню (заглушка). */
 export const payReminderInline = {
