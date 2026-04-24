@@ -1,5 +1,7 @@
 import {
+  claimReferralReward,
   consumeReferralInviteByTgUser,
+  createReferralReward,
   createUser,
   deletePaymentSession,
   findAwaitingProofSessionByChat,
@@ -7,6 +9,7 @@ import {
   findUsersByTelegramChatId,
   getReferralInviteByTgUser,
   getReferralProgram,
+  getReferralReward,
   getUser,
   getPaymentSession,
   getSubscriptionShop,
@@ -77,6 +80,13 @@ function planPickerButtonLabel(p: SubscriptionShopPlanRow): string {
   return t;
 }
 
+function planPickerButtonLabelWithPrice(p: SubscriptionShopPlanRow, priceRub: number): string {
+  const gb = p.total_gb > 0 ? `${p.total_gb} ГБ` : "безлимит";
+  let t = `${p.id} — ${gb} / ${p.days} дн. — ${priceRub} ₽`;
+  if (t.length > 58) t = `${t.slice(0, 55)}…`;
+  return t;
+}
+
 function topupPickerButtonLabel(p: TopUpShopPlanRow): string {
   let t = `${p.id} — +${p.add_gb} ГБ — ${p.price_rub} ₽`;
   if (t.length > 58) t = `${t.slice(0, 55)}…`;
@@ -116,6 +126,26 @@ export function vpnPlansKeyboard(targetUserId?: number) {
   ]);
   rows.push([{ text: "« Главное меню", callback_data: "home" }]);
   return { inline_keyboard: rows };
+}
+
+export function vpnPlansKeyboardDiscounted(discountPercent: number) {
+  const shop = getSubscriptionShop();
+  const rows = shop.plans.map((p) => {
+    const newPrice = Math.max(0, Math.floor(p.price_rub - (p.price_rub * discountPercent) / 100));
+    return [{ text: planPickerButtonLabelWithPrice(p, newPrice), callback_data: `pplan:${p.id}` }];
+  });
+  rows.push([{ text: "« Главное меню", callback_data: "home" }]);
+  return { inline_keyboard: rows };
+}
+
+function referralRewardKeyboard(rewardId: string, gb: number, days: number) {
+  return {
+    inline_keyboard: [
+      [{ text: `Получить +${gb} ГБ`, callback_data: `refreward:gb:${rewardId}` }],
+      [{ text: `Получить +${days} дней`, callback_data: `refreward:days:${rewardId}` }],
+      [{ text: "« В меню", callback_data: "home" }],
+    ],
+  };
 }
 
 export function vpnPlansKeyboardForNew() {
@@ -174,6 +204,11 @@ export async function sendVpnPlanPicker(
     return;
   }
   const newName = String(newSubscriptionName ?? "").trim();
+  const target = resolveLinkedTarget(tgUserId, targetUserId);
+  const pendingInvite = linked.length === 0 ? getReferralInviteByTgUser(tgUserId) : undefined;
+  const pendingInviter = pendingInvite ? getUser(pendingInvite.inviter_user_id) : undefined;
+  const refCfg = getReferralProgram();
+  const shouldShowDiscount = !target && !newName && linked.length === 0 && pendingInvite && refCfg.enabled && pendingInviter;
   if (newName) {
     await sendTelegramHtml(
       chatId,
@@ -182,10 +217,27 @@ export async function sendVpnPlanPicker(
     );
     return;
   }
-  const target = resolveLinkedTarget(tgUserId, targetUserId);
   const prefix = target
     ? `<b>Продление подписки:</b> ${escHtml(userTargetTitle(target))}\n\n`
     : "<b>Выберите нужную подписку</b>\n\n";
+  if (shouldShowDiscount) {
+    const inviterMention =
+      pendingInviter.name && pendingInviter.name.trim().startsWith("@")
+        ? pendingInviter.name.trim()
+        : `#${pendingInviter.id} ${pendingInviter.name}`;
+    const priceLines = shop.plans
+      .map((p) => {
+        const discounted = Math.max(0, Math.floor(p.price_rub - (p.price_rub * refCfg.invited_discount_percent) / 100));
+        return `Тариф ${p.id}: <s>${p.price_rub} ₽</s> <b>${discounted} ₽</b>`;
+      })
+      .join("\n");
+    await sendTelegramHtml(
+      chatId,
+      `${prefix}<b>Вам скидка ${refCfg.invited_discount_percent}% от ${escHtml(inviterMention)}, который пригласил.</b>\n\n${priceLines}`,
+      vpnPlansKeyboardDiscounted(refCfg.invited_discount_percent),
+    );
+    return;
+  }
   await sendTelegramHtml(chatId, `${prefix}Тарифы магазина:`, vpnPlansKeyboard(target?.id));
 }
 
@@ -473,22 +525,19 @@ export async function onAdminPaymentConfirm(
     const refCfg = getReferralProgram();
     const inviter = getUser(sess.referral_inviter_user_id);
     if (inviter) {
-      if (refCfg.inviter_reward_kind === "gb") {
-        if (inviter.total_gb > 0) {
-          updateUserRow(inviter.id, { total_gb: inviter.total_gb + refCfg.inviter_reward_value });
-        }
-      } else {
-        const base = Math.max(Date.now(), inviter.expiry_time > 0 ? inviter.expiry_time : 0);
-        const extraMs = refCfg.inviter_reward_value * DAY_MS;
-        updateUserRow(inviter.id, { expiry_time: snapExpiryTimeToNoonLocal(base + extraMs) });
-      }
+      const reward = createReferralReward({
+        inviter_user_id: inviter.id,
+        invitee_tg_user_id: sess.tg_user_id,
+        invitee_name: clientDisplayNameFromSession(sess),
+        reward_gb: refCfg.inviter_reward_gb,
+        reward_days: refCfg.inviter_reward_days,
+      });
       try {
+        const invitee = clientDisplayNameFromSession(sess);
         await sendTelegramHtml(
           Number(String(inviter.tg_id || "").trim()),
-          refCfg.inviter_reward_kind === "gb"
-            ? `🎁 По рефералке начислено <b>+${refCfg.inviter_reward_value} ГБ</b>.`
-            : `🎁 По рефералке продлен срок подписки на <b>${refCfg.inviter_reward_value} дн.</b>`,
-          backHomeRow,
+          `🎉 <b>${escHtml(invitee)}</b> присоединился по вашей реферальной ссылке.\n\nВыберите свою награду:`,
+          referralRewardKeyboard(reward.id, reward.reward_gb, reward.reward_days),
         );
       } catch {
         // silent
@@ -587,6 +636,53 @@ function clientDisplayNameFromSession(sess: PaymentSessionRow): string {
   const fn = (sess.tg_first_name ?? "").trim();
   if (fn) return fn;
   return "Новый клиент";
+}
+
+export async function onReferralRewardChosen(
+  callbackQueryId: string,
+  tgFromId: number,
+  rewardId: string,
+  kind: "gb" | "days",
+): Promise<void> {
+  const reward = getReferralReward(rewardId);
+  if (!reward || reward.status !== "pending") {
+    await answerCallbackQuery(callbackQueryId, { text: "Награда уже выбрана или недоступна.", show_alert: true });
+    return;
+  }
+  const inviter = getUser(reward.inviter_user_id);
+  if (!inviter || String(inviter.tg_id || "").trim() !== String(tgFromId).trim()) {
+    await answerCallbackQuery(callbackQueryId, { text: "Нет доступа к этой награде.", show_alert: true });
+    return;
+  }
+  if (kind === "gb") {
+    if (inviter.total_gb <= 0) {
+      await answerCallbackQuery(callbackQueryId, { text: "У вас безлимит. Выберите награду в днях.", show_alert: true });
+      return;
+    }
+    updateUserRow(inviter.id, { total_gb: inviter.total_gb + reward.reward_gb });
+    claimReferralReward(reward.id);
+    await answerCallbackQuery(callbackQueryId, { text: `Начислено +${reward.reward_gb} ГБ` });
+    await sendTelegramHtml(
+      tgFromId,
+      `🎁 Начислено <b>+${reward.reward_gb} ГБ</b> на вашу текущую подписку.`,
+      backHomeRow,
+    );
+  } else {
+    const base = Math.max(Date.now(), inviter.expiry_time > 0 ? inviter.expiry_time : 0);
+    updateUserRow(inviter.id, { expiry_time: snapExpiryTimeToNoonLocal(base + reward.reward_days * DAY_MS) });
+    claimReferralReward(reward.id);
+    await answerCallbackQuery(callbackQueryId, { text: `Добавлено +${reward.reward_days} дней` });
+    await sendTelegramHtml(
+      tgFromId,
+      `🎁 Срок вашей подписки продлен на <b>${reward.reward_days} дней</b>.`,
+      backHomeRow,
+    );
+  }
+  try {
+    await pushClientListToAllDeployedServers();
+  } catch (e) {
+    console.error("[telegram] push after referral reward:", e);
+  }
 }
 
 export async function onAdminPaymentReject(

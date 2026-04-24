@@ -22,6 +22,7 @@ import {
   onAdminPaymentConfirm,
   onAdminPaymentReject,
   onPaymentProofPhoto,
+  onReferralRewardChosen,
   onVpnPlanChosen,
   sendGbTopUpPlanPicker,
   sendVpnPlanPicker,
@@ -622,6 +623,12 @@ async function handleCallback(q: CallbackQuery): Promise<void> {
     const pnx = /^pnx:([0-9a-f]+)$/.exec(data);
     if (pnx) {
       await onAdminPaymentReject(q.id, fromId, pnx[1]!);
+      return;
+    }
+
+    const rr = /^refreward:(gb|days):([0-9a-f]+)$/.exec(data);
+    if (rr) {
+      await onReferralRewardChosen(q.id, fromId, rr[2]!, rr[1] as "gb" | "days");
       return;
     }
 

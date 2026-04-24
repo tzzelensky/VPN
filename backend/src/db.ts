@@ -127,8 +127,8 @@ export type SubscriptionShopConfig = {
 
 export type ReferralProgramConfig = {
   enabled: boolean;
-  inviter_reward_kind: "gb" | "days";
-  inviter_reward_value: number;
+  inviter_reward_gb: number;
+  inviter_reward_days: number;
   invited_discount_percent: number;
   invite_copy_text: string;
 };
@@ -139,6 +139,17 @@ export type ReferralInviteRow = {
   created_at: string;
   consumed: 0 | 1;
 };
+
+export type ReferralRewardRow = {
+  id: string;
+  inviter_user_id: number;
+  invitee_tg_user_id: number;
+  invitee_name: string;
+  reward_gb: number;
+  reward_days: number;
+  status: "pending" | "claimed";
+  created_at: string;
+ };
 
 export type ServerRow = {
   id: number;
@@ -182,6 +193,7 @@ type FileStore = {
   subscription_shop: SubscriptionShopConfig;
   referral_program: ReferralProgramConfig;
   referral_invites: ReferralInviteRow[];
+  referral_rewards: ReferralRewardRow[];
 };
 
 function defaultSubscriptionShop(): SubscriptionShopConfig {
@@ -204,8 +216,8 @@ function defaultSubscriptionShop(): SubscriptionShopConfig {
 function defaultReferralProgram(): ReferralProgramConfig {
   return {
     enabled: false,
-    inviter_reward_kind: "gb",
-    inviter_reward_value: 10,
+    inviter_reward_gb: 10,
+    inviter_reward_days: 7,
     invited_discount_percent: 10,
     invite_copy_text: "Я пользуюсь этим VPN, вот тебе скидка на первую покупку.",
   };
@@ -222,6 +234,7 @@ function emptyStore(): FileStore {
     subscription_shop: defaultSubscriptionShop(),
     referral_program: defaultReferralProgram(),
     referral_invites: [],
+    referral_rewards: [],
   };
 }
 
@@ -229,14 +242,22 @@ export function normalizeReferralProgram(raw: unknown): ReferralProgramConfig {
   const base = defaultReferralProgram();
   if (!raw || typeof raw !== "object") return base;
   const o = raw as Record<string, unknown>;
-  const kind = String(o.inviter_reward_kind ?? "").trim().toLowerCase() === "days" ? "days" : "gb";
-  const rewardVal = Math.max(1, Math.floor(Number(o.inviter_reward_value) || base.inviter_reward_value));
+  const legacyKind = String(o.inviter_reward_kind ?? "").trim().toLowerCase();
+  const legacyVal = Math.max(1, Math.floor(Number(o.inviter_reward_value) || 1));
+  const rewardGb = Math.max(
+    1,
+    Math.floor(Number(o.inviter_reward_gb) || (legacyKind === "gb" ? legacyVal : base.inviter_reward_gb)),
+  );
+  const rewardDays = Math.max(
+    1,
+    Math.floor(Number(o.inviter_reward_days) || (legacyKind === "days" ? legacyVal : base.inviter_reward_days)),
+  );
   const discount = Math.min(90, Math.max(0, Math.floor(Number(o.invited_discount_percent) || 0)));
   const copy = String(o.invite_copy_text ?? "").trim();
   return {
     enabled: o.enabled === true || o.enabled === 1 || o.enabled === "1",
-    inviter_reward_kind: kind,
-    inviter_reward_value: rewardVal,
+    inviter_reward_gb: rewardGb,
+    inviter_reward_days: rewardDays,
     invited_discount_percent: Number.isFinite(discount) ? discount : base.invited_discount_percent,
     invite_copy_text: copy || base.invite_copy_text,
   };
@@ -469,6 +490,31 @@ function readStore(): FileStore {
         } as ReferralInviteRow;
       })
       .filter((x): x is ReferralInviteRow => x != null);
+    const rewardsRaw = Array.isArray((parsed as { referral_rewards?: unknown }).referral_rewards)
+      ? (parsed as { referral_rewards: unknown[] }).referral_rewards
+      : [];
+    const referral_rewards = rewardsRaw
+      .map((x) => {
+        if (!x || typeof x !== "object") return null;
+        const o = x as Record<string, unknown>;
+        const id = String(o.id ?? "").trim();
+        const inviterUserId = Number(o.inviter_user_id);
+        const inviteeTgUserId = Number(o.invitee_tg_user_id);
+        if (!id || !Number.isFinite(inviterUserId) || inviterUserId <= 0 || !Number.isFinite(inviteeTgUserId) || inviteeTgUserId <= 0) {
+          return null;
+        }
+        return {
+          id,
+          inviter_user_id: Math.floor(inviterUserId),
+          invitee_tg_user_id: Math.floor(inviteeTgUserId),
+          invitee_name: String(o.invitee_name ?? "").trim(),
+          reward_gb: Math.max(1, Math.floor(Number(o.reward_gb) || 1)),
+          reward_days: Math.max(1, Math.floor(Number(o.reward_days) || 1)),
+          status: o.status === "claimed" ? "claimed" : "pending",
+          created_at: String(o.created_at ?? new Date().toISOString()),
+        } as ReferralRewardRow;
+      })
+      .filter((x): x is ReferralRewardRow => x != null);
     return {
       subscription_token: parsed.subscription_token ?? null,
       next_server_id: Number(parsed.next_server_id) > 0 ? Number(parsed.next_server_id) : 1,
@@ -481,6 +527,7 @@ function readStore(): FileStore {
       ),
       referral_program: normalizeReferralProgram((parsed as { referral_program?: unknown }).referral_program),
       referral_invites,
+      referral_rewards,
     };
   } catch {
     return emptyStore();
@@ -1080,6 +1127,46 @@ export function consumeReferralInviteByTgUser(tgUserId: number): void {
     if (i === -1) return;
     rows[i] = { ...rows[i]!, consumed: 1 };
   });
+}
+
+export function createReferralReward(input: {
+  inviter_user_id: number;
+  invitee_tg_user_id: number;
+  invitee_name: string;
+  reward_gb: number;
+  reward_days: number;
+}): ReferralRewardRow {
+  const row: ReferralRewardRow = {
+    id: randomBytes(8).toString("hex"),
+    inviter_user_id: Math.floor(input.inviter_user_id),
+    invitee_tg_user_id: Math.floor(input.invitee_tg_user_id),
+    invitee_name: String(input.invitee_name ?? "").trim(),
+    reward_gb: Math.max(1, Math.floor(Number(input.reward_gb) || 1)),
+    reward_days: Math.max(1, Math.floor(Number(input.reward_days) || 1)),
+    status: "pending",
+    created_at: new Date().toISOString(),
+  };
+  mutate((store) => {
+    store.referral_rewards = [...(store.referral_rewards ?? []), row];
+  });
+  return row;
+}
+
+export function getReferralReward(id: string): ReferralRewardRow | undefined {
+  return readStore().referral_rewards.find((r) => r.id === id);
+}
+
+export function claimReferralReward(id: string): ReferralRewardRow | undefined {
+  let out: ReferralRewardRow | undefined;
+  mutate((store) => {
+    const rows = store.referral_rewards ?? [];
+    const i = rows.findIndex((r) => r.id === id && r.status === "pending");
+    if (i === -1) return;
+    const next = { ...rows[i]!, status: "claimed" as const };
+    rows[i] = next;
+    out = next;
+  });
+  return out;
 }
 
 export function initDb(): void {

@@ -108,21 +108,19 @@ export default function ReferralProgramPage({ onLogout }: { onLogout: () => void
             </div>
 
             <div className="form-field">
-              <label>Награда пригласившему</label>
-              <select
-                value={cfg.inviter_reward_kind}
-                onChange={(e) => setCfg({ ...cfg, inviter_reward_kind: e.target.value === "days" ? "days" : "gb" })}
-              >
-                <option value="gb">ГБ</option>
-                <option value="days">Дней подписки</option>
-              </select>
-            </div>
-            <div className="form-field">
-              <label>Размер награды</label>
+              <label>Награда пригласившему: ГБ</label>
               <input
                 inputMode="numeric"
-                value={cfg.inviter_reward_value}
-                onChange={(e) => setCfg({ ...cfg, inviter_reward_value: Math.max(1, Math.floor(Number(e.target.value) || 1)) })}
+                value={cfg.inviter_reward_gb}
+                onChange={(e) => setCfg({ ...cfg, inviter_reward_gb: Math.max(1, Math.floor(Number(e.target.value) || 1)) })}
+              />
+            </div>
+            <div className="form-field">
+              <label>Награда пригласившему: Дней</label>
+              <input
+                inputMode="numeric"
+                value={cfg.inviter_reward_days}
+                onChange={(e) => setCfg({ ...cfg, inviter_reward_days: Math.max(1, Math.floor(Number(e.target.value) || 1)) })}
               />
             </div>
 

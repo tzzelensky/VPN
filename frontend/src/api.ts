@@ -437,8 +437,8 @@ export async function sendCommunication(payload: SendCommunicationPayload): Prom
 
 export type ReferralProgramDto = {
   enabled: boolean;
-  inviter_reward_kind: "gb" | "days";
-  inviter_reward_value: number;
+  inviter_reward_gb: number;
+  inviter_reward_days: number;
   invited_discount_percent: number;
   invite_copy_text: string;
 };
