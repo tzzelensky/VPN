@@ -23,10 +23,7 @@ export function clearSubscriptionUsageMonotonic(user: Pick<UserRow, "id" | "sub_
  */
 function profileTitleBase(user: UserRow): string {
   const base = (user.name || user.email || "VPN").trim();
-  const note = (user.comment || "").trim();
-  if (!note || note === base) return base;
-  const combined = `${base} · ${note}`;
-  return combined.length <= 200 ? combined : combined.slice(0, 200);
+  return base;
 }
 
 function ruExpirySnippet(ms: number): string {

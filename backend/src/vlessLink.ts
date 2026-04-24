@@ -39,12 +39,9 @@ function pickStr(serverVal: string, userVal: string): string {
 /**
  * VLESS URI для подписки: Reality из импорта x-ui или TCP без TLS (как в панели).
  */
-/** Подпись узла в подписке: сервер, имя клиента и при необходимости комментарий (как в x-ui). */
+/** Подпись узла в подписке: только сервер и имя клиента (внутренние заметки не публикуем). */
 export function vlessListLabel(serverName: string, user: Pick<UserRow, "name" | "comment">): string {
-  const base = `${serverName} (${user.name})`;
-  const note = (user.comment || "").trim();
-  if (!note || note === user.name.trim()) return base;
-  return `${base} · ${note}`;
+  return `${serverName} (${user.name})`;
 }
 
 export function buildVlessUriForUser(
