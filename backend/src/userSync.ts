@@ -6,6 +6,7 @@ import {
   type ServerRow,
 } from "./db.js";
 import {
+  alterInboundUsersViaApi,
   TZADMIN_XRAY_CONFIG_PATH,
   removeClientUuidFromTzadmin,
   syncServerClientUuids,
@@ -34,9 +35,15 @@ export async function resolveConfigPath(row: ServerRow, log?: SshLog): Promise<s
 let pushQueue: Promise<void> = Promise.resolve();
 /** Последняя успешно синхронизированная сигнатура UUID по server.id. */
 const lastSyncedSignatureByServerId = new Map<number, string>();
+/** Последний успешно синхронизированный набор UUID по server.id (для дельта-обновлений через Xray API). */
+const lastSyncedUuidSetByServerId = new Map<number, Set<string>>();
 
 function signatureForUuids(uuids: string[]): string {
   return [...uuids].sort().join(",");
+}
+
+function setFromUuids(uuids: string[]): Set<string> {
+  return new Set(uuids.map((x) => x.trim()).filter(Boolean));
 }
 
 /** Обновить inbound на всех развёрнутых серверах по текущим пользователям в БД. */
@@ -50,6 +57,29 @@ export async function pushClientListToAllDeployedServers(log?: SshLog): Promise<
       if (prevSig === sig) {
         log?.(`Синхронизация ${row.host} пропущена: список UUID не изменился.`);
         continue;
+      }
+      const nextSet = setFromUuids(uuids);
+      const prevSet = lastSyncedUuidSetByServerId.get(row.id);
+      if (prevSet) {
+        const add: string[] = [];
+        const rem: string[] = [];
+        for (const id of nextSet) if (!prevSet.has(id)) add.push(id);
+        for (const id of prevSet) if (!nextSet.has(id)) rem.push(id);
+        // Быстрый путь без рестарта: точечный add/remove пользователей через HandlerService.
+        if (add.length + rem.length > 0 && add.length + rem.length <= 4) {
+          const fast = await alterInboundUsersViaApi(
+            sshCfg(row),
+            { configPath: path, preferredVlessPort: row.vless_port, addUuids: add, removeUuids: rem },
+            log,
+          );
+          if (fast.ok) {
+            log?.(`Быстрый sync ${row.host}: ${fast.detail}`);
+            lastSyncedSignatureByServerId.set(row.id, sig);
+            lastSyncedUuidSetByServerId.set(row.id, nextSet);
+            continue;
+          }
+          log?.(`Быстрый sync недоступен на ${row.host}, fallback на полный sync: ${fast.detail}`);
+        }
       }
       log?.(`Синхронизация ${row.host} → ${path} (${uuids.length} UUID), порт ${row.vless_port}…`);
       const r = await syncServerClientUuids(
@@ -83,6 +113,7 @@ export async function pushClientListToAllDeployedServers(log?: SshLog): Promise<
         });
       }
       lastSyncedSignatureByServerId.set(row.id, sig);
+      lastSyncedUuidSetByServerId.set(row.id, nextSet);
     }
   };
   const job = pushQueue.then(() => run());
@@ -93,6 +124,16 @@ export async function pushClientListToAllDeployedServers(log?: SshLog): Promise<
 export async function removeUserUuidFromAllServers(userVlessUuid: string, log?: SshLog): Promise<void> {
   for (const row of listDeployedServers()) {
     const path = await resolveConfigPath(row, log);
+    const fast = await alterInboundUsersViaApi(
+      sshCfg(row),
+      { configPath: path, preferredVlessPort: row.vless_port, removeUuids: [userVlessUuid] },
+      log,
+    );
+    if (fast.ok) {
+      lastSyncedSignatureByServerId.delete(row.id);
+      lastSyncedUuidSetByServerId.delete(row.id);
+      continue;
+    }
     const fresh = getServer(row.id);
     const fallback = fresh?.vless_uuid ?? null;
     log?.(`Удаление UUID пользователя на ${row.host}…`);
@@ -107,6 +148,9 @@ export async function removeUserUuidFromAllServers(userVlessUuid: string, log?: 
       log,
     );
     if (!r.ok) log?.(`Ошибка на ${row.host}: ${r.detail}`);
-    else lastSyncedSignatureByServerId.delete(row.id);
+    else {
+      lastSyncedSignatureByServerId.delete(row.id);
+      lastSyncedUuidSetByServerId.delete(row.id);
+    }
   }
 }

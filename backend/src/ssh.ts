@@ -559,6 +559,135 @@ function chooseManagedPort(inbounds: Record<string, unknown>[], preferredPort: n
   return p < 65535 ? p : preferredPort;
 }
 
+function parseXrayApiServer(config: Record<string, unknown>): string | null {
+  const inbounds = config.inbounds;
+  if (Array.isArray(inbounds)) {
+    for (const raw of inbounds) {
+      const ib = raw as Record<string, unknown>;
+      if (String(ib.tag ?? "") !== "api") continue;
+      const listenRaw = ib.listen;
+      const listen =
+        listenRaw === "0.0.0.0" || listenRaw === "::" ? "127.0.0.1" : String(listenRaw ?? "127.0.0.1");
+      const port = Number(ib.port);
+      if (!Number.isFinite(port) || port <= 0) continue;
+      if (listen.includes(":") && !listen.startsWith("[")) return `[${listen}]:${port}`;
+      if (listen.startsWith("[") && listen.includes("]")) return `${listen}:${port}`;
+      return `${listen}:${port}`;
+    }
+  }
+  const api = config.api as Record<string, unknown> | undefined;
+  if (api && typeof api.listen === "string" && api.listen.trim()) {
+    return api.listen.trim();
+  }
+  return null;
+}
+
+function pickInboundForApiUserOps(config: Record<string, unknown>, preferredPort: number): Record<string, unknown> | null {
+  const inbounds = Array.isArray(config.inbounds) ? (config.inbounds as Record<string, unknown>[]) : [];
+  const managed = inbounds.find((ib) => String(ib.tag ?? "") === TZADMIN_VLESS_TAG);
+  if (managed) return managed;
+  const idx = findCandidateVlessInboundIndex(inbounds, preferredPort);
+  if (idx < 0) return null;
+  return inbounds[idx] ?? null;
+}
+
+function xrayBinaryDetectScript(): string {
+  return [
+    "PATH=/usr/local/bin:/usr/bin:/usr/local/x-ui/bin:$PATH",
+    "X=$(command -v xray 2>/dev/null || true)",
+    '[ -z "$X" ] && [ -x /usr/local/x-ui/bin/xray-linux-amd64 ] && X=/usr/local/x-ui/bin/xray-linux-amd64',
+    '[ -z "$X" ] && [ -x /usr/local/x-ui/bin/xray ] && X=/usr/local/x-ui/bin/xray',
+    '[ -z "$X" ] && [ -x /usr/local/bin/xray ] && X=/usr/local/bin/xray',
+    '[ -z "$X" ] && [ -x /usr/bin/xray ] && X=/usr/bin/xray',
+    '[ -n "$X" ] || { echo "xray binary not found for api user ops" >&2; exit 127; }',
+  ].join("; ");
+}
+
+export async function alterInboundUsersViaApi(
+  cfg: SshConfig,
+  opts: { configPath: string; preferredVlessPort: number; addUuids?: string[]; removeUuids?: string[] },
+  log?: SshLog,
+): Promise<{ ok: boolean; detail: string }> {
+  try {
+    const detail = await withSsh(
+      cfg,
+      async (conn) => {
+        const raw = await sftpReadFile(conn, opts.configPath);
+        const config = JSON.parse(raw.toString("utf8")) as Record<string, unknown>;
+        const apiServer = parseXrayApiServer(config);
+        if (!apiServer) throw new Error("xray api.listen не найден");
+        const inbound = pickInboundForApiUserOps(config, opts.preferredVlessPort);
+        if (!inbound) throw new Error("не найден VLESS inbound для API user ops");
+        const tag = String(inbound.tag ?? "").trim();
+        if (!tag) throw new Error("VLESS inbound без tag, API user ops невозможен");
+        const sec = String(streamSettingsOfInbound(inbound).security ?? "").toLowerCase();
+        const defaultFlow = sec === "reality" ? "xtls-rprx-vision" : "";
+        const addUuids = [...new Set((opts.addUuids ?? []).map((x) => String(x).trim()).filter(Boolean))];
+        const removeUuids = [...new Set((opts.removeUuids ?? []).map((x) => String(x).trim()).filter(Boolean))];
+        if (addUuids.length === 0 && removeUuids.length === 0) return "no-op";
+
+        if (addUuids.length > 0) {
+          const clients = addUuids.map((id) => ({
+            id,
+            email: id,
+            level: 0,
+            ...(defaultFlow ? { flow: defaultFlow } : {}),
+          }));
+          const payload = {
+            inbounds: [
+              {
+                tag,
+                protocol: "vless",
+                settings: {
+                  clients,
+                  decryption: "none",
+                },
+              },
+            ],
+          };
+          const aduB64 = Buffer.from(JSON.stringify(payload), "utf8").toString("base64");
+          const cmd = [
+            xrayBinaryDetectScript(),
+            `API=${shellQuote(apiServer)}`,
+            "TMP=/tmp/tzadmin-adu-$$.json",
+            `printf %s ${shellQuote(aduB64)} | base64 -d > \"$TMP\"`,
+            "\"$X\" api adu --server=\"$API\" \"$TMP\"",
+            "RC=$?",
+            "rm -f \"$TMP\"",
+            "[ \"$RC\" -eq 0 ] || exit \"$RC\"",
+          ].join("; ");
+          const r = await exec(conn, `bash -lc ${JSON.stringify(cmd)}`);
+          if (r.code !== 0) {
+            const txt = (r.stderr || r.stdout || "").trim();
+            throw new Error(`xray api adu failed: ${txt || `exit ${r.code}`}`);
+          }
+        }
+
+        if (removeUuids.length > 0) {
+          const cmd = [
+            xrayBinaryDetectScript(),
+            `API=${shellQuote(apiServer)}`,
+            `TAG=${shellQuote(tag)}`,
+            ...removeUuids.map((id) => `"$X" api rmu --server="$API" -tag="$TAG" ${shellQuote(id)}`),
+          ].join("; ");
+          const r = await exec(conn, `bash -lc ${JSON.stringify(cmd)}`);
+          if (r.code !== 0) {
+            const txt = (r.stderr || r.stdout || "").trim();
+            throw new Error(`xray api rmu failed: ${txt || `exit ${r.code}`}`);
+          }
+        }
+
+        log?.(`Xray API user ops OK on inbound tag=${tag}: +${addUuids.length}, -${removeUuids.length}`);
+        return `ok +${addUuids.length} -${removeUuids.length}`;
+      },
+      log,
+    );
+    return { ok: true, detail };
+  } catch (e) {
+    return { ok: false, detail: e instanceof Error ? e.message : String(e) };
+  }
+}
+
 export async function testSshConnection(
   cfg: SshConfig,
   log?: SshLog,
