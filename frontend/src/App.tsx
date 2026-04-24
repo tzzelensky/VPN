@@ -6,6 +6,7 @@ import ServersPage from "./pages/ServersPage";
 import UsersPage from "./pages/UsersPage";
 import SubscriptionShopPage from "./pages/SubscriptionShopPage";
 import CommunicationsPage from "./pages/CommunicationsPage";
+import ReferralProgramPage from "./pages/ReferralProgramPage";
 
 function useSession() {
   const [ready, setReady] = useState(false);
@@ -62,6 +63,10 @@ export default function App() {
       <Route
         path="/communications"
         element={loggedIn ? <CommunicationsPage onLogout={() => setLoggedIn(false)} /> : <Navigate to="/login" replace />}
+      />
+      <Route
+        path="/referral-program"
+        element={loggedIn ? <ReferralProgramPage onLogout={() => setLoggedIn(false)} /> : <Navigate to="/login" replace />}
       />
       <Route path="/" element={<Navigate to={loggedIn ? "/servers" : "/login"} replace />} />
       <Route path="*" element={<Navigate to="/" replace />} />

@@ -1,4 +1,13 @@
-import { deleteUser, findUsersByTelegramChatId, getUser, getSubscriptionShop, listUsers, updateUserRow } from "../db.js";
+import {
+  deleteUser,
+  findUsersByTelegramChatId,
+  getReferralProgram,
+  getUser,
+  getSubscriptionShop,
+  listUsers,
+  setReferralInvite,
+  updateUserRow,
+} from "../db.js";
 import { answerCallbackQuery, sendTelegramHtml, sendTelegramPhoto } from "./api.js";
 import { escHtml, formatStatsHtml } from "./format.js";
 import {
@@ -184,7 +193,7 @@ function linkedUsers(fromId: number) {
 async function sendMainMenuLinked(chatId: number, from: TgUser): Promise<void> {
   const name = displayName(from);
   const text = `👋 <b>Привет, ${escHtml(name)}!</b>\n\n👇 <b>Выберите действие:</b>`;
-  await sendTelegramHtml(chatId, text, mainMenuInline(isAdminTg(from.id)));
+  await sendTelegramHtml(chatId, text, mainMenuInline(isAdminTg(from.id), getReferralProgram().enabled));
 }
 
 /** /start и «Меню»: без привязки — экран покупки; с привязкой — основное меню. */
@@ -203,6 +212,11 @@ async function sendWelcome(chatId: number, from: TgUser): Promise<void> {
       ? "Оформление новых подписок сейчас <b>отключено</b>. Когда администратор привяжет ваш Telegram к аккаунту в панели, здесь появится меню с оплатой продления и ссылкой на VPN."
       : "Нажмите <b>«Купить подписку»</b> — выберите тариф, оплатите по ссылке и отправьте <b>фото чека</b> в этот чат. После проверки администратор подключит доступ.");
   await sendTelegramHtml(chatId, text, newUserKeyboard(sales));
+}
+
+function parseStartArg(text: string): string {
+  const m = /^\/start(?:@\w+)?(?:\s+(.+))?$/i.exec(text.trim());
+  return (m?.[1] ?? "").trim();
 }
 
 export async function handleTelegramUpdate(body: unknown): Promise<void> {
@@ -226,6 +240,15 @@ export async function handleTelegramUpdate(body: unknown): Promise<void> {
 
   const t = text.toLowerCase();
   if (t === "/help" || t.startsWith("/start")) {
+    const arg = parseStartArg(text);
+    const ref = /^ref_(\d+)$/i.exec(arg);
+    if (ref) {
+      const inviterId = Number(ref[1]);
+      const inviter = getUser(inviterId);
+      if (inviter && inviter.tg_id && String(inviter.tg_id).trim() !== String(from.id).trim() && linkedUsers(from.id).length === 0) {
+        setReferralInvite(from.id, inviterId);
+      }
+    }
     await sendWelcome(chatId, from);
     return;
   }
@@ -235,7 +258,11 @@ export async function handleTelegramUpdate(body: unknown): Promise<void> {
     const name = text.trim();
     if (name.toLowerCase() === "отмена" || name.toLowerCase() === "/cancel") {
       newSubscriptionDraftByChat.delete(chatId);
-      await sendTelegramHtml(chatId, "Создание новой подписки отменено.", mainMenuInline(isAdminTg(from.id)));
+      await sendTelegramHtml(
+        chatId,
+        "Создание новой подписки отменено.",
+        mainMenuInline(isAdminTg(from.id), getReferralProgram().enabled),
+      );
       return;
     }
     if (!name) {
@@ -404,14 +431,18 @@ async function handleCallback(q: CallbackQuery): Promise<void> {
     if (data === "pnew_cancel") {
       await answerCallbackQuery(q.id);
       newSubscriptionDraftByChat.delete(chatId);
-      await sendTelegramHtml(chatId, "Создание новой подписки отменено.", mainMenuInline(isAdminTg(fromId)));
+      await sendTelegramHtml(
+        chatId,
+        "Создание новой подписки отменено.",
+        mainMenuInline(isAdminTg(fromId), getReferralProgram().enabled),
+      );
       return;
     }
 
     if (data === "pdel_menu") {
       await answerCallbackQuery(q.id);
       if (linked.length === 0) {
-        await sendTelegramHtml(chatId, "У вас нет подписок для удаления.", mainMenuInline(isAdminTg(fromId)));
+        await sendTelegramHtml(chatId, "У вас нет подписок для удаления.", mainMenuInline(isAdminTg(fromId), getReferralProgram().enabled));
         return;
       }
       await sendTelegramHtml(chatId, "<b>Выберите подписку для удаления:</b>", payDeletePickerKeyboard(linked));
@@ -457,7 +488,44 @@ async function handleCallback(q: CallbackQuery): Promise<void> {
       }
       deleteUser(userId);
       await answerCallbackQuery(q.id, { text: "Подписка удалена." });
-      await sendTelegramHtml(chatId, "Подписка удалена.", mainMenuInline(isAdminTg(fromId)));
+      await sendTelegramHtml(chatId, "Подписка удалена.", mainMenuInline(isAdminTg(fromId), getReferralProgram().enabled));
+      return;
+    }
+
+    if (data === "ref_menu") {
+      await answerCallbackQuery(q.id);
+      const refCfg = getReferralProgram();
+      if (!refCfg.enabled) {
+        await sendTelegramHtml(chatId, "Реферальная программа сейчас отключена.", backHomeRow);
+        return;
+      }
+      const text =
+        `Посоветуй VPN другу и получи награду на выбор!\n` +
+        `А друг получит скидку на первую подписку <b>${refCfg.invited_discount_percent}%</b>.`;
+      await sendTelegramHtml(chatId, text, {
+        inline_keyboard: [
+          [{ text: "Пригласить друга⚡", callback_data: "ref_send" }],
+          [{ text: "« В меню", callback_data: "home" }],
+        ],
+      });
+      return;
+    }
+
+    if (data === "ref_send") {
+      await answerCallbackQuery(q.id);
+      const linkedUser = linked[0];
+      const refCfg = getReferralProgram();
+      if (!refCfg.enabled) {
+        await sendTelegramHtml(chatId, "Реферальная программа сейчас отключена.", backHomeRow);
+        return;
+      }
+      if (!linkedUser) {
+        await sendTelegramHtml(chatId, "Сначала активируйте свою подписку, затем сможете приглашать друзей.", backHomeRow);
+        return;
+      }
+      const botName = (process.env.TELEGRAM_BOT_USERNAME ?? "").trim().replace(/^@/, "");
+      const link = botName ? `https://t.me/${botName}?start=ref_${linkedUser.id}` : `ref_${linkedUser.id}`;
+      await sendTelegramHtml(chatId, `${escHtml(refCfg.invite_copy_text)}\n\n${escHtml(link)}`, backHomeRow);
       return;
     }
 

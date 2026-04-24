@@ -3,13 +3,14 @@ export function publicSubscriptionUrl(subToken: string): string {
   return `${base}/sub/${encodeURIComponent(subToken)}`;
 }
 
-export function mainMenuInline(isAdmin = false) {
+export function mainMenuInline(isAdmin = false, referralEnabled = false) {
   const rows: { text: string; callback_data: string }[][] = [
     [{ text: "Статистика по подписке", callback_data: "stats" }],
     [{ text: "Подписка", callback_data: "sub" }],
     [{ text: "Оплата подписки", callback_data: "pay" }],
     [{ text: "Докупить ГБ", callback_data: "buygb" }],
   ];
+  if (referralEnabled) rows.push([{ text: "Пригласи друга", callback_data: "ref_menu" }]);
   if (isAdmin) rows.push([{ text: "Клиенты", callback_data: "admin_clients" }]);
   return { inline_keyboard: rows };
 }

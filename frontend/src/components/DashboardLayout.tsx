@@ -40,6 +40,12 @@ export default function DashboardLayout({
           >
             Коммуникации
           </NavLink>
+          <NavLink
+            to="/referral-program"
+            className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}
+          >
+            Реферальная программая
+          </NavLink>
         </nav>
         <button type="button" className="ghost" onClick={() => void doLogout()}>
           Выйти

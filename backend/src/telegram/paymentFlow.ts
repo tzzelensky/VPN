@@ -1,9 +1,12 @@
 import {
+  consumeReferralInviteByTgUser,
   createUser,
   deletePaymentSession,
   findAwaitingProofSessionByChat,
   findPendingAdminSessionByChat,
   findUsersByTelegramChatId,
+  getReferralInviteByTgUser,
+  getReferralProgram,
   getUser,
   getPaymentSession,
   getSubscriptionShop,
@@ -148,7 +151,7 @@ function isPaymentAdmin(fromId: number): boolean {
 
 function replyKeyboardForPayer(tgUserId: number) {
   const linked = findUsersByTelegramChatId(tgUserId);
-  if (linked.length > 0) return mainMenuInline();
+  if (linked.length > 0) return mainMenuInline(false, getReferralProgram().enabled);
   return newUserKeyboard(getSubscriptionShop().sales_disabled);
 }
 
@@ -238,11 +241,16 @@ export async function onVpnPlanChosen(
     return;
   }
   const meta = getPlanRuntimeMeta(planId);
+  const invite = linked.length === 0 ? getReferralInviteByTgUser(tgUserId) : undefined;
+  const refCfg = getReferralProgram();
+  const discountPercent =
+    !target && !newName && linked.length === 0 && invite && refCfg.enabled ? refCfg.invited_discount_percent : 0;
+  const finalPrice = Math.max(0, Math.floor(meta.priceRub - (meta.priceRub * discountPercent) / 100));
   const payUrl = effectivePaymentUrl();
   startPaymentAwaitingProof(chatId, tgUserId, planId, "subscription", target?.id, newName || undefined, {
     username: from?.username,
     first_name: from?.first_name,
-  });
+  }, { inviter_user_id: invite?.inviter_user_id, discount_percent: discountPercent });
   const linkEsc = escHtml(payUrl);
   const body =
     `<b>Выбрано:</b> ${escHtml(planSummary(meta))}\n` +
@@ -251,7 +259,9 @@ export async function onVpnPlanChosen(
       : target
         ? `<b>Подписка:</b> ${escHtml(userTargetTitle(target))}\n`
         : "") +
-    `<b>Сумма к оплате:</b> ${meta.priceRub} ₽\n\n` +
+    (discountPercent > 0
+      ? `<b>Сумма к оплате:</b> <s>${meta.priceRub} ₽</s> <b>${finalPrice} ₽</b> (скидка ${discountPercent}%)\n\n`
+      : `<b>Сумма к оплате:</b> ${meta.priceRub} ₽\n\n`) +
     `<b>Ссылка для оплаты:</b>\n<a href="${linkEsc}">${linkEsc}</a>\n\n` +
     `В комментарии к переводу укажите <b>только номер тарифа</b>: <code>1</code>, <code>2</code> или <code>3</code> ` +
     `(как выбрали выше).\n\n` +
@@ -458,6 +468,34 @@ export async function onAdminPaymentConfirm(
       : autoCreatedUser
         ? [autoCreatedUser]
         : linked;
+
+  if (!isTopUp && autoCreated && sess.referral_inviter_user_id && (sess.referral_discount_percent ?? 0) > 0) {
+    const refCfg = getReferralProgram();
+    const inviter = getUser(sess.referral_inviter_user_id);
+    if (inviter) {
+      if (refCfg.inviter_reward_kind === "gb") {
+        if (inviter.total_gb > 0) {
+          updateUserRow(inviter.id, { total_gb: inviter.total_gb + refCfg.inviter_reward_value });
+        }
+      } else {
+        const base = Math.max(Date.now(), inviter.expiry_time > 0 ? inviter.expiry_time : 0);
+        const extraMs = refCfg.inviter_reward_value * DAY_MS;
+        updateUserRow(inviter.id, { expiry_time: snapExpiryTimeToNoonLocal(base + extraMs) });
+      }
+      try {
+        await sendTelegramHtml(
+          Number(String(inviter.tg_id || "").trim()),
+          refCfg.inviter_reward_kind === "gb"
+            ? `🎁 По рефералке начислено <b>+${refCfg.inviter_reward_value} ГБ</b>.`
+            : `🎁 По рефералке продлен срок подписки на <b>${refCfg.inviter_reward_value} дн.</b>`,
+          backHomeRow,
+        );
+      } catch {
+        // silent
+      }
+    }
+    consumeReferralInviteByTgUser(sess.tg_user_id);
+  }
 
   const affected: UserRow[] = [];
   const skippedUnlimited: UserRow[] = [];

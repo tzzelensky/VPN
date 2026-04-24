@@ -97,6 +97,8 @@ export type PaymentSessionRow = {
   /** Снимок из Telegram при выборе тарифа — для имени клиента в панели. */
   tg_username?: string;
   tg_first_name?: string;
+  referral_inviter_user_id?: number;
+  referral_discount_percent?: number;
 };
 
 export type SubscriptionShopPlanRow = {
@@ -121,6 +123,21 @@ export type SubscriptionShopConfig = {
   payment_url: string;
   plans: SubscriptionShopPlanRow[];
   topup_plans: TopUpShopPlanRow[];
+};
+
+export type ReferralProgramConfig = {
+  enabled: boolean;
+  inviter_reward_kind: "gb" | "days";
+  inviter_reward_value: number;
+  invited_discount_percent: number;
+  invite_copy_text: string;
+};
+
+export type ReferralInviteRow = {
+  tg_user_id: number;
+  inviter_user_id: number;
+  created_at: string;
+  consumed: 0 | 1;
 };
 
 export type ServerRow = {
@@ -163,6 +180,8 @@ type FileStore = {
   users: UserRow[];
   payment_sessions: PaymentSessionRow[];
   subscription_shop: SubscriptionShopConfig;
+  referral_program: ReferralProgramConfig;
+  referral_invites: ReferralInviteRow[];
 };
 
 function defaultSubscriptionShop(): SubscriptionShopConfig {
@@ -182,6 +201,16 @@ function defaultSubscriptionShop(): SubscriptionShopConfig {
   };
 }
 
+function defaultReferralProgram(): ReferralProgramConfig {
+  return {
+    enabled: false,
+    inviter_reward_kind: "gb",
+    inviter_reward_value: 10,
+    invited_discount_percent: 10,
+    invite_copy_text: "Я пользуюсь этим VPN, вот тебе скидка на первую покупку.",
+  };
+}
+
 function emptyStore(): FileStore {
   return {
     subscription_token: null,
@@ -191,6 +220,25 @@ function emptyStore(): FileStore {
     users: [],
     payment_sessions: [],
     subscription_shop: defaultSubscriptionShop(),
+    referral_program: defaultReferralProgram(),
+    referral_invites: [],
+  };
+}
+
+export function normalizeReferralProgram(raw: unknown): ReferralProgramConfig {
+  const base = defaultReferralProgram();
+  if (!raw || typeof raw !== "object") return base;
+  const o = raw as Record<string, unknown>;
+  const kind = String(o.inviter_reward_kind ?? "").trim().toLowerCase() === "days" ? "days" : "gb";
+  const rewardVal = Math.max(1, Math.floor(Number(o.inviter_reward_value) || base.inviter_reward_value));
+  const discount = Math.min(90, Math.max(0, Math.floor(Number(o.invited_discount_percent) || 0)));
+  const copy = String(o.invite_copy_text ?? "").trim();
+  return {
+    enabled: o.enabled === true || o.enabled === 1 || o.enabled === "1",
+    inviter_reward_kind: kind,
+    inviter_reward_value: rewardVal,
+    invited_discount_percent: Number.isFinite(discount) ? discount : base.invited_discount_percent,
+    invite_copy_text: copy || base.invite_copy_text,
   };
 }
 
@@ -278,6 +326,14 @@ function normalizePaymentSession(raw: unknown): PaymentSessionRow | null {
     proof_file_id: o.proof_file_id != null ? String(o.proof_file_id) : undefined,
     tg_username: o.tg_username != null ? String(o.tg_username).trim() : undefined,
     tg_first_name: o.tg_first_name != null ? String(o.tg_first_name).trim() : undefined,
+    referral_inviter_user_id:
+      Number.isFinite(Number(o.referral_inviter_user_id)) && Number(o.referral_inviter_user_id) > 0
+        ? Math.floor(Number(o.referral_inviter_user_id))
+        : undefined,
+    referral_discount_percent:
+      Number.isFinite(Number(o.referral_discount_percent)) && Number(o.referral_discount_percent) >= 0
+        ? Math.floor(Number(o.referral_discount_percent))
+        : undefined,
   };
 }
 
@@ -395,6 +451,24 @@ function readStore(): FileStore {
     const payment_sessions = sessionsRaw
       .map((x) => normalizePaymentSession(x))
       .filter((x): x is PaymentSessionRow => x != null);
+    const invitesRaw = Array.isArray((parsed as { referral_invites?: unknown }).referral_invites)
+      ? (parsed as { referral_invites: unknown[] }).referral_invites
+      : [];
+    const referral_invites = invitesRaw
+      .map((x) => {
+        if (!x || typeof x !== "object") return null;
+        const o = x as Record<string, unknown>;
+        const tg = Number(o.tg_user_id);
+        const inviter = Number(o.inviter_user_id);
+        if (!Number.isFinite(tg) || tg <= 0 || !Number.isFinite(inviter) || inviter <= 0) return null;
+        return {
+          tg_user_id: Math.floor(tg),
+          inviter_user_id: Math.floor(inviter),
+          created_at: String(o.created_at ?? new Date().toISOString()),
+          consumed: o.consumed === 1 ? 1 : 0,
+        } as ReferralInviteRow;
+      })
+      .filter((x): x is ReferralInviteRow => x != null);
     return {
       subscription_token: parsed.subscription_token ?? null,
       next_server_id: Number(parsed.next_server_id) > 0 ? Number(parsed.next_server_id) : 1,
@@ -405,6 +479,8 @@ function readStore(): FileStore {
       subscription_shop: normalizeSubscriptionShop(
         (parsed as { subscription_shop?: unknown }).subscription_shop,
       ),
+      referral_program: normalizeReferralProgram((parsed as { referral_program?: unknown }).referral_program),
+      referral_invites,
     };
   } catch {
     return emptyStore();
@@ -908,6 +984,7 @@ export function startPaymentAwaitingProof(
   target_user_id?: number,
   new_subscription_name?: string,
   tgProfile?: { username?: string; first_name?: string },
+  referralMeta?: { inviter_user_id?: number; discount_percent?: number },
 ): string {
   const id = randomBytes(8).toString("hex");
   const un = (tgProfile?.username ?? "").trim().replace(/^@/, "");
@@ -929,6 +1006,12 @@ export function startPaymentAwaitingProof(
       status: "awaiting_proof",
       ...(un ? { tg_username: un } : {}),
       ...(fn ? { tg_first_name: fn } : {}),
+      ...(referralMeta?.inviter_user_id && referralMeta.inviter_user_id > 0
+        ? { referral_inviter_user_id: Math.floor(referralMeta.inviter_user_id) }
+        : {}),
+      ...(Number.isFinite(Number(referralMeta?.discount_percent))
+        ? { referral_discount_percent: Math.max(0, Math.floor(Number(referralMeta?.discount_percent))) }
+        : {}),
     });
   });
   return id;
@@ -959,6 +1042,43 @@ export function getSubscriptionShop(): SubscriptionShopConfig {
 export function setSubscriptionShop(config: SubscriptionShopConfig): void {
   mutate((store) => {
     store.subscription_shop = normalizeSubscriptionShop(config);
+  });
+}
+
+export function getReferralProgram(): ReferralProgramConfig {
+  return normalizeReferralProgram(readStore().referral_program);
+}
+
+export function setReferralProgram(config: ReferralProgramConfig): void {
+  mutate((store) => {
+    store.referral_program = normalizeReferralProgram(config);
+  });
+}
+
+export function setReferralInvite(tgUserId: number, inviterUserId: number): void {
+  mutate((store) => {
+    const rows = store.referral_invites ?? [];
+    const next = rows.filter((r) => r.tg_user_id !== tgUserId || r.consumed === 1);
+    next.push({
+      tg_user_id: Math.floor(tgUserId),
+      inviter_user_id: Math.floor(inviterUserId),
+      created_at: new Date().toISOString(),
+      consumed: 0,
+    });
+    store.referral_invites = next;
+  });
+}
+
+export function getReferralInviteByTgUser(tgUserId: number): ReferralInviteRow | undefined {
+  return readStore().referral_invites.find((r) => r.tg_user_id === tgUserId && r.consumed === 0);
+}
+
+export function consumeReferralInviteByTgUser(tgUserId: number): void {
+  mutate((store) => {
+    const rows = store.referral_invites ?? [];
+    const i = rows.findIndex((r) => r.tg_user_id === tgUserId && r.consumed === 0);
+    if (i === -1) return;
+    rows[i] = { ...rows[i]!, consumed: 1 };
   });
 }
 

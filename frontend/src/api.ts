@@ -434,3 +434,26 @@ export async function sendCommunication(payload: SendCommunicationPayload): Prom
   });
   return handle(res);
 }
+
+export type ReferralProgramDto = {
+  enabled: boolean;
+  inviter_reward_kind: "gb" | "days";
+  inviter_reward_value: number;
+  invited_discount_percent: number;
+  invite_copy_text: string;
+};
+
+export async function loadReferralProgram(): Promise<ReferralProgramDto> {
+  const res = await fetch("/api/referral-program", { credentials: "include" });
+  return handle(res);
+}
+
+export async function saveReferralProgram(body: ReferralProgramDto): Promise<ReferralProgramDto> {
+  const res = await fetch("/api/referral-program", {
+    method: "PUT",
+    credentials: "include",
+    headers: jsonHeaders,
+    body: JSON.stringify(body),
+  });
+  return handle(res);
+}
