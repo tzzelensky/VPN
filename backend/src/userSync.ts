@@ -32,6 +32,12 @@ export async function resolveConfigPath(row: ServerRow, log?: SshLog): Promise<s
 
 /** Очередь: параллельные push ломали конфиг на сервере (два SSH подряд). */
 let pushQueue: Promise<void> = Promise.resolve();
+/** Последняя успешно синхронизированная сигнатура UUID по server.id. */
+const lastSyncedSignatureByServerId = new Map<number, string>();
+
+function signatureForUuids(uuids: string[]): string {
+  return [...uuids].sort().join(",");
+}
 
 /** Обновить inbound на всех развёрнутых серверах по текущим пользователям в БД. */
 export async function pushClientListToAllDeployedServers(log?: SshLog): Promise<void> {
@@ -39,6 +45,12 @@ export async function pushClientListToAllDeployedServers(log?: SshLog): Promise<
     for (const row of listDeployedServers()) {
       const path = await resolveConfigPath(row, log);
       const uuids = clientUuidsForServer(row.vless_uuid);
+      const sig = signatureForUuids(uuids);
+      const prevSig = lastSyncedSignatureByServerId.get(row.id);
+      if (prevSig === sig) {
+        log?.(`Синхронизация ${row.host} пропущена: список UUID не изменился.`);
+        continue;
+      }
       log?.(`Синхронизация ${row.host} → ${path} (${uuids.length} UUID), порт ${row.vless_port}…`);
       const r = await syncServerClientUuids(
         sshCfg(row),
@@ -70,6 +82,7 @@ export async function pushClientListToAllDeployedServers(log?: SshLog): Promise<
           sub_reality_spx: r.hints.sub_reality_spx,
         });
       }
+      lastSyncedSignatureByServerId.set(row.id, sig);
     }
   };
   const job = pushQueue.then(() => run());
@@ -94,5 +107,6 @@ export async function removeUserUuidFromAllServers(userVlessUuid: string, log?: 
       log,
     );
     if (!r.ok) log?.(`Ошибка на ${row.host}: ${r.detail}`);
+    else lastSyncedSignatureByServerId.delete(row.id);
   }
 }
