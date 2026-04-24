@@ -80,6 +80,15 @@ function topupPickerButtonLabel(p: TopUpShopPlanRow): string {
   return t;
 }
 
+function planSummary(meta: Pick<PlanRuntimeMeta, "total_gb" | "days">): string {
+  const gb = meta.total_gb > 0 ? `${meta.total_gb} ГБ` : "безлимит";
+  return `${gb} / ${meta.days} дн.`;
+}
+
+function topupSummary(meta: Pick<TopUpPlanRuntimeMeta, "add_gb">): string {
+  return `+${meta.add_gb} ГБ`;
+}
+
 function expiryDateText(expiryMs: number): string {
   if (!expiryMs) return "без срока";
   return new Date(expiryMs).toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric" });
@@ -236,7 +245,7 @@ export async function onVpnPlanChosen(
   });
   const linkEsc = escHtml(payUrl);
   const body =
-    `<b>Выбрано:</b> ${escHtml(meta.title)}\n` +
+    `<b>Выбрано:</b> ${escHtml(planSummary(meta))}\n` +
     (newName
       ? `<b>Новая подписка:</b> ${escHtml(newName)}\n`
       : target
@@ -279,7 +288,7 @@ export async function onGbTopUpPlanChosen(
   });
   const linkEsc = escHtml(payUrl);
   const body =
-    `<b>Выбрано:</b> ${escHtml(meta.title)}\n` +
+    `<b>Выбрано:</b> ${escHtml(topupSummary(meta))}\n` +
     (target ? `<b>Подписка:</b> ${escHtml(userTargetTitle(target))}\n` : "") +
     `<b>Пополнение:</b> +${meta.add_gb} ГБ\n` +
     `<b>Сумма к оплате:</b> ${meta.priceRub} ₽\n\n` +
@@ -344,8 +353,8 @@ export async function onPaymentProofPhoto(msg: PhotoMsg): Promise<boolean> {
     `Сессия: <code>${escHtml(sess.id)}</code>\n` +
     (payerTag ? `Плательщик: <b>${payerTag}</b> (chat <code>${sess.tg_chat_id}</code>)\n` : `Чат: <code>${sess.tg_chat_id}</code>\n`) +
     (isTopUp
-      ? `Пакет докупки: <b>${sess.plan_id}</b> — ${escHtml(topupMeta.title)} (+${topupMeta.add_gb} ГБ)\n`
-      : `Тариф: <b>${sess.plan_id}</b> — ${escHtml(subMeta.title)}\n`) +
+      ? `Пакет докупки: <b>${sess.plan_id}</b> — ${escHtml(topupSummary(topupMeta))}\n`
+      : `Тариф: <b>${sess.plan_id}</b> — ${escHtml(planSummary(subMeta))}\n`) +
     `Сумма: <b>${isTopUp ? topupMeta.priceRub : subMeta.priceRub} ₽</b>\n\n` +
     `${linkedBrief}`;
 
@@ -409,7 +418,7 @@ export async function onAdminPaymentConfirm(
         total_gb: subMeta.total_gb,
         expiry_time: expiryMs,
         enable: 1,
-        comment: `Оплата в боте, тариф #${sess.plan_id}: ${subMeta.title}`,
+        comment: `Оплата в боте, тариф #${sess.plan_id}: ${planSummary(subMeta)}`,
       });
       autoCreated = true;
       linked = autoCreatedUser ? [autoCreatedUser] : findUsersByTelegramChatId(sess.tg_chat_id);
@@ -510,19 +519,19 @@ export async function onAdminPaymentConfirm(
   const body = isTopUp
     ? `<b>Оплата подтверждена.</b>\n\n` +
       `Начислено: <b>+${topupMeta.add_gb} ГБ</b>\n` +
-      `Пакет: ${escHtml(topupMeta.title)}\n\n` +
+      `Пакет: ${escHtml(topupSummary(topupMeta))}\n\n` +
       (topupList ? `<b>Подписки, к которым применена докупка:</b>\n${topupList}` : "Начисление не применено.") +
       `${skippedUnlimitedText}\n\n` +
       `Актуальные данные — в разделе «Статистика по подписке».`
     : autoCreated
     ? `<b>Оплата подтверждена — доступ открыт.</b>\n\n` +
-      `Тариф: ${escHtml(subMeta.title)}\n` +
+      `Тариф: ${escHtml(planSummary(subMeta))}\n` +
       `Лимит трафика: <b>${escHtml(trafficNote)}</b>\n` +
       `Срок: <b>${subMeta.days}</b> суток с момента активации (до полудня дня окончания).\n\n` +
       `<b>Ссылка на подписку (добавьте в клиент):</b>\n\n<code>${subCode}</code>\n\n` +
       `Позже её можно скопировать в меню «Подписка». Статистика — в «Статистика по подписке».`
     : `<b>Оплата подтверждена.</b>\n\n` +
-      `Тариф: ${escHtml(subMeta.title)}\n` +
+      `Тариф: ${escHtml(planSummary(subMeta))}\n` +
       `Лимит трафика: <b>${escHtml(trafficNote)}</b>\n` +
       `Срок продлён на <b>${subMeta.days}</b> суток.\n` +
       (affectedList ? `\n<b>Обновлённые подписки:</b>\n${affectedList}\n` : "") +

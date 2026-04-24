@@ -508,7 +508,7 @@ async function handleCallback(q: CallbackQuery): Promise<void> {
       await sendTelegramHtml(
         chatId,
         "<b>Выберите подписку:</b>",
-        pickSubscriptionKeyboard(linked.map((x) => x.id)),
+        pickSubscriptionKeyboard(linked.map((x) => ({ id: x.id, name: x.name }))),
       );
       return;
     }

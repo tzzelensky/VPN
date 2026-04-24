@@ -26,10 +26,11 @@ export const buyGbReminderInline = {
   ],
 };
 
-export function pickSubscriptionKeyboard(userIds: number[]) {
+export function pickSubscriptionKeyboard(users: Array<{ id: number; name: string }>) {
   const rows: { text: string; callback_data: string }[][] = [];
-  for (const id of userIds) {
-    rows.push([{ text: `Подписка #${id}`, callback_data: `lnk:${id}` }]);
+  for (const u of users) {
+    const label = `#${u.id} ${String(u.name || "").trim()}`.trim();
+    rows.push([{ text: label.slice(0, 58), callback_data: `lnk:${u.id}` }]);
   }
   rows.push([{ text: "« В меню", callback_data: "home" }]);
   return { inline_keyboard: rows };
