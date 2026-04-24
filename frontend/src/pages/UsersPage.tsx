@@ -128,6 +128,7 @@ export default function UsersPage({ onLogout }: { onLogout: () => void }) {
   const [notifyBusyId, setNotifyBusyId] = useState<number | null>(null);
   const [resetBusyId, setResetBusyId] = useState<number | null>(null);
   const [syncBusy, setSyncBusy] = useState(false);
+  const [expandedInfoId, setExpandedInfoId] = useState<number | null>(null);
 
   const tableLocked =
     refreshing || deleteBusyId !== null || notifyBusyId !== null || resetBusyId !== null || syncBusy;
@@ -290,12 +291,11 @@ export default function UsersPage({ onLogout }: { onLogout: () => void }) {
                   const pct = trafficPercent(u);
                   const ex = expiryPill(u);
                   const alive = clientAlive(u);
-                  const subLine =
+                  const emailLine =
                     !isBotAutoEmail(u.email) && u.email.trim() !== u.name.trim() ? (
                       <div className="ud-client-email muted">{u.email}</div>
-                    ) : u.comment ? (
-                      <div className="ud-client-email muted">{u.comment.length > 42 ? `${u.comment.slice(0, 40)}…` : u.comment}</div>
                     ) : null;
+                  const infoOpen = expandedInfoId === u.id && Boolean((u.comment || "").trim());
                   return (
                     <tr key={u.id} className="ud-row">
                       <td className="ud-td-actions">
@@ -461,9 +461,22 @@ export default function UsersPage({ onLogout }: { onLogout: () => void }) {
                       <td className="ud-td-client">
                         <div className="ud-client-line">
                           <span className={`ud-client-dot ${alive ? "ud-client-dot-on" : "ud-client-dot-off"}`} aria-hidden />
-                          <span className="ud-client-name">{u.name}</span>
+                          <button
+                            type="button"
+                            className={`ud-client-name-btn ${infoOpen ? "open" : ""}`}
+                            onClick={() =>
+                              setExpandedInfoId((cur) => {
+                                if (!(u.comment || "").trim()) return null;
+                                return cur === u.id ? null : u.id;
+                              })
+                            }
+                            title={(u.comment || "").trim() ? "Показать/скрыть информацию о клиенте" : "Информация о клиенте не указана"}
+                          >
+                            <span className="ud-client-name">{u.name}</span>
+                          </button>
                         </div>
-                        {subLine}
+                        {emailLine}
+                        {infoOpen ? <div className="ud-client-info-pop">{u.comment}</div> : null}
                       </td>
                       <td className="ud-td-traffic">
                         <div className="ud-traffic-used">{formatUsedGb(u)}</div>

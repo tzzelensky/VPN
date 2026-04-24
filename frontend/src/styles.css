@@ -1156,6 +1156,23 @@ th {
   font-size: 0.88rem;
 }
 
+.ud-client-name-btn {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  padding: 0;
+  margin: 0;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+}
+
+.ud-client-name-btn:hover .ud-client-name,
+.ud-client-name-btn.open .ud-client-name {
+  color: #93c5fd;
+  text-decoration: underline;
+}
+
 .ud-client-email {
   font-size: 0.72rem;
   margin-top: 0.2rem;
@@ -1163,6 +1180,20 @@ th {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.ud-client-info-pop {
+  margin-top: 0.35rem;
+  max-width: 18rem;
+  font-size: 0.74rem;
+  line-height: 1.4;
+  color: #c8d4e6;
+  background: #1a2230;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.45rem 0.55rem;
+  white-space: normal;
+  word-break: break-word;
 }
 
 .ud-td-traffic {

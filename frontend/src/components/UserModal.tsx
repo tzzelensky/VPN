@@ -341,13 +341,13 @@ export default function UserModal({
                 ) : null}
               </div>
               <div className="form-field form-field-span-2">
-                <label>Комментарий (заголовок подписки и подписи узлов)</label>
+                <label>Информация о клиенте (только в панели)</label>
                 <textarea
                   className="user-modal-textarea"
                   rows={2}
                   value={comment}
                   onChange={(e) => setComment(e.target.value)}
-                  placeholder="заметка к клиенту"
+                  placeholder="Например: Для мамы, тариф по договоренности, важные заметки..."
                 />
               </div>
             </div>
