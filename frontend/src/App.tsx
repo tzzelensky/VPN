@@ -34,6 +34,17 @@ function useSession() {
 }
 
 export default function App() {
+  const path = typeof window !== "undefined" ? window.location.pathname : "";
+  if (path.startsWith("/mysub")) {
+    return (
+      <Routes>
+        <Route path="/mysub" element={<MySubPage />} />
+        <Route path="/mysub/:tgId" element={<MySubPage />} />
+        <Route path="*" element={<Navigate to="/mysub" replace />} />
+      </Routes>
+    );
+  }
+
   const { ready, loggedIn, setLoggedIn } = useSession();
 
   if (!ready) {
