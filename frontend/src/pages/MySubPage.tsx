@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { loadMySubWebAppProfile, sendMySubPaymentProof, type MySubProfileDto } from "../api";
+import { claimMySubReferralReward, loadMySubWebAppProfile, sendMySubPaymentProof, type MySubProfileDto } from "../api";
 
 type Tab = "home" | "subscription" | "friends" | "profile";
 
@@ -52,6 +52,8 @@ export default function MySubPage() {
   const [newSubName, setNewSubName] = useState("");
   const [profileSubModalId, setProfileSubModalId] = useState<number>(0);
   const [homeSubId, setHomeSubId] = useState<number>(0);
+  const [friendRewardId, setFriendRewardId] = useState("");
+  const [friendRewardBusy, setFriendRewardBusy] = useState(false);
 
   function getInitData(): string {
     const tgWebApp = (window as unknown as {
@@ -207,6 +209,27 @@ export default function MySubPage() {
     const tgWebApp = (window as unknown as { Telegram?: { WebApp?: { openTelegramLink?: (url: string) => void } } }).Telegram?.WebApp;
     if (tgWebApp?.openTelegramLink) tgWebApp.openTelegramLink(shareUrl);
     else window.open(shareUrl, "_blank", "noopener,noreferrer");
+  }
+
+  async function claimFriendReward(kind: "gb" | "days") {
+    if (!friendRewardId) return;
+    setFriendRewardBusy(true);
+    try {
+      await claimMySubReferralReward({ init_data: initData, reward_id: friendRewardId, kind });
+      setMsg(kind === "gb" ? "Награда +ГБ успешно применена." : "Награда +дни успешно применена.");
+      setFriendRewardId("");
+      const profile = await loadMySubWebAppProfile(initData);
+      setData(profile);
+    } catch (e) {
+      const m = e instanceof Error ? e.message : String(e);
+      if (m.includes("inviter_unlimited_choose_days")) {
+        setMsg("У вас безлимит. Можно выбрать только награду в днях.");
+      } else {
+        setMsg("Не удалось применить награду. Попробуйте еще раз.");
+      }
+    } finally {
+      setFriendRewardBusy(false);
+    }
   }
 
   return (
@@ -468,9 +491,16 @@ export default function MySubPage() {
                           <div>Пока никого не приглашено.</div>
                         ) : (
                           data.referral.invited_friends.map((f, idx) => (
-                            <div key={`${f.tg_user_id}-${idx}`}>
-                              {f.name} • {new Date(f.created_at).toLocaleDateString("ru-RU")} •{" "}
-                              {f.status === "claimed" ? "награда выдана" : "ожидает награду"}
+                            <div key={`${f.tg_user_id}-${idx}`} className="mysub-friend-row">
+                              <span>
+                                {f.name} • {new Date(f.created_at).toLocaleDateString("ru-RU")} •{" "}
+                                {f.status === "claimed" ? "награда выдана" : "ожидает награду"}
+                              </span>
+                              {f.status === "pending" ? (
+                                <button type="button" className="mysub-gift-btn" onClick={() => setFriendRewardId(f.reward_id)}>
+                                  🎁
+                                </button>
+                              ) : null}
                             </div>
                           ))
                         )}
@@ -649,6 +679,31 @@ export default function MySubPage() {
               >
                 Скопировать ссылку подписки
               </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+      {friendRewardId ? (
+        <div className="modal-backdrop" onClick={() => setFriendRewardId("")}>
+          <div className="modal mysub-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-head">
+              <h2>Выбор награды</h2>
+              <button type="button" className="ghost modal-close" onClick={() => setFriendRewardId("")}>
+                ×
+              </button>
+            </div>
+            <div className="modal-body">
+              <p className="sub" style={{ marginBottom: "0.5rem" }}>
+                Выберите, какую награду применить к вашей подписке.
+              </p>
+              <div className="row-actions">
+                <button type="button" className="primary" disabled={friendRewardBusy} onClick={() => void claimFriendReward("gb")}>
+                  Получить ГБ
+                </button>
+                <button type="button" className="ghost" disabled={friendRewardBusy} onClick={() => void claimFriendReward("days")}>
+                  Получить дни
+                </button>
+              </div>
             </div>
           </div>
         </div>

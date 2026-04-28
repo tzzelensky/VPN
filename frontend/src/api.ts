@@ -485,7 +485,15 @@ export type MySubProfileDto = {
     enabled: boolean;
     invite_copy_text: string;
     invite_link: string;
-    invited_friends: Array<{ name: string; tg_user_id: number; status: "pending" | "claimed"; created_at: string }>;
+    invited_friends: Array<{
+      reward_id: string;
+      name: string;
+      tg_user_id: number;
+      status: "pending" | "claimed";
+      created_at: string;
+      reward_gb: number;
+      reward_days: number;
+    }>;
   };
 };
 
@@ -513,6 +521,19 @@ export async function sendMySubPaymentProof(payload: {
   new_subscription_name?: string;
 }): Promise<{ ok: boolean }> {
   const res = await fetch("/api/mysub/webapp/payment-proof", {
+    method: "POST",
+    headers: jsonHeaders,
+    body: JSON.stringify(payload),
+  });
+  return handle(res);
+}
+
+export async function claimMySubReferralReward(payload: {
+  init_data: string;
+  reward_id: string;
+  kind: "gb" | "days";
+}): Promise<{ ok: boolean }> {
+  const res = await fetch("/api/mysub/webapp/referral-reward", {
     method: "POST",
     headers: jsonHeaders,
     body: JSON.stringify(payload),

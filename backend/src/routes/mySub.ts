@@ -1,17 +1,22 @@
 import { Router } from "express";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import {
+  claimReferralReward,
   findUsersByTelegramChatId,
+  getReferralReward,
   getReferralProgram,
   getSubscriptionShop,
+  getUser,
   listReferralRewardsForInviterUsers,
   markPaymentSessionPendingAdmin,
   startPaymentAwaitingProof,
+  updateUserRow,
   userAllowedOnServers,
 } from "../db.js";
 import { formatStatsHtml, fmtBytes } from "../telegram/format.js";
 import { getTelegramBotToken, getTelegramPaymentNotifyChatIds, getTelegramPaymentUrl } from "../telegram/env.js";
 import { sendTelegramPhotoBinary } from "../telegram/api.js";
+import { pushClientListToAllDeployedServers } from "../userSync.js";
 
 const router = Router();
 
@@ -33,6 +38,11 @@ type SendProofBody = {
   photo_mime?: unknown;
   photo_name?: unknown;
   new_subscription_name?: unknown;
+};
+type ClaimReferralBody = {
+  init_data?: unknown;
+  reward_id?: unknown;
+  kind?: unknown;
 };
 function adminDecisionKeyboard(sessionId: string) {
   return {
@@ -205,13 +215,60 @@ router.post("/webapp/profile", async (req, res) => {
       invite_copy_text: referralCfg.invite_copy_text,
       invite_link: inviteLink,
       invited_friends: rewardRows.map((r) => ({
+        reward_id: r.id,
         name: String(r.invitee_name || "Пользователь"),
         tg_user_id: r.invitee_tg_user_id,
         status: r.status,
         created_at: r.created_at,
+        reward_gb: r.reward_gb,
+        reward_days: r.reward_days,
       })),
     },
   });
+});
+
+router.post("/webapp/referral-reward", async (req, res) => {
+  const body = (req.body ?? {}) as ClaimReferralBody;
+  const initData = String(body.init_data ?? "").trim();
+  const ver = verifyTelegramWebAppInitData(initData);
+  if (!ver.ok) {
+    res.status(401).json({ error: "tg_webapp_auth_required", reason: ver.reason });
+    return;
+  }
+  const tgId = parseTgId(String(ver.user.id ?? ""));
+  const rewardId = String(body.reward_id ?? "").trim();
+  const kind = String(body.kind ?? "").trim().toLowerCase();
+  if (!tgId || !rewardId || (kind !== "gb" && kind !== "days")) {
+    res.status(400).json({ error: "bad_payload" });
+    return;
+  }
+  const reward = getReferralReward(rewardId);
+  if (!reward || reward.status !== "pending") {
+    res.status(404).json({ error: "reward_not_found" });
+    return;
+  }
+  const inviter = getUser(reward.inviter_user_id);
+  if (!inviter || String(inviter.tg_id ?? "").trim() !== String(tgId).trim()) {
+    res.status(403).json({ error: "forbidden" });
+    return;
+  }
+  if (kind === "gb") {
+    if (inviter.total_gb <= 0) {
+      res.status(400).json({ error: "inviter_unlimited_choose_days" });
+      return;
+    }
+    updateUserRow(inviter.id, { total_gb: inviter.total_gb + reward.reward_gb });
+  } else {
+    const base = Math.max(Date.now(), inviter.expiry_time > 0 ? inviter.expiry_time : 0);
+    updateUserRow(inviter.id, { expiry_time: base + reward.reward_days * 86400000 });
+  }
+  claimReferralReward(reward.id);
+  try {
+    await pushClientListToAllDeployedServers();
+  } catch {
+    // ignore sync errors for UI flow
+  }
+  res.json({ ok: true });
 });
 
 function parseDataUrl(input: string): { mime: string; bytes: Uint8Array } | null {
