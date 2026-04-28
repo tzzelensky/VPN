@@ -69,6 +69,7 @@ export default function App() {
         path="/referral-program"
         element={loggedIn ? <ReferralProgramPage onLogout={() => setLoggedIn(false)} /> : <Navigate to="/login" replace />}
       />
+      <Route path="/mysub" element={<MySubPage />} />
       <Route path="/mysub/:tgId" element={<MySubPage />} />
       <Route path="/" element={<Navigate to={loggedIn ? "/servers" : "/login"} replace />} />
       <Route path="*" element={<Navigate to="/" replace />} />

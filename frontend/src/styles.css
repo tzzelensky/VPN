@@ -1649,3 +1649,148 @@ th {
   gap: 0.6rem;
   flex-wrap: wrap;
 }
+
+.mysub-wrap {
+  background:
+    radial-gradient(circle at 0% 0%, rgba(255, 44, 93, 0.2) 0%, transparent 42%),
+    radial-gradient(circle at 100% 100%, rgba(110, 64, 255, 0.22) 0%, transparent 45%),
+    #080913;
+  padding-bottom: 6.4rem;
+}
+
+.mysub-card {
+  width: min(520px, 100%);
+  border-radius: 26px;
+  border-color: rgba(255, 70, 120, 0.34);
+  background: linear-gradient(160deg, rgba(31, 15, 45, 0.96), rgba(10, 12, 26, 0.96));
+  box-shadow: 0 22px 44px rgba(1, 4, 20, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  transition: transform 220ms ease, box-shadow 220ms ease;
+}
+
+.mysub-head {
+  position: relative;
+}
+
+.mysub-avatar,
+.mysub-avatar-fallback {
+  width: 66px;
+  height: 66px;
+  border: 2px solid rgba(255, 255, 255, 0.18);
+}
+
+.mysub-name {
+  font-size: 2rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+.mysub-title {
+  margin: 0 0 0.45rem;
+  font-size: 1.35rem;
+}
+
+.mysub-section {
+  border-radius: 22px;
+  border-color: rgba(255, 70, 120, 0.35);
+  background: linear-gradient(180deg, rgba(29, 18, 43, 0.88), rgba(17, 17, 35, 0.9));
+  box-shadow: inset 0 0 0 1px rgba(255, 130, 170, 0.09), 0 14px 30px rgba(7, 8, 20, 0.45);
+  animation: mysubFadeUp 260ms ease both;
+}
+
+.mysub-sub-box {
+  border-radius: 18px;
+  border-color: rgba(255, 70, 120, 0.3);
+  background: rgba(13, 16, 31, 0.68);
+}
+
+.mysub-url {
+  border-radius: 14px;
+  border-color: rgba(255, 70, 120, 0.36);
+  background: rgba(10, 11, 25, 0.92);
+  margin-bottom: 0.7rem;
+}
+
+.row-actions {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.65rem;
+}
+
+.mysub-stat-list {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.mysub-stat-list > div {
+  border: 1px solid rgba(255, 70, 120, 0.26);
+  border-radius: 12px;
+  padding: 0.48rem 0.6rem;
+  color: var(--muted);
+  background: rgba(8, 10, 21, 0.58);
+}
+
+.mysub-stat-list > button {
+  width: 100%;
+}
+
+.mysub-bottom-actions {
+  position: sticky;
+  bottom: 0.4rem;
+  z-index: 4;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.45rem;
+  border: 1px solid rgba(255, 70, 120, 0.4);
+  border-radius: 999px;
+  padding: 0.45rem;
+  background: rgba(18, 16, 30, 0.92);
+  backdrop-filter: blur(8px);
+}
+
+.mysub-bottom-actions > button {
+  min-height: 2.3rem;
+  font-size: 0.88rem;
+}
+
+.mysub-card .primary {
+  background: linear-gradient(180deg, #ff3f6d, #ff2a56);
+  border-radius: 14px;
+  border: none;
+}
+
+.mysub-card .ghost {
+  background: rgba(18, 18, 35, 0.72);
+  border-radius: 14px;
+  border: 1px solid rgba(255, 70, 120, 0.34);
+}
+
+.mysub-card select,
+.mysub-card input[type="file"] {
+  border: 1px solid rgba(255, 70, 120, 0.28);
+  border-radius: 12px;
+  background: rgba(7, 9, 20, 0.72);
+}
+
+@keyframes mysubFadeUp {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (max-width: 540px) {
+  .mysub-wrap {
+    padding: 0.55rem 0.4rem 6rem;
+  }
+  .mysub-card {
+    border-radius: 20px;
+    padding: 0.8rem;
+  }
+  .mysub-name {
+    font-size: 1.85rem;
+  }
+}

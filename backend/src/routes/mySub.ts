@@ -1,7 +1,9 @@
 import { Router } from "express";
-import { findUsersByTelegramChatId } from "../db.js";
-import { formatStatsHtml } from "../telegram/format.js";
-import { getTelegramBotToken } from "../telegram/env.js";
+import { createHmac, timingSafeEqual } from "node:crypto";
+import { findUsersByTelegramChatId, getSubscriptionShop, userAllowedOnServers } from "../db.js";
+import { formatStatsHtml, fmtBytes } from "../telegram/format.js";
+import { getTelegramBotToken, getTelegramPaymentNotifyChatIds, getTelegramPaymentUrl } from "../telegram/env.js";
+import { sendTelegramPhotoBinary } from "../telegram/api.js";
 
 const router = Router();
 
@@ -14,6 +16,15 @@ type TgChatResult = {
 };
 
 type TgFileResult = { file_path?: string };
+type WebAppUser = { id?: number; first_name?: string; last_name?: string; username?: string };
+type SendProofBody = {
+  init_data?: unknown;
+  user_id?: unknown;
+  plan_id?: unknown;
+  photo_base64?: unknown;
+  photo_mime?: unknown;
+  photo_name?: unknown;
+};
 
 function publicSubUrl(subToken: string): string {
   const base = (process.env.PUBLIC_API_URL ?? "http://localhost:4000").replace(/\/$/, "");
@@ -24,6 +35,45 @@ function parseTgId(raw: string): number | null {
   const n = Number(String(raw ?? "").trim());
   if (!Number.isFinite(n) || n <= 0) return null;
   return Math.floor(n);
+}
+
+function verifyTelegramWebAppInitData(initData: string): { ok: true; user: WebAppUser } | { ok: false; reason: string } {
+  const token = getTelegramBotToken();
+  if (!token) return { ok: false, reason: "telegram_not_configured" };
+  const raw = String(initData ?? "").trim();
+  if (!raw) return { ok: false, reason: "init_data_required" };
+  const p = new URLSearchParams(raw);
+  const hash = String(p.get("hash") ?? "").trim().toLowerCase();
+  if (!hash) return { ok: false, reason: "hash_missing" };
+  const kv: string[] = [];
+  const keys: string[] = [];
+  p.forEach((_v, k) => {
+    if (k !== "hash") keys.push(k);
+  });
+  keys.sort();
+  for (const k of keys) kv.push(`${k}=${p.get(k) ?? ""}`);
+  const dataCheckString = kv.join("\n");
+  const secret = createHmac("sha256", "WebAppData").update(token).digest();
+  const calc = createHmac("sha256", secret).update(dataCheckString).digest("hex").toLowerCase();
+  const hashBuf = Buffer.from(hash, "hex");
+  const calcBuf = Buffer.from(calc, "hex");
+  if (hashBuf.length !== calcBuf.length || !timingSafeEqual(hashBuf, calcBuf)) {
+    return { ok: false, reason: "bad_signature" };
+  }
+  const authDate = Number(p.get("auth_date"));
+  if (!Number.isFinite(authDate) || authDate <= 0) return { ok: false, reason: "bad_auth_date" };
+  const ageSec = Math.floor(Date.now() / 1000) - Math.floor(authDate);
+  if (ageSec > 86400) return { ok: false, reason: "auth_expired" };
+  let user: WebAppUser = {};
+  try {
+    const parsed = JSON.parse(String(p.get("user") ?? "{}")) as WebAppUser;
+    user = parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return { ok: false, reason: "bad_user_payload" };
+  }
+  const tgId = Number(user.id);
+  if (!Number.isFinite(tgId) || tgId <= 0) return { ok: false, reason: "bad_user_id" };
+  return { ok: true, user };
 }
 
 async function tgCall<T>(method: string, body: Record<string, unknown>): Promise<T | null> {
@@ -66,9 +116,23 @@ async function fetchPhotoBytesByFileId(fileId: string): Promise<{ bytes: Buffer;
 }
 
 router.get("/:tgId(\\d+)/profile", async (req, res) => {
-  const tgId = parseTgId(req.params.tgId);
+  res.status(401).json({ error: "tg_webapp_auth_required" });
+});
+
+router.get("/:tgId(\\d+)/avatar", async (req, res) => {
+  res.status(401).send("tg_webapp_auth_required");
+});
+
+router.post("/webapp/profile", async (req, res) => {
+  const initData = String((req.body as { init_data?: unknown })?.init_data ?? "").trim();
+  const ver = verifyTelegramWebAppInitData(initData);
+  if (!ver.ok) {
+    res.status(401).json({ error: "tg_webapp_auth_required", reason: ver.reason });
+    return;
+  }
+  const tgId = parseTgId(String(ver.user.id ?? ""));
   if (!tgId) {
-    res.status(400).json({ error: "invalid_tg_id" });
+    res.status(401).json({ error: "tg_webapp_auth_required", reason: "bad_user_id" });
     return;
   }
   const linked = findUsersByTelegramChatId(tgId);
@@ -77,45 +141,118 @@ router.get("/:tgId(\\d+)/profile", async (req, res) => {
     return;
   }
   const chat = await resolveChatProfile(tgId);
-  const displayName = chat.displayName || linked[0]!.name || "Пользователь";
+  const displayName =
+    `${String(ver.user.first_name ?? "").trim()} ${String(ver.user.last_name ?? "").trim()}`.trim() ||
+    (ver.user.username ? `@${ver.user.username}` : "") ||
+    chat.displayName ||
+    linked[0]!.name ||
+    "Пользователь";
+  let avatarDataUrl: string | null = null;
+  if (chat.bigFileId) {
+    const photo = await fetchPhotoBytesByFileId(chat.bigFileId);
+    if (photo) {
+      avatarDataUrl = `data:${photo.mime};base64,${photo.bytes.toString("base64")}`;
+    }
+  }
   const subscriptions = linked.map((u) => ({
     id: u.id,
     name: u.name,
     subscription_url: publicSubUrl(u.sub_token),
+    enable: u.enable === 1,
+    allowed: userAllowedOnServers(u),
+    total_gb: u.total_gb,
+    traffic_up: u.traffic_up,
+    traffic_down: u.traffic_down,
+    used_text: fmtBytes(u.traffic_up + u.traffic_down),
+    total_text: u.total_gb > 0 ? fmtBytes(u.total_gb * 1073741824) : "∞",
+    expiry_time: u.expiry_time,
   }));
+  const shop = getSubscriptionShop();
   res.json({
     tg_id: tgId,
     name: displayName,
-    avatar_url: chat.bigFileId ? `/api/mysub/${tgId}/avatar` : null,
+    avatar_url: avatarDataUrl,
     stats_html: formatStatsHtml(linked),
     subscriptions,
+    payment_url: shop.payment_url.trim() || getTelegramPaymentUrl(),
+    plans: shop.plans,
   });
 });
 
-router.get("/:tgId(\\d+)/avatar", async (req, res) => {
-  const tgId = parseTgId(req.params.tgId);
-  if (!tgId) {
-    res.status(400).send("bad tg id");
+function parseDataUrl(input: string): { mime: string; bytes: Uint8Array } | null {
+  const m = /^data:([^;,]+);base64,(.+)$/i.exec(input.trim());
+  if (!m) return null;
+  const mime = m[1] || "image/jpeg";
+  const b64 = m[2] || "";
+  try {
+    const buf = Buffer.from(b64, "base64");
+    if (!buf.length) return null;
+    return { mime, bytes: new Uint8Array(buf) };
+  } catch {
+    return null;
+  }
+}
+
+router.post("/webapp/payment-proof", async (req, res) => {
+  const body = (req.body ?? {}) as SendProofBody;
+  const initData = String(body.init_data ?? "").trim();
+  const ver = verifyTelegramWebAppInitData(initData);
+  if (!ver.ok) {
+    res.status(401).json({ error: "tg_webapp_auth_required", reason: ver.reason });
+    return;
+  }
+  const tgId = parseTgId(String(ver.user.id ?? ""));
+  const userId = Number(body.user_id);
+  const planId = Number(body.plan_id);
+  if (!tgId || !Number.isFinite(userId) || userId <= 0 || !Number.isFinite(planId) || ![1, 2, 3].includes(planId)) {
+    res.status(400).json({ error: "bad_payload" });
     return;
   }
   const linked = findUsersByTelegramChatId(tgId);
-  if (linked.length === 0) {
-    res.status(404).send("not found");
+  const target = linked.find((u) => u.id === Math.floor(userId));
+  if (!target) {
+    res.status(403).json({ error: "forbidden" });
     return;
   }
-  const chat = await resolveChatProfile(tgId);
-  if (!chat.bigFileId) {
-    res.status(404).send("no avatar");
+  const b64 = String(body.photo_base64 ?? "").trim();
+  const parsed = parseDataUrl(b64);
+  if (!parsed) {
+    res.status(400).json({ error: "invalid_photo" });
     return;
   }
-  const photo = await fetchPhotoBytesByFileId(chat.bigFileId);
-  if (!photo) {
-    res.status(502).send("avatar fetch failed");
+  const shop = getSubscriptionShop();
+  const plan = shop.plans.find((p) => p.id === planId);
+  if (!plan) {
+    res.status(400).json({ error: "bad_plan" });
     return;
   }
-  res.setHeader("Content-Type", photo.mime);
-  res.setHeader("Cache-Control", "public, max-age=300");
-  res.send(photo.bytes);
+  const caption =
+    `<b>Оплата из WebApp</b>\n` +
+    `Пользователь: <b>${String(ver.user.first_name ?? "").trim() || target.name}</b> (chat <code>${tgId}</code>)\n` +
+    `Подписка: <b>#${target.id} ${target.name}</b>\n` +
+    `Тариф: <b>${plan.id}</b> — ${plan.total_gb > 0 ? `${plan.total_gb} ГБ` : "безлимит"} / ${plan.days} дн.\n` +
+    `Сумма: <b>${plan.price_rub} ₽</b>`;
+
+  let sent = 0;
+  const admins = getTelegramPaymentNotifyChatIds();
+  for (const chatId of admins) {
+    try {
+      await sendTelegramPhotoBinary(chatId, parsed.bytes, {
+        caption,
+        filename: String(body.photo_name ?? "proof.jpg").trim() || "proof.jpg",
+        mimeType: String(body.photo_mime ?? parsed.mime) || parsed.mime,
+        parse_mode: "HTML",
+      });
+      sent++;
+    } catch {
+      // skip
+    }
+  }
+  if (sent === 0) {
+    res.status(502).json({ error: "send_failed" });
+    return;
+  }
+  res.json({ ok: true });
 });
 
 export default router;

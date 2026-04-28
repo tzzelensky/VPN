@@ -466,10 +466,49 @@ export type MySubProfileDto = {
   name: string;
   avatar_url: string | null;
   stats_html: string;
-  subscriptions: Array<{ id: number; name: string; subscription_url: string }>;
+  subscriptions: Array<{
+    id: number;
+    name: string;
+    subscription_url: string;
+    enable: boolean;
+    allowed: boolean;
+    total_gb: number;
+    traffic_up: number;
+    traffic_down: number;
+    used_text: string;
+    total_text: string;
+    expiry_time: number;
+  }>;
+  payment_url: string;
+  plans: Array<{ id: number; title: string; total_gb: number; days: number; price_rub: number }>;
 };
 
 export async function loadMySubProfile(tgId: number): Promise<MySubProfileDto> {
   const res = await fetch(`/api/mysub/${tgId}/profile`);
+  return handle(res);
+}
+
+export async function loadMySubWebAppProfile(initData: string): Promise<MySubProfileDto> {
+  const res = await fetch("/api/mysub/webapp/profile", {
+    method: "POST",
+    headers: jsonHeaders,
+    body: JSON.stringify({ init_data: initData }),
+  });
+  return handle(res);
+}
+
+export async function sendMySubPaymentProof(payload: {
+  init_data: string;
+  user_id: number;
+  plan_id: number;
+  photo_base64: string;
+  photo_mime?: string;
+  photo_name?: string;
+}): Promise<{ ok: boolean }> {
+  const res = await fetch("/api/mysub/webapp/payment-proof", {
+    method: "POST",
+    headers: jsonHeaders,
+    body: JSON.stringify(payload),
+  });
   return handle(res);
 }
