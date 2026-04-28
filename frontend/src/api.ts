@@ -460,3 +460,16 @@ export async function saveReferralProgram(body: ReferralProgramDto): Promise<Ref
   });
   return handle(res);
 }
+
+export type MySubProfileDto = {
+  tg_id: number;
+  name: string;
+  avatar_url: string | null;
+  stats_html: string;
+  subscriptions: Array<{ id: number; name: string; subscription_url: string }>;
+};
+
+export async function loadMySubProfile(tgId: number): Promise<MySubProfileDto> {
+  const res = await fetch(`/api/mysub/${tgId}/profile`);
+  return handle(res);
+}
