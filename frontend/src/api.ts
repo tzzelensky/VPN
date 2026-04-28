@@ -409,9 +409,12 @@ export async function listCommunicationTargets(): Promise<{ users: Communication
 }
 
 export type SendCommunicationPayload = {
-  mode: "global" | "single";
+  mode: "global" | "single" | "selected";
   text: string;
   user_id?: number;
+  user_ids?: number[];
+  mark_enabled?: boolean;
+  mark_text?: string;
   photo_base64?: string;
   photo_mime?: string;
   photo_name?: string;

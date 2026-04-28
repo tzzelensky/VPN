@@ -13,6 +13,9 @@ type SendBody = {
   mode?: unknown;
   text?: unknown;
   user_id?: unknown;
+  user_ids?: unknown;
+  mark_enabled?: unknown;
+  mark_text?: unknown;
   photo_base64?: unknown;
   photo_mime?: unknown;
   photo_name?: unknown;
@@ -105,6 +108,20 @@ router.post("/send", async (req, res) => {
     }
     const row = { id: user.id, name: user.name, tg_id: user.tg_id, enable: user.enable === 1 };
     targets = uniqTargets([row]);
+  } else if (mode === "selected") {
+    const idsRaw = Array.isArray(body.user_ids) ? body.user_ids : [];
+    const ids = [...new Set(idsRaw.map((x) => Math.floor(Number(x))).filter((n) => Number.isFinite(n) && n > 0))];
+    if (ids.length === 0) {
+      res.status(400).json({ error: "users_required" });
+      return;
+    }
+    const rows: TargetUserLite[] = [];
+    for (const id of ids) {
+      const u = getUser(id);
+      if (!u) continue;
+      rows.push({ id: u.id, name: u.name, tg_id: u.tg_id, enable: u.enable === 1 });
+    }
+    targets = uniqTargets(rows);
   } else {
     res.status(400).json({ error: "invalid_mode" });
     return;
@@ -117,7 +134,10 @@ router.post("/send", async (req, res) => {
 
   const failures: Array<{ user_id: number; user_name: string; error: string }> = [];
   let sent = 0;
-  const caption = `<b>Сообщение от администратора</b>\n\n${text}`;
+  const markEnabled = body.mark_enabled === true || body.mark_enabled === 1 || body.mark_enabled === "1";
+  const markText = String(body.mark_text ?? "").trim();
+  const header = markEnabled ? `<b>${markText || "Сообщение от администратора"}</b>\n\n` : "";
+  const caption = `${header}${text}`;
   for (const t of targets) {
     try {
       if (photo) {

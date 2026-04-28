@@ -1473,3 +1473,59 @@ th {
   margin: 0;
   padding-left: 1.1rem;
 }
+
+.comms-selected-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.comms-selected-chips {
+  margin-top: 0.55rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.comms-chip {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid rgba(61, 158, 255, 0.28);
+  background: rgba(61, 158, 255, 0.12);
+  border-radius: 999px;
+  padding: 0.18rem 0.52rem;
+  font-size: 0.79rem;
+}
+
+.comms-picker-modal {
+  width: min(980px, 100%);
+}
+
+.comms-picker-search {
+  margin-bottom: 0.65rem;
+}
+
+.comms-picker-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  gap: 0.8rem;
+  align-items: center;
+}
+
+.comms-picker-col {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.comms-picker-list {
+  min-height: 320px;
+  font-family: inherit;
+  font-size: 0.92rem;
+}
+
+.comms-picker-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
