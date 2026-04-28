@@ -2,7 +2,9 @@ import { Router } from "express";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import {
   findUsersByTelegramChatId,
+  getReferralProgram,
   getSubscriptionShop,
+  listReferralRewardsForInviterUsers,
   markPaymentSessionPendingAdmin,
   startPaymentAwaitingProof,
   userAllowedOnServers,
@@ -180,6 +182,15 @@ router.post("/webapp/profile", async (req, res) => {
     total_text: u.total_gb > 0 ? fmtBytes(u.total_gb * 1073741824) : "∞",
     expiry_time: u.expiry_time,
   }));
+  const referralCfg = getReferralProgram();
+  const inviterIds = linked.map((u) => u.id);
+  const rewardRows = listReferralRewardsForInviterUsers(inviterIds).sort((a, b) => {
+    const ta = Date.parse(a.created_at || "");
+    const tb = Date.parse(b.created_at || "");
+    return (Number.isFinite(tb) ? tb : 0) - (Number.isFinite(ta) ? ta : 0);
+  });
+  const botName = String(process.env.TELEGRAM_BOT_USERNAME ?? "").trim().replace(/^@/, "");
+  const inviteLink = linked[0] && botName ? `https://t.me/${botName}?start=ref_${linked[0].id}` : "";
   const shop = getSubscriptionShop();
   res.json({
     tg_id: tgId,
@@ -189,6 +200,17 @@ router.post("/webapp/profile", async (req, res) => {
     subscriptions,
     payment_url: shop.payment_url.trim() || getTelegramPaymentUrl(),
     plans: shop.plans,
+    referral: {
+      enabled: referralCfg.enabled,
+      invite_copy_text: referralCfg.invite_copy_text,
+      invite_link: inviteLink,
+      invited_friends: rewardRows.map((r) => ({
+        name: String(r.invitee_name || "Пользователь"),
+        tg_user_id: r.invitee_tg_user_id,
+        status: r.status,
+        created_at: r.created_at,
+      })),
+    },
   });
 });
 

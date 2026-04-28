@@ -1169,6 +1169,16 @@ export function claimReferralReward(id: string): ReferralRewardRow | undefined {
   return out;
 }
 
+export function listReferralRewardsForInviterUsers(inviterUserIds: number[]): ReferralRewardRow[] {
+  const ids = new Set(
+    inviterUserIds
+      .map((n) => Math.floor(Number(n)))
+      .filter((n) => Number.isFinite(n) && n > 0),
+  );
+  if (ids.size === 0) return [];
+  return readStore().referral_rewards.filter((r) => ids.has(r.inviter_user_id));
+}
+
 export function initDb(): void {
   if (!fs.existsSync(dataPath)) {
     writeStore(emptyStore());

@@ -481,6 +481,12 @@ export type MySubProfileDto = {
   }>;
   payment_url: string;
   plans: Array<{ id: number; title: string; total_gb: number; days: number; price_rub: number }>;
+  referral: {
+    enabled: boolean;
+    invite_copy_text: string;
+    invite_link: string;
+    invited_friends: Array<{ name: string; tg_user_id: number; status: "pending" | "claimed"; created_at: string }>;
+  };
 };
 
 export async function loadMySubProfile(tgId: number): Promise<MySubProfileDto> {

@@ -197,6 +197,18 @@ export default function MySubPage() {
     setShowPickModal(true);
   }
 
+  function shareReferralInTelegram() {
+    if (!data?.referral?.invite_link) {
+      setMsg("Реферальная ссылка недоступна.");
+      return;
+    }
+    const text = data.referral.invite_copy_text || "Присоединяйся по моей ссылке!";
+    const shareUrl = `https://t.me/share/url?url=${encodeURIComponent(data.referral.invite_link)}&text=${encodeURIComponent(text)}`;
+    const tgWebApp = (window as unknown as { Telegram?: { WebApp?: { openTelegramLink?: (url: string) => void } } }).Telegram?.WebApp;
+    if (tgWebApp?.openTelegramLink) tgWebApp.openTelegramLink(shareUrl);
+    else window.open(shareUrl, "_blank", "noopener,noreferrer");
+  }
+
   return (
     <div className="mysub-wrap">
       <div className="mysub-card">
@@ -425,7 +437,49 @@ export default function MySubPage() {
             ) : tab === "friends" ? (
               <section className="mysub-section mysub-section-anim">
                 <h3 className="mysub-title">Друзья</h3>
-                <p className="sub">В разработке.</p>
+                {data.referral?.enabled ? (
+                  <>
+                    <div className="mysub-sub-box">
+                      <p style={{ margin: 0, fontWeight: 700 }}>Приглашайте друзей</p>
+                      <p className="sub" style={{ marginTop: "0.35rem" }}>
+                        Отправьте ссылку другу. Когда он откроет приложение, вам начислится награда.
+                      </p>
+                      <div className="mysub-url">{data.referral.invite_link || "Реферальная ссылка недоступна"}</div>
+                      <div className="row-actions">
+                        <button type="button" className="primary" disabled={!data.referral.invite_link} onClick={shareReferralInTelegram}>
+                          Отправить в Telegram
+                        </button>
+                        <button
+                          type="button"
+                          className="ghost"
+                          disabled={!data.referral.invite_link}
+                          onClick={() => {
+                            if (data.referral.invite_link) void copySubscription(data.referral.invite_link);
+                          }}
+                        >
+                          Скопировать ссылку
+                        </button>
+                      </div>
+                    </div>
+                    <div className="mysub-sub-box" style={{ marginTop: "0.65rem" }}>
+                      <p style={{ margin: 0, fontWeight: 700 }}>Приглашенные друзья</p>
+                      <div className="mysub-stat-list" style={{ marginTop: "0.55rem" }}>
+                        {data.referral.invited_friends.length === 0 ? (
+                          <div>Пока никого не приглашено.</div>
+                        ) : (
+                          data.referral.invited_friends.map((f, idx) => (
+                            <div key={`${f.tg_user_id}-${idx}`}>
+                              {f.name} • {new Date(f.created_at).toLocaleDateString("ru-RU")} •{" "}
+                              {f.status === "claimed" ? "награда выдана" : "ожидает награду"}
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    </div>
+                  </>
+                ) : (
+                  <p className="sub">Реферальная программа временно отключена.</p>
+                )}
               </section>
             ) : (
               <section className="mysub-section mysub-section-anim">
