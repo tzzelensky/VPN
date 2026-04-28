@@ -3,6 +3,40 @@ import { loadMySubWebAppProfile, sendMySubPaymentProof, type MySubProfileDto } f
 
 type Tab = "home" | "subscription" | "friends" | "profile";
 
+function NavIcon({ tab }: { tab: Tab }) {
+  if (tab === "home") {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M4 10.5L12 4l8 6.5V20a1 1 0 0 1-1 1h-4.8v-5.5h-4.4V21H5a1 1 0 0 1-1-1z" />
+      </svg>
+    );
+  }
+  if (tab === "subscription") {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <rect x="3" y="6" width="18" height="12" rx="2.4" ry="2.4" />
+        <path d="M3 10.5h18" />
+      </svg>
+    );
+  }
+  if (tab === "friends") {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <circle cx="8" cy="8" r="3.2" />
+        <circle cx="16.5" cy="9" r="2.7" />
+        <path d="M3.7 19.3c0-2.8 2.4-4.9 5.3-4.9s5.3 2.1 5.3 4.9" />
+        <path d="M13.2 19.3c.2-2.1 1.9-3.7 4.1-3.7 2.3 0 4.2 1.7 4.2 3.7" />
+      </svg>
+    );
+  }
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <circle cx="12" cy="8" r="3.4" />
+      <path d="M5 20c0-3.2 2.8-5.6 7-5.6s7 2.4 7 5.6" />
+    </svg>
+  );
+}
+
 export default function MySubPage() {
   const [data, setData] = useState<MySubProfileDto | null>(null);
   const [tab, setTab] = useState<Tab>("home");
@@ -82,6 +116,26 @@ export default function MySubPage() {
     });
   }
 
+  async function compressImage(file: File): Promise<{ base64: string; mime: string; name: string }> {
+    if (!file.type.startsWith("image/")) {
+      return { base64: await fileToDataUrl(file), mime: file.type || "application/octet-stream", name: file.name || "file.bin" };
+    }
+    const imageBitmap = await createImageBitmap(file);
+    const maxSide = 1280;
+    const scale = Math.min(1, maxSide / Math.max(imageBitmap.width, imageBitmap.height));
+    const w = Math.max(1, Math.round(imageBitmap.width * scale));
+    const h = Math.max(1, Math.round(imageBitmap.height * scale));
+    const canvas = document.createElement("canvas");
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) throw new Error("Не удалось обработать фото.");
+    ctx.drawImage(imageBitmap, 0, 0, w, h);
+    imageBitmap.close();
+    const base64 = canvas.toDataURL("image/jpeg", 0.72);
+    return { base64, mime: "image/jpeg", name: "proof.jpg" };
+  }
+
   async function submitPaymentProof() {
     if (!data || !payPhoto) {
       setMsg("Выберите тариф и фото чека.");
@@ -98,14 +152,14 @@ export default function MySubPage() {
     setBusyPay(true);
     setMsg("");
     try {
-      const base64 = await fileToDataUrl(payPhoto);
+      const compressed = await compressImage(payPhoto);
       await sendMySubPaymentProof({
         init_data: initData,
         user_id: pickedSub?.id,
         plan_id: payPlanId,
-        photo_base64: base64,
-        photo_mime: payPhoto.type || "image/jpeg",
-        photo_name: payPhoto.name || "proof.jpg",
+        photo_base64: compressed.base64,
+        photo_mime: compressed.mime,
+        photo_name: compressed.name,
         new_subscription_name: data.subscriptions.length === 0 ? newSubName.trim().slice(0, 25) : undefined,
       });
       setMsg("Чек отправлен администратору. Ожидайте подтверждения.");
@@ -151,7 +205,7 @@ export default function MySubPage() {
             {tab === "home" ? (
               <section className="mysub-section">
                 <h3 className="mysub-title">Подключитесь за минуту</h3>
-                <p className="sub">VPN для максимального качества и поддержки проекта.</p>
+                <p className="sub">Быстрый и надежный VPN для стабильного подключения.</p>
                 <div className="mysub-sub-box">
                   <p className="sub" style={{ marginBottom: "0.4rem" }}>
                     {pickedSub ? `Конфиг: #${pickedSub.id} ${pickedSub.name}` : "Выберите подписку"}
@@ -336,18 +390,22 @@ export default function MySubPage() {
 
             {msg ? <div className="flash ok">{msg}</div> : null}
             <div className="mysub-bottom-actions">
-              <button type="button" className={tab === "home" ? "primary" : "ghost"} onClick={() => setTab("home")}>
-                Главная
-              </button>
-              <button type="button" className={tab === "subscription" ? "primary" : "ghost"} onClick={() => setTab("subscription")}>
-                Подписка
-              </button>
-              <button type="button" className={tab === "friends" ? "primary" : "ghost"} onClick={() => setTab("friends")}>
-                Друзья
-              </button>
-              <button type="button" className={tab === "profile" ? "primary" : "ghost"} onClick={() => setTab("profile")}>
-                Профиль
-              </button>
+              {([
+                ["home", "Главная"],
+                ["subscription", "Подписка"],
+                ["friends", "Друзья"],
+                ["profile", "Профиль"],
+              ] as Array<[Tab, string]>).map(([t, label]) => (
+                <button
+                  key={t}
+                  type="button"
+                  className={`mysub-nav-btn ${tab === t ? "active" : ""}`}
+                  onClick={() => setTab(t)}
+                >
+                  <NavIcon tab={t} />
+                  <span>{label}</span>
+                </button>
+              ))}
             </div>
           </>
         ) : null}
