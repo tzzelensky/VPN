@@ -213,6 +213,13 @@ export default function MySubPage() {
 
   async function claimFriendReward(kind: "gb" | "days") {
     if (!friendRewardId) return;
+    if (kind === "gb" && (data?.subscriptions ?? []).some((s) => s.total_gb <= 0)) {
+      const text = "У вас безлимит. Можно выбрать только награду в днях.";
+      setMsg(text);
+      const tgWebApp = (window as unknown as { Telegram?: { WebApp?: { showAlert?: (msg: string) => void } } }).Telegram?.WebApp;
+      tgWebApp?.showAlert?.(text);
+      return;
+    }
     setFriendRewardBusy(true);
     try {
       await claimMySubReferralReward({ init_data: initData, reward_id: friendRewardId, kind });
@@ -223,7 +230,10 @@ export default function MySubPage() {
     } catch (e) {
       const m = e instanceof Error ? e.message : String(e);
       if (m.includes("inviter_unlimited_choose_days")) {
-        setMsg("У вас безлимит. Можно выбрать только награду в днях.");
+        const text = "У вас безлимит. Можно выбрать только награду в днях.";
+        setMsg(text);
+        const tgWebApp = (window as unknown as { Telegram?: { WebApp?: { showAlert?: (msg: string) => void } } }).Telegram?.WebApp;
+        tgWebApp?.showAlert?.(text);
       } else {
         setMsg("Не удалось применить награду. Попробуйте еще раз.");
       }
