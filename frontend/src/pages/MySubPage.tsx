@@ -51,6 +51,7 @@ export default function MySubPage() {
   const [busyPay, setBusyPay] = useState(false);
   const [newSubName, setNewSubName] = useState("");
   const [profileSubModalId, setProfileSubModalId] = useState<number>(0);
+  const [homeSubId, setHomeSubId] = useState<number>(0);
 
   function getInitData(): string {
     const tgWebApp = (window as unknown as {
@@ -81,6 +82,7 @@ export default function MySubPage() {
         setData(profile);
         if (profile.subscriptions.length > 0) {
           setPickedSubId(profile.subscriptions[0]!.id);
+          setHomeSubId(profile.subscriptions[0]!.id);
         }
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
@@ -89,11 +91,19 @@ export default function MySubPage() {
       }
     })();
   }, []);
+  useEffect(() => {
+    setMsg("");
+  }, [tab]);
 
   const pickedSub = useMemo(() => {
     if (!data) return null;
     return data.subscriptions.find((s) => s.id === pickedSubId) ?? null;
   }, [data, pickedSubId]);
+  const homeSub = useMemo(() => {
+    if (!data) return null;
+    const targetId = homeSubId > 0 ? homeSubId : pickedSubId;
+    return data.subscriptions.find((s) => s.id === targetId) ?? null;
+  }, [data, homeSubId, pickedSubId]);
   const initData = useMemo(() => {
     return getInitData();
   }, []);
@@ -204,29 +214,53 @@ export default function MySubPage() {
             </div>
 
             {tab === "home" ? (
-              <section className="mysub-section">
+              <section className="mysub-section mysub-section-anim">
                 <h3 className="mysub-title">Подключитесь за минуту</h3>
                 <p className="sub">Быстрый и надежный VPN для стабильного подключения.</p>
                 <div className="mysub-sub-box">
+                  {data.subscriptions.length > 1 ? (
+                    <div className="form-field">
+                      <label>Выберите подписку</label>
+                      <select
+                        value={homeSub?.id ? String(homeSub.id) : ""}
+                        onChange={(e) => {
+                          const id = Number(e.target.value) || 0;
+                          setHomeSubId(id);
+                          setPickedSubId(id);
+                        }}
+                      >
+                        {data.subscriptions.map((s) => (
+                          <option key={s.id} value={s.id}>
+                            #{s.id} {s.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  ) : null}
                   <p className="sub" style={{ marginBottom: "0.4rem" }}>
-                    {pickedSub ? `Конфиг: #${pickedSub.id} ${pickedSub.name}` : "Выберите подписку"}
+                    {homeSub ? `Конфиг: #${homeSub.id} ${homeSub.name}` : "Выберите подписку"}
                   </p>
-                  <div className="mysub-url">{pickedSub?.subscription_url || "Нажмите кнопку «Скопировать конфиг»"}</div>
+                  <div className="mysub-url">{homeSub?.subscription_url || "Нажмите кнопку «Скопировать конфиг»"}</div>
                   <div className="row-actions">
                     <button
                       type="button"
                       className="primary"
-                      disabled={!pickedSub}
+                      disabled={!homeSub}
                       onClick={() => {
-                        if (!pickedSub || (data.subscriptions.length > 1 && !showPickModal)) {
+                        if (!homeSub || (data.subscriptions.length > 1 && !showPickModal)) {
                           openPick("copy");
                           return;
                         }
-                        void copySubscription(pickedSub.subscription_url);
+                        void copySubscription(homeSub.subscription_url);
                       }}
                     >
                       Скопировать конфиг
                     </button>
+                    {data.subscriptions.length === 1 ? (
+                      <button type="button" className="ghost" onClick={() => setTab("subscription")}>
+                        Купить еще подписку
+                      </button>
+                    ) : null}
                     <button type="button" className="ghost" onClick={() => setShowInstruction(true)}>
                       Инструкция
                     </button>
@@ -234,7 +268,7 @@ export default function MySubPage() {
                 </div>
               </section>
             ) : tab === "subscription" ? (
-              <section className="mysub-section">
+              <section className="mysub-section mysub-section-anim">
                 <h3 className="mysub-title">Подписка</h3>
                 {data.subscriptions.length === 0 ? (
                   <div className="mysub-sub-box">
@@ -264,7 +298,16 @@ export default function MySubPage() {
                     </div>
                     <div className="form-field">
                       <label>Фото чека</label>
-                      <input type="file" accept="image/*" onChange={(e) => setPayPhoto(e.target.files?.[0] ?? null)} />
+                      <label className="mysub-file-btn">
+                        <input
+                          className="mysub-file-input"
+                          type="file"
+                          accept="image/*"
+                          onChange={(e) => setPayPhoto(e.target.files?.[0] ?? null)}
+                        />
+                        Выберите файл
+                      </label>
+                      <p className="field-hint">{payPhoto ? `Выбрано: ${payPhoto.name}` : "Фото не выбрано."}</p>
                     </div>
                     <button type="button" className="primary" disabled={busyPay} onClick={() => void submitPaymentProof()}>
                       {busyPay ? "Отправка..." : "Подтвердить оплату"}
@@ -347,7 +390,15 @@ export default function MySubPage() {
                     </div>
                     <div className="form-field">
                       <label>Фото чека</label>
-                      <input type="file" accept="image/*" onChange={(e) => setPayPhoto(e.target.files?.[0] ?? null)} />
+                      <label className="mysub-file-btn">
+                        <input
+                          className="mysub-file-input"
+                          type="file"
+                          accept="image/*"
+                          onChange={(e) => setPayPhoto(e.target.files?.[0] ?? null)}
+                        />
+                        Выберите файл
+                      </label>
                       <p className="field-hint">{payPhoto ? `Выбрано: ${payPhoto.name}` : "Фото не выбрано."}</p>
                     </div>
                     <div className="row-actions">
@@ -372,12 +423,12 @@ export default function MySubPage() {
                 )}
               </section>
             ) : tab === "friends" ? (
-              <section className="mysub-section">
+              <section className="mysub-section mysub-section-anim">
                 <h3 className="mysub-title">Друзья</h3>
                 <p className="sub">В разработке.</p>
               </section>
             ) : (
-              <section className="mysub-section">
+              <section className="mysub-section mysub-section-anim">
                 <h3 className="mysub-title">Профиль</h3>
                 <div className="mysub-sub-box">
                   <p style={{ margin: 0, fontWeight: 600 }}>{data.name}</p>
@@ -428,7 +479,7 @@ export default function MySubPage() {
       </div>
       {showInstruction ? (
         <div className="modal-backdrop" onClick={() => setShowInstruction(false)}>
-          <div className="modal comms-picker-modal" onClick={(e) => e.stopPropagation()}>
+          <div className="modal mysub-modal comms-picker-modal" onClick={(e) => e.stopPropagation()}>
             <div className="modal-head">
               <h2>Инструкция</h2>
               <button type="button" className="ghost modal-close" onClick={() => setShowInstruction(false)}>
@@ -460,7 +511,7 @@ export default function MySubPage() {
       ) : null}
       {showPickModal && data ? (
         <div className="modal-backdrop" onClick={() => setShowPickModal(false)}>
-          <div className="modal" onClick={(e) => e.stopPropagation()}>
+          <div className="modal mysub-modal" onClick={(e) => e.stopPropagation()}>
             <div className="modal-head">
               <h2>Выбор подписки</h2>
               <button type="button" className="ghost modal-close" onClick={() => setShowPickModal(false)}>
@@ -505,7 +556,7 @@ export default function MySubPage() {
       ) : null}
       {profileSubModalId > 0 && data ? (
         <div className="modal-backdrop" onClick={() => setProfileSubModalId(0)}>
-          <div className="modal" onClick={(e) => e.stopPropagation()}>
+          <div className="modal mysub-modal" onClick={(e) => e.stopPropagation()}>
             <div className="modal-head">
               <h2>Подписка</h2>
               <button type="button" className="ghost modal-close" onClick={() => setProfileSubModalId(0)}>

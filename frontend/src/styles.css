@@ -1811,6 +1811,47 @@ th {
   font-weight: 600;
 }
 
+.mysub-file-btn {
+  margin-top: 0.15rem;
+  width: 100%;
+  min-height: 2.7rem;
+  border-radius: 12px;
+  border: 1px solid rgba(61, 158, 255, 0.35);
+  background: rgba(61, 158, 255, 0.1);
+  color: var(--text);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.mysub-file-input {
+  display: none;
+}
+
+.mysub-wrap .mysub-modal {
+  overflow: hidden;
+  border-radius: 16px;
+}
+
+.mysub-wrap .mysub-modal .modal-body {
+  padding-bottom: 0.85rem;
+}
+
+.mysub-wrap .mysub-modal .modal-footer {
+  margin: 0;
+  border-top: 1px solid rgba(61, 158, 255, 0.28);
+  padding: 0.75rem 1rem;
+}
+
+.mysub-wrap .mysub-modal .modal-footer > .primary {
+  min-width: 230px;
+}
+
+.mysub-section-anim {
+  animation: mysubSlideIn 240ms ease both;
+}
+
 @keyframes mysubFadeUp {
   from {
     opacity: 0;
@@ -1819,6 +1860,17 @@ th {
   to {
     opacity: 1;
     transform: translateY(0);
+  }
+}
+
+@keyframes mysubSlideIn {
+  from {
+    opacity: 0;
+    transform: translateX(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
   }
 }
 
