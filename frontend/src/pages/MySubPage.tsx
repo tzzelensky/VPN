@@ -211,6 +211,13 @@ export default function MySubPage() {
     else window.open(shareUrl, "_blank", "noopener,noreferrer");
   }
 
+  function openSupportProfile() {
+    const url = "https://t.me/hsnvps";
+    const tgWebApp = (window as unknown as { Telegram?: { WebApp?: { openTelegramLink?: (u: string) => void } } }).Telegram?.WebApp;
+    if (tgWebApp?.openTelegramLink) tgWebApp.openTelegramLink(url);
+    else window.open(url, "_blank", "noopener,noreferrer");
+  }
+
   async function claimFriendReward(kind: "gb" | "days") {
     if (!friendRewardId) return;
     if (kind === "gb" && (data?.subscriptions ?? []).some((s) => s.total_gb <= 0)) {
@@ -544,6 +551,11 @@ export default function MySubPage() {
                         </button>
                       ))
                     )}
+                  </div>
+                  <div className="row-actions" style={{ marginTop: "0.75rem" }}>
+                    <button type="button" className="ghost" onClick={openSupportProfile}>
+                      Поддержка
+                    </button>
                   </div>
                 </div>
               </section>
