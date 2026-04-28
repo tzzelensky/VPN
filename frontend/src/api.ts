@@ -499,11 +499,12 @@ export async function loadMySubWebAppProfile(initData: string): Promise<MySubPro
 
 export async function sendMySubPaymentProof(payload: {
   init_data: string;
-  user_id: number;
+  user_id?: number;
   plan_id: number;
   photo_base64: string;
   photo_mime?: string;
   photo_name?: string;
+  new_subscription_name?: string;
 }): Promise<{ ok: boolean }> {
   const res = await fetch("/api/mysub/webapp/payment-proof", {
     method: "POST",

@@ -15,13 +15,26 @@ export default function MySubPage() {
   const [payPlanId, setPayPlanId] = useState<number>(1);
   const [payPhoto, setPayPhoto] = useState<File | null>(null);
   const [busyPay, setBusyPay] = useState(false);
+  const [newSubName, setNewSubName] = useState("");
+
+  function getInitData(): string {
+    const tgWebApp = (window as unknown as {
+      Telegram?: { WebApp?: { initData?: string; ready?: () => void; expand?: () => void } };
+    }).Telegram?.WebApp;
+    const direct = String(tgWebApp?.initData ?? "").trim();
+    if (direct) return direct;
+    const fromHash = new URLSearchParams(String(window.location.hash ?? "").replace(/^#/, "")).get("tgWebAppData");
+    if (fromHash) return decodeURIComponent(fromHash);
+    const fromQuery = new URLSearchParams(window.location.search).get("tgWebAppData");
+    if (fromQuery) return decodeURIComponent(fromQuery);
+    return "";
+  }
 
   useEffect(() => {
     void (async () => {
       setErr("");
-      const tgWebApp = (window as unknown as { Telegram?: { WebApp?: { initData?: string; ready?: () => void; expand?: () => void } } })
-        .Telegram?.WebApp;
-      const initData = String(tgWebApp?.initData ?? "").trim();
+      const tgWebApp = (window as unknown as { Telegram?: { WebApp?: { ready?: () => void; expand?: () => void } } }).Telegram?.WebApp;
+      const initData = getInitData();
       if (!initData) {
         setErr("Требуется авторизация через тг.");
         return;
@@ -31,7 +44,7 @@ export default function MySubPage() {
       try {
         const profile = await loadMySubWebAppProfile(initData);
         setData(profile);
-        if (profile.subscriptions.length === 1) {
+        if (profile.subscriptions.length > 0) {
           setPickedSubId(profile.subscriptions[0]!.id);
         }
       } catch (e) {
@@ -47,8 +60,7 @@ export default function MySubPage() {
     return data.subscriptions.find((s) => s.id === pickedSubId) ?? null;
   }, [data, pickedSubId]);
   const initData = useMemo(() => {
-    const tgWebApp = (window as unknown as { Telegram?: { WebApp?: { initData?: string } } }).Telegram?.WebApp;
-    return String(tgWebApp?.initData ?? "").trim();
+    return getInitData();
   }, []);
 
   async function copySubscription(url: string) {
@@ -71,8 +83,16 @@ export default function MySubPage() {
   }
 
   async function submitPaymentProof() {
-    if (!data || !pickedSub || !payPhoto) {
-      setMsg("Выберите подписку, тариф и фото чека.");
+    if (!data || !payPhoto) {
+      setMsg("Выберите тариф и фото чека.");
+      return;
+    }
+    if (data.subscriptions.length > 0 && !pickedSub) {
+      setMsg("Выберите подписку.");
+      return;
+    }
+    if (data.subscriptions.length === 0 && !newSubName.trim()) {
+      setMsg("Введите название новой подписки.");
       return;
     }
     setBusyPay(true);
@@ -81,14 +101,16 @@ export default function MySubPage() {
       const base64 = await fileToDataUrl(payPhoto);
       await sendMySubPaymentProof({
         init_data: initData,
-        user_id: pickedSub.id,
+        user_id: pickedSub?.id,
         plan_id: payPlanId,
         photo_base64: base64,
         photo_mime: payPhoto.type || "image/jpeg",
         photo_name: payPhoto.name || "proof.jpg",
+        new_subscription_name: data.subscriptions.length === 0 ? newSubName.trim().slice(0, 25) : undefined,
       });
       setMsg("Чек отправлен администратору. Ожидайте подтверждения.");
       setPayPhoto(null);
+      if (data.subscriptions.length === 0) setNewSubName("");
     } catch (e) {
       const m = e instanceof Error ? e.message : String(e);
       if (m.includes("tg_webapp_auth_required")) setErr("Требуется авторизация через тг.");
@@ -139,6 +161,7 @@ export default function MySubPage() {
                     <button
                       type="button"
                       className="primary"
+                      disabled={!pickedSub}
                       onClick={() => {
                         if (!pickedSub || (data.subscriptions.length > 1 && !showPickModal)) {
                           openPick("copy");
@@ -158,6 +181,38 @@ export default function MySubPage() {
             ) : tab === "subscription" ? (
               <section className="mysub-section">
                 <h3 className="mysub-title">Подписка</h3>
+                {data.subscriptions.length === 0 ? (
+                  <div className="mysub-sub-box">
+                    <p className="sub" style={{ marginBottom: "0.5rem" }}>
+                      У вас пока нет подписок. Выберите тариф и отправьте чек, после подтверждения администратором создадим подписку.
+                    </p>
+                    <div className="form-field">
+                      <label>Название новой подписки</label>
+                      <input
+                        value={newSubName}
+                        onChange={(e) => setNewSubName(e.target.value.slice(0, 25))}
+                        placeholder='Например: "Для мамы"'
+                      />
+                    </div>
+                    <div className="form-field">
+                      <label>Тариф</label>
+                      <select value={payPlanId} onChange={(e) => setPayPlanId(Number(e.target.value) || 1)}>
+                        {data.plans.map((p) => (
+                          <option key={p.id} value={p.id}>
+                            Тариф {p.id}: {p.total_gb > 0 ? `${p.total_gb} ГБ` : "безлимит"} / {p.days} дн. / {p.price_rub} ₽
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="form-field">
+                      <label>Фото чека</label>
+                      <input type="file" accept="image/*" onChange={(e) => setPayPhoto(e.target.files?.[0] ?? null)} />
+                    </div>
+                    <button type="button" className="primary" disabled={busyPay} onClick={() => void submitPaymentProof()}>
+                      {busyPay ? "Отправка..." : "Купить подписку"}
+                    </button>
+                  </div>
+                ) : null}
                 {data.subscriptions.length > 1 ? (
                   <div className="form-field">
                     <label>Выберите подписку</label>
@@ -257,19 +312,23 @@ export default function MySubPage() {
                   <p style={{ margin: 0, fontWeight: 600 }}>{data.name}</p>
                   <p className="sub" style={{ marginTop: "0.35rem" }}>Список подписок:</p>
                   <div className="mysub-stat-list">
-                    {data.subscriptions.map((s) => (
-                      <button
-                        key={s.id}
-                        type="button"
-                        className={pickedSubId === s.id ? "primary" : "ghost"}
-                        onClick={() => {
-                          setPickedSubId(s.id);
-                          setTab("subscription");
-                        }}
-                      >
-                        #{s.id} {s.name}
-                      </button>
-                    ))}
+                    {data.subscriptions.length === 0 ? (
+                      <div>Подписок пока нет.</div>
+                    ) : (
+                      data.subscriptions.map((s) => (
+                        <button
+                          key={s.id}
+                          type="button"
+                          className={pickedSubId === s.id ? "primary" : "ghost"}
+                          onClick={() => {
+                            setPickedSubId(s.id);
+                            setTab("subscription");
+                          }}
+                        >
+                          #{s.id} {s.name}
+                        </button>
+                      ))
+                    )}
                   </div>
                 </div>
               </section>

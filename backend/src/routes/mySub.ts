@@ -24,6 +24,7 @@ type SendProofBody = {
   photo_base64?: unknown;
   photo_mime?: unknown;
   photo_name?: unknown;
+  new_subscription_name?: unknown;
 };
 
 function publicSubUrl(subToken: string): string {
@@ -136,16 +137,12 @@ router.post("/webapp/profile", async (req, res) => {
     return;
   }
   const linked = findUsersByTelegramChatId(tgId);
-  if (linked.length === 0) {
-    res.status(404).json({ error: "not_found" });
-    return;
-  }
   const chat = await resolveChatProfile(tgId);
   const displayName =
     `${String(ver.user.first_name ?? "").trim()} ${String(ver.user.last_name ?? "").trim()}`.trim() ||
     (ver.user.username ? `@${ver.user.username}` : "") ||
     chat.displayName ||
-    linked[0]!.name ||
+    linked[0]?.name ||
     "Пользователь";
   let avatarDataUrl: string | null = null;
   if (chat.bigFileId) {
@@ -172,7 +169,7 @@ router.post("/webapp/profile", async (req, res) => {
     tg_id: tgId,
     name: displayName,
     avatar_url: avatarDataUrl,
-    stats_html: formatStatsHtml(linked),
+    stats_html: linked.length > 0 ? formatStatsHtml(linked) : "Подписок пока нет.",
     subscriptions,
     payment_url: shop.payment_url.trim() || getTelegramPaymentUrl(),
     plans: shop.plans,
@@ -202,15 +199,17 @@ router.post("/webapp/payment-proof", async (req, res) => {
     return;
   }
   const tgId = parseTgId(String(ver.user.id ?? ""));
-  const userId = Number(body.user_id);
+  const rawUserId = Number(body.user_id);
+  const userId = Number.isFinite(rawUserId) && rawUserId > 0 ? Math.floor(rawUserId) : 0;
   const planId = Number(body.plan_id);
-  if (!tgId || !Number.isFinite(userId) || userId <= 0 || !Number.isFinite(planId) || ![1, 2, 3].includes(planId)) {
+  if (!tgId || !Number.isFinite(planId) || ![1, 2, 3].includes(planId)) {
     res.status(400).json({ error: "bad_payload" });
     return;
   }
+  const newSubscriptionName = String(body.new_subscription_name ?? "").trim().slice(0, 25);
   const linked = findUsersByTelegramChatId(tgId);
-  const target = linked.find((u) => u.id === Math.floor(userId));
-  if (!target) {
+  const target = userId > 0 ? linked.find((u) => u.id === userId) ?? null : null;
+  if (userId > 0 && !target) {
     res.status(403).json({ error: "forbidden" });
     return;
   }
@@ -228,8 +227,10 @@ router.post("/webapp/payment-proof", async (req, res) => {
   }
   const caption =
     `<b>Оплата из WebApp</b>\n` +
-    `Пользователь: <b>${String(ver.user.first_name ?? "").trim() || target.name}</b> (chat <code>${tgId}</code>)\n` +
-    `Подписка: <b>#${target.id} ${target.name}</b>\n` +
+    `Пользователь: <b>${String(ver.user.first_name ?? "").trim() || target?.name || "Пользователь"}</b> (chat <code>${tgId}</code>)\n` +
+    (target
+      ? `Подписка: <b>#${target.id} ${target.name}</b>\n`
+      : `Новая подписка: <b>${newSubscriptionName || "Без названия"}</b>\n`) +
     `Тариф: <b>${plan.id}</b> — ${plan.total_gb > 0 ? `${plan.total_gb} ГБ` : "безлимит"} / ${plan.days} дн.\n` +
     `Сумма: <b>${plan.price_rub} ₽</b>`;
 
