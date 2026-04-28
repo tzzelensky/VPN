@@ -1796,6 +1796,21 @@ th {
   background: rgba(7, 9, 20, 0.72);
 }
 
+.mysub-pay-link-btn {
+  margin-top: 0.55rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-height: 2.85rem;
+  border-radius: 12px;
+  border: 1px solid rgba(61, 158, 255, 0.45);
+  background: rgba(61, 158, 255, 0.16);
+  color: var(--text);
+  text-decoration: none;
+  font-weight: 600;
+}
+
 @keyframes mysubFadeUp {
   from {
     opacity: 0;

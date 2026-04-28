@@ -121,12 +121,13 @@ export async function sendTelegramPhoto(
 export async function sendTelegramPhotoBinary(
   chatId: number,
   bytes: Uint8Array,
-  opts?: { caption?: string; mimeType?: string; filename?: string; parse_mode?: "HTML" },
+  opts?: { caption?: string; mimeType?: string; filename?: string; parse_mode?: "HTML"; reply_markup?: unknown },
 ): Promise<void> {
   const form = new FormData();
   form.set("chat_id", String(chatId));
   if (opts?.caption) form.set("caption", opts.caption);
   form.set("parse_mode", opts?.parse_mode ?? "HTML");
+  if (opts?.reply_markup) form.set("reply_markup", JSON.stringify(opts.reply_markup));
   const mime = (opts?.mimeType ?? "image/jpeg").trim() || "image/jpeg";
   const filename = (opts?.filename ?? "photo.jpg").trim() || "photo.jpg";
   form.set("photo", new Blob([Buffer.from(bytes)], { type: mime }), filename);

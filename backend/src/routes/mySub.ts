@@ -1,6 +1,12 @@
 import { Router } from "express";
 import { createHmac, timingSafeEqual } from "node:crypto";
-import { findUsersByTelegramChatId, getSubscriptionShop, userAllowedOnServers } from "../db.js";
+import {
+  findUsersByTelegramChatId,
+  getSubscriptionShop,
+  markPaymentSessionPendingAdmin,
+  startPaymentAwaitingProof,
+  userAllowedOnServers,
+} from "../db.js";
 import { formatStatsHtml, fmtBytes } from "../telegram/format.js";
 import { getTelegramBotToken, getTelegramPaymentNotifyChatIds, getTelegramPaymentUrl } from "../telegram/env.js";
 import { sendTelegramPhotoBinary } from "../telegram/api.js";
@@ -26,6 +32,16 @@ type SendProofBody = {
   photo_name?: unknown;
   new_subscription_name?: unknown;
 };
+function adminDecisionKeyboard(sessionId: string) {
+  return {
+    inline_keyboard: [
+      [
+        { text: "Подтвердить", callback_data: `pok:${sessionId}` },
+        { text: "Платёж не поступил", callback_data: `pnx:${sessionId}` },
+      ],
+    ],
+  };
+}
 
 function publicSubUrl(subToken: string): string {
   const base = (process.env.PUBLIC_API_URL ?? "http://localhost:4000").replace(/\/$/, "");
@@ -233,6 +249,16 @@ router.post("/webapp/payment-proof", async (req, res) => {
       : `Новая подписка: <b>${newSubscriptionName || "Без названия"}</b>\n`) +
     `Тариф: <b>${plan.id}</b> — ${plan.total_gb > 0 ? `${plan.total_gb} ГБ` : "безлимит"} / ${plan.days} дн.\n` +
     `Сумма: <b>${plan.price_rub} ₽</b>`;
+  const sessionId = startPaymentAwaitingProof(
+    tgId,
+    tgId,
+    plan.id,
+    "subscription",
+    target?.id,
+    target ? undefined : newSubscriptionName || "Новая подписка",
+    { username: String(ver.user.username ?? "").trim() || undefined, first_name: String(ver.user.first_name ?? "").trim() || undefined },
+  );
+  markPaymentSessionPendingAdmin(sessionId, "webapp");
 
   let sent = 0;
   const admins = getTelegramPaymentNotifyChatIds();
@@ -243,6 +269,7 @@ router.post("/webapp/payment-proof", async (req, res) => {
         filename: String(body.photo_name ?? "proof.jpg").trim() || "proof.jpg",
         mimeType: String(body.photo_mime ?? parsed.mime) || parsed.mime,
         parse_mode: "HTML",
+        reply_markup: adminDecisionKeyboard(sessionId),
       });
       sent++;
     } catch {

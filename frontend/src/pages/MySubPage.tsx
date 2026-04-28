@@ -50,6 +50,7 @@ export default function MySubPage() {
   const [payPhoto, setPayPhoto] = useState<File | null>(null);
   const [busyPay, setBusyPay] = useState(false);
   const [newSubName, setNewSubName] = useState("");
+  const [profileSubModalId, setProfileSubModalId] = useState<number>(0);
 
   function getInitData(): string {
     const tgWebApp = (window as unknown as {
@@ -162,7 +163,7 @@ export default function MySubPage() {
         photo_name: compressed.name,
         new_subscription_name: data.subscriptions.length === 0 ? newSubName.trim().slice(0, 25) : undefined,
       });
-      setMsg("Чек отправлен администратору. Ожидайте подтверждения.");
+      setMsg("Чек получен. Администратор проверит оплату и примет решение. Обычно это занимает немного времени. После подтверждения подписка придет в чат");
       setPayPhoto(null);
       if (data.subscriptions.length === 0) setNewSubName("");
     } catch (e) {
@@ -257,13 +258,16 @@ export default function MySubPage() {
                           </option>
                         ))}
                       </select>
+                      <a className="mysub-pay-link-btn" href={data.payment_url} target="_blank" rel="noreferrer">
+                        Оплатить по ссылке
+                      </a>
                     </div>
                     <div className="form-field">
                       <label>Фото чека</label>
                       <input type="file" accept="image/*" onChange={(e) => setPayPhoto(e.target.files?.[0] ?? null)} />
                     </div>
                     <button type="button" className="primary" disabled={busyPay} onClick={() => void submitPaymentProof()}>
-                      {busyPay ? "Отправка..." : "Купить подписку"}
+                      {busyPay ? "Отправка..." : "Подтвердить оплату"}
                     </button>
                   </div>
                 ) : null}
@@ -292,6 +296,16 @@ export default function MySubPage() {
                       <div>Использовано: {pickedSub.used_text}</div>
                       <div>Лимит: {pickedSub.total_text}</div>
                       <div>
+                        Осталось:{" "}
+                        {pickedSub.total_gb > 0
+                          ? `${Math.max(
+                              0,
+                              pickedSub.total_gb -
+                                Math.floor((pickedSub.traffic_up + pickedSub.traffic_down) / (1024 * 1024 * 1024) * 100) / 100,
+                            ).toFixed(2)} ГБ`
+                          : "∞"}
+                      </div>
+                      <div>
                         Срок:{" "}
                         {pickedSub.expiry_time > 0
                           ? new Date(pickedSub.expiry_time).toLocaleDateString("ru-RU")
@@ -312,7 +326,7 @@ export default function MySubPage() {
                     </div>
                     <hr style={{ borderColor: "var(--border)", opacity: 0.45, margin: "0.8rem 0" }} />
                     <div className="form-field">
-                      <label>Оплата подписки</label>
+                      <label>Тариф для оплаты</label>
                       <select value={payPlanId} onChange={(e) => setPayPlanId(Number(e.target.value) || 1)}>
                         {data.plans.map((p) => (
                           <option key={p.id} value={p.id}>
@@ -321,12 +335,15 @@ export default function MySubPage() {
                         ))}
                       </select>
                       <p className="field-hint" style={{ marginTop: "0.45rem" }}>
-                        1) Оплатите по ссылке: <a href={data.payment_url} target="_blank" rel="noreferrer">{data.payment_url}</a>
+                        1) Нажмите кнопку оплаты ниже.
                         <br />
                         2) В комментарии укажите номер тарифа.
                         <br />
                         3) Прикрепите фото чека ниже.
                       </p>
+                      <a className="mysub-pay-link-btn" href={data.payment_url} target="_blank" rel="noreferrer">
+                        Оплатить по ссылке
+                      </a>
                     </div>
                     <div className="form-field">
                       <label>Фото чека</label>
@@ -346,7 +363,7 @@ export default function MySubPage() {
                           void submitPaymentProof();
                         }}
                       >
-                        {busyPay ? "Отправка..." : "Оплата подписки"}
+                        {busyPay ? "Отправка..." : "Подтвердить оплату"}
                       </button>
                     </div>
                   </div>
@@ -375,8 +392,7 @@ export default function MySubPage() {
                           type="button"
                           className={pickedSubId === s.id ? "primary" : "ghost"}
                           onClick={() => {
-                            setPickedSubId(s.id);
-                            setTab("subscription");
+                            setProfileSubModalId(s.id);
                           }}
                         >
                           #{s.id} {s.name}
@@ -482,6 +498,51 @@ export default function MySubPage() {
                 }}
               >
                 Выбрать
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+      {profileSubModalId > 0 && data ? (
+        <div className="modal-backdrop" onClick={() => setProfileSubModalId(0)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-head">
+              <h2>Подписка</h2>
+              <button type="button" className="ghost modal-close" onClick={() => setProfileSubModalId(0)}>
+                ×
+              </button>
+            </div>
+            <div className="modal-body">
+              {(() => {
+                const s = data.subscriptions.find((x) => x.id === profileSubModalId);
+                if (!s) return <p className="sub">Подписка не найдена.</p>;
+                return (
+                  <div className="mysub-stat-list">
+                    <div><b>#{s.id} {s.name}</b></div>
+                    <div>Использовано: {s.used_text}</div>
+                    <div>Лимит: {s.total_text}</div>
+                    <div>
+                      Осталось:{" "}
+                      {s.total_gb > 0
+                        ? `${Math.max(0, s.total_gb - Math.floor((s.traffic_up + s.traffic_down) / (1024 * 1024 * 1024) * 100) / 100).toFixed(2)} ГБ`
+                        : "∞"}
+                    </div>
+                    <div>Срок: {s.expiry_time > 0 ? new Date(s.expiry_time).toLocaleDateString("ru-RU") : "без срока"}</div>
+                  </div>
+                );
+              })()}
+            </div>
+            <div className="modal-footer">
+              <button
+                type="button"
+                className="primary"
+                onClick={() => {
+                  const s = data.subscriptions.find((x) => x.id === profileSubModalId);
+                  if (!s) return;
+                  void copySubscription(s.subscription_url);
+                }}
+              >
+                Скопировать ссылку подписки
               </button>
             </div>
           </div>
