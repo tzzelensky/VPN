@@ -552,11 +552,11 @@ export default function MySubPage() {
                       ))
                     )}
                   </div>
-                  <div className="row-actions" style={{ marginTop: "0.75rem" }}>
-                    <button type="button" className="ghost" onClick={openSupportProfile}>
-                      Поддержка
-                    </button>
-                  </div>
+                </div>
+                <div className="row-actions" style={{ marginTop: "0.75rem" }}>
+                  <button type="button" className="ghost" onClick={openSupportProfile}>
+                    Поддержка
+                  </button>
                 </div>
               </section>
             )}
