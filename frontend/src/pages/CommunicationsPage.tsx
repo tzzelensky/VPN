@@ -271,14 +271,40 @@ export default function CommunicationsPage({ onLogout }: { onLogout: () => void 
           >
             Сообщение выбранному клиенту
           </button>
-                    <button
-                      type="button"
-                      className={mode === "selected" ? "primary" : "ghost"}
-                      disabled={busy}
-                      onClick={() => setMode("selected")}
-                    >
-                      Выбор клиентов
-                    </button>
+          <button
+            type="button"
+            className={mode === "selected" ? "primary" : "ghost"}
+            disabled={busy}
+            onClick={() => setMode("selected")}
+          >
+            Выбор клиентов
+          </button>
+        </div>
+
+        <div className="form-field" style={{ marginTop: "0.75rem" }}>
+          <div className="shop-toggle-row">
+            <div>
+              <label>Пометка сообщения</label>
+              <p className="field-hint" style={{ marginTop: "0.2rem" }}>
+                Автосохранение включено. По умолчанию используется «Сообщение от администратора».
+              </p>
+            </div>
+            <button
+              type="button"
+              className={`toggle ${markEnabled ? "on" : ""}`}
+              aria-pressed={markEnabled}
+              disabled={busy}
+              onClick={() => setMarkEnabled((v) => !v)}
+            />
+          </div>
+          {markEnabled ? (
+            <input
+              value={markText}
+              disabled={busy}
+              onChange={(e) => setMarkText(e.target.value)}
+              placeholder="Сообщение от администратора"
+            />
+          ) : null}
         </div>
 
         {mode === "single" ? (
@@ -334,41 +360,22 @@ export default function CommunicationsPage({ onLogout }: { onLogout: () => void 
           />
         </div>
 
-        <div className="form-field">
-          <div className="shop-toggle-row">
-            <div>
-              <label>Пометка сообщения</label>
-              <p className="field-hint" style={{ marginTop: "0.2rem" }}>
-                Автосохранение включено. По умолчанию используется «Сообщение от администратора».
-              </p>
-            </div>
-            <button
-              type="button"
-              className={`toggle ${markEnabled ? "on" : ""}`}
-              aria-pressed={markEnabled}
-              disabled={busy}
-              onClick={() => setMarkEnabled((v) => !v)}
-            />
-          </div>
-          {markEnabled ? (
-            <input
-              value={markText}
-              disabled={busy}
-              onChange={(e) => setMarkText(e.target.value)}
-              placeholder="Сообщение от администратора"
-            />
-          ) : null}
-        </div>
-
         <div className="form-field" style={{ marginTop: "0.8rem" }}>
           <label>Фото (опционально)</label>
-          <input
-            type="file"
-            accept="image/*"
-            disabled={busy}
-            onChange={(e) => setPhoto(e.target.files?.[0] ?? null)}
-          />
-          <p className="field-hint">{photo ? `Выбрано: ${photo.name}` : "Фото не выбрано."}</p>
+          <div className="comms-file-row">
+            <label className={`ghost comms-file-btn ${busy ? "disabled" : ""}`}>
+              <input
+                type="file"
+                accept="image/*"
+                disabled={busy}
+                className="comms-file-input"
+                onChange={(e) => setPhoto(e.target.files?.[0] ?? null)}
+              />
+              Выбор файла
+            </label>
+            <span className="comms-file-name">{photo ? photo.name : "Не выбран ни один файл"}</span>
+          </div>
+          <p className="field-hint">{photo ? `Фото: ${photo.name}` : "Фото не выбрано."}</p>
         </div>
 
         <div className="row-actions">

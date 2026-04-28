@@ -1529,3 +1529,34 @@ th {
   flex-direction: column;
   gap: 0.5rem;
 }
+
+.comms-file-row {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+}
+
+.comms-file-input {
+  display: none;
+}
+
+.comms-file-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 36px;
+  padding: 0.4rem 0.75rem;
+  border-radius: 10px;
+  cursor: pointer;
+}
+
+.comms-file-btn.disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+.comms-file-name {
+  font-size: 0.9rem;
+  color: var(--muted);
+}
