@@ -15,6 +15,21 @@ export function mainMenuInline(isAdmin = false, referralEnabled = false) {
   return { inline_keyboard: rows };
 }
 
+export function mainMenuReply(isAdmin = false, referralEnabled = false) {
+  const rows: string[][] = [
+    ["Статистика по подписке", "Подписка"],
+    ["Оплата подписки", "Докупить ГБ"],
+  ];
+  if (referralEnabled) rows.push(["Пригласи друга"]);
+  if (isAdmin) rows.push(["Клиенты"]);
+  rows.push(["/start"]);
+  return {
+    keyboard: rows.map((r) => r.map((text) => ({ text }))),
+    resize_keyboard: true,
+    is_persistent: true,
+  };
+}
+
 /** Напоминание из админки: кнопка «Оплатить» — пока тот же callback, что и в меню (заглушка). */
 export const payReminderInline = {
   inline_keyboard: [[{ text: "Оплатить", callback_data: "pay" }]],
@@ -49,4 +64,15 @@ export function newUserKeyboard(salesDisabled: boolean) {
   }
   rows.push([{ text: "« Меню", callback_data: "home" }]);
   return { inline_keyboard: rows };
+}
+
+export function newUserReply(salesDisabled: boolean) {
+  const rows: string[][] = [];
+  if (!salesDisabled) rows.push(["Купить подписку"]);
+  rows.push(["/start"]);
+  return {
+    keyboard: rows.map((r) => r.map((text) => ({ text }))),
+    resize_keyboard: true,
+    is_persistent: true,
+  };
 }

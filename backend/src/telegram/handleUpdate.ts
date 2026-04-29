@@ -13,7 +13,9 @@ import { escHtml, formatStatsHtml } from "./format.js";
 import {
   backHomeRow,
   mainMenuInline,
+  mainMenuReply,
   newUserKeyboard,
+  newUserReply,
   pickSubscriptionKeyboard,
   publicSubscriptionUrl,
 } from "./keyboards.js";
@@ -194,7 +196,7 @@ function linkedUsers(fromId: number) {
 async function sendMainMenuLinked(chatId: number, from: TgUser): Promise<void> {
   const name = displayName(from);
   const text = `👋 <b>Привет, ${escHtml(name)}!</b>\n\n👇 <b>Выберите действие:</b>`;
-  await sendTelegramHtml(chatId, text, mainMenuInline(isAdminTg(from.id), getReferralProgram().enabled));
+  await sendTelegramHtml(chatId, text, mainMenuReply(isAdminTg(from.id), getReferralProgram().enabled));
 }
 
 /** /start и «Меню»: без привязки — экран покупки; с привязкой — основное меню. */
@@ -212,7 +214,7 @@ async function sendWelcome(chatId: number, from: TgUser): Promise<void> {
     (sales
       ? "Оформление новых подписок сейчас <b>отключено</b>. Когда администратор привяжет ваш Telegram к аккаунту в панели, здесь появится меню с оплатой продления и ссылкой на VPN."
       : "Нажмите <b>«Купить подписку»</b> — выберите тариф, оплатите по ссылке и отправьте <b>фото чека</b> в этот чат. После проверки администратор подключит доступ.");
-  await sendTelegramHtml(chatId, text, newUserKeyboard(sales));
+  await sendTelegramHtml(chatId, text, newUserReply(sales));
 }
 
 function parseStartArg(text: string): string {
@@ -333,6 +335,75 @@ export async function handleTelegramUpdate(body: unknown): Promise<void> {
   if (msg.photo?.length) {
     const handled = await onPaymentProofPhoto(msg);
     if (handled) return;
+  }
+
+  const normalized = t
+    .replace(/[^\p{L}\p{N}\s/]/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (normalized === "статистика по подписке") {
+    const html = formatStatsHtml(linkedUsers(from.id));
+    await sendTelegramHtml(chatId, html, backHomeRow);
+    return;
+  }
+  if (normalized === "подписка") {
+    const linked = linkedUsers(from.id);
+    if (linked.length === 0) {
+      await sendTelegramHtml(
+        chatId,
+        "<b>Подписка не привязана.</b>\nПопросите администратора указать ваш <b>Telegram Chat ID</b> в карточке клиента.",
+        backHomeRow,
+      );
+      return;
+    }
+    if (linked.length === 1) {
+      const u = linked[0]!;
+      const url = publicSubscriptionUrl(u.sub_token);
+      await sendTelegramHtml(chatId, `<b>Subscription URL:</b>\n\n<code>${escUrlForCode(url)}</code>`, backHomeRow);
+      return;
+    }
+    await sendTelegramHtml(
+      chatId,
+      "<b>Выберите подписку:</b>",
+      pickSubscriptionKeyboard(linked.map((x) => ({ id: x.id, name: x.name }))),
+    );
+    return;
+  }
+  if (normalized === "оплата подписки" || normalized === "купить подписку") {
+    const linked = linkedUsers(from.id);
+    if (linked.length > 0) {
+      await sendTelegramHtml(chatId, "<b>Выберите подписку для оплаты/продления:</b>", paySubscriptionPickerKeyboard(linked));
+      return;
+    }
+    await sendVpnPlanPicker(chatId, from.id);
+    return;
+  }
+  if (normalized === "докупить гб") {
+    const linked = linkedUsers(from.id);
+    if (linked.length > 1) {
+      await sendTelegramHtml(chatId, "<b>Выберите подписку для докупки ГБ:</b>", paymentTargetKeyboard(linked, "gb"));
+      return;
+    }
+    await sendGbTopUpPlanPicker(chatId, from.id, linked[0]?.id);
+    return;
+  }
+  if (normalized === "пригласи друга") {
+    const refCfg = getReferralProgram();
+    if (!refCfg.enabled) {
+      await sendTelegramHtml(chatId, "Реферальная программа сейчас отключена.", backHomeRow);
+      return;
+    }
+    const text =
+      `Посоветуй VPN другу и получи награду на выбор!\n` +
+      `А друг получит скидку на первую подписку <b>${refCfg.invited_discount_percent}%</b>.`;
+    await sendTelegramHtml(chatId, text, {
+      inline_keyboard: [[{ text: "Пригласить друга⚡", callback_data: "ref_send" }], [{ text: "« В меню", callback_data: "home" }]],
+    });
+    return;
+  }
+  if (normalized === "клиенты" && isAdminTg(from.id)) {
+    await sendTelegramHtml(chatId, "<b>Клиенты</b>\n\nВыберите клиента:", adminClientsKeyboard());
+    return;
   }
 }
 
