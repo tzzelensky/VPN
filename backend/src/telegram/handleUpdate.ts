@@ -405,6 +405,9 @@ export async function handleTelegramUpdate(body: unknown): Promise<void> {
     await sendTelegramHtml(chatId, "<b>Клиенты</b>\n\nВыберите клиента:", adminClientsKeyboard());
     return;
   }
+
+  // Любой другой текст -> возвращаем панель действий, чтобы бот был "живым" без /start.
+  await sendWelcome(chatId, from);
 }
 
 async function handleCallback(q: CallbackQuery): Promise<void> {

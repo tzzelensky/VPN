@@ -22,11 +22,9 @@ export function mainMenuReply(isAdmin = false, referralEnabled = false) {
   ];
   if (referralEnabled) rows.push(["Пригласи друга"]);
   if (isAdmin) rows.push(["Клиенты"]);
-  rows.push(["/start"]);
   return {
     keyboard: rows.map((r) => r.map((text) => ({ text }))),
     resize_keyboard: true,
-    is_persistent: true,
   };
 }
 
@@ -69,10 +67,8 @@ export function newUserKeyboard(salesDisabled: boolean) {
 export function newUserReply(salesDisabled: boolean) {
   const rows: string[][] = [];
   if (!salesDisabled) rows.push(["Купить подписку"]);
-  rows.push(["/start"]);
   return {
     keyboard: rows.map((r) => r.map((text) => ({ text }))),
     resize_keyboard: true,
-    is_persistent: true,
   };
 }
