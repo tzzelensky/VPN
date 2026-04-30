@@ -332,10 +332,10 @@ export default function MySubPage() {
                 </div>
                 <div className="mysub-highlight-box">
                   <b>Почему выбирают нас?</b>
-                  <span>Ютуб 4К</span>
-                  <span>Все нейросети</span>
-                  <span>Нет лагов в играх</span>
-                  <span>Телеграм летает</span>
+                  <span>YouTube в 4K без ограничений и тормозов.</span>
+                  <span>Доступ ко всем популярным нейросетям без блокировок.</span>
+                  <span>Стабильный пинг для игр без лагов и разрывов.</span>
+                  <span>Telegram, звонки и медиа работают мгновенно.</span>
                 </div>
               </section>
             ) : tab === "subscription" ? (
