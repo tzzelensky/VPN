@@ -109,6 +109,9 @@ export default function MySubPage() {
   const initData = useMemo(() => {
     return getInitData();
   }, []);
+  const hasActiveSubscription = useMemo(() => {
+    return (data?.subscriptions ?? []).some((s) => s.allowed);
+  }, [data]);
 
   async function copySubscription(url: string) {
     setMsg("");
@@ -251,12 +254,17 @@ export default function MySubPage() {
 
   return (
     <div className="mysub-wrap">
+      {!err && !data ? (
+        <div className="mysub-loading-screen" aria-live="polite">
+          <div className="mysub-loader-ring" />
+          <p className="sub">Загрузка...</p>
+        </div>
+      ) : null}
       <div className="mysub-card">
         {err ? <div className="flash err">{err}</div> : null}
-        {!err && !data ? <div className="sub">Загрузка…</div> : null}
         {data ? (
           <>
-            <div className="mysub-head">
+            <div className={`mysub-head ${hasActiveSubscription ? "active-sub" : ""}`}>
               {data.avatar_url ? (
                 <img src={data.avatar_url} alt="avatar" className="mysub-avatar" />
               ) : (
@@ -324,7 +332,10 @@ export default function MySubPage() {
                 </div>
                 <div className="mysub-highlight-box">
                   <b>Почему выбирают нас?</b>
-                  <span>Стабильные сервера, высокий аптайм и быстрая поддержка.</span>
+                  <span>Ютуб 4К</span>
+                  <span>Все нейросети</span>
+                  <span>Нет лагов в играх</span>
+                  <span>Телеграм летает</span>
                 </div>
               </section>
             ) : tab === "subscription" ? (

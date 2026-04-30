@@ -1659,6 +1659,29 @@ th {
   padding-bottom: 6.4rem;
 }
 
+.mysub-loading-screen {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.9rem;
+  background: rgba(5, 8, 16, 0.45);
+  backdrop-filter: blur(2px);
+}
+
+.mysub-loader-ring {
+  width: 54px;
+  height: 54px;
+  border-radius: 50%;
+  border: 4px solid rgba(255, 255, 255, 0.14);
+  border-top-color: #62a8ff;
+  border-right-color: #64e1aa;
+  animation: mysubSpin 900ms linear infinite;
+}
+
 .mysub-card {
   width: min(520px, 100%);
   position: relative;
@@ -1687,12 +1710,29 @@ th {
   position: relative;
 }
 
+.mysub-head.active-sub::before {
+  content: "";
+  position: absolute;
+  top: -8px;
+  left: 50%;
+  width: 128px;
+  height: 128px;
+  transform: translateX(-50%);
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(95, 219, 135, 0.45) 0%, rgba(70, 190, 120, 0.16) 45%, rgba(70, 190, 120, 0) 72%);
+  filter: blur(9px);
+  z-index: 0;
+  pointer-events: none;
+}
+
 .mysub-avatar,
 .mysub-avatar-fallback {
   width: 72px;
   height: 72px;
   border: 2px solid rgba(255, 255, 255, 0.22);
   box-shadow: 0 10px 24px rgba(0, 0, 0, 0.4);
+  position: relative;
+  z-index: 1;
 }
 
 .mysub-name {
@@ -1794,12 +1834,15 @@ th {
 }
 
 .mysub-bottom-actions {
-  position: sticky;
-  bottom: 0.4rem;
-  z-index: 4;
+  position: fixed;
+  left: 50%;
+  bottom: max(0.45rem, env(safe-area-inset-bottom));
+  transform: translateX(-50%);
+  z-index: 30;
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 0.45rem;
+  width: min(500px, calc(100vw - 1rem));
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 24px;
   padding: 0.45rem;
@@ -1910,6 +1953,7 @@ th {
 .mysub-highlight-box span {
   color: var(--muted);
   font-size: 0.82rem;
+  letter-spacing: 0.01em;
 }
 
 .mysub-file-btn {
@@ -1998,6 +2042,15 @@ th {
   to {
     opacity: 1;
     transform: translateX(0);
+  }
+}
+
+@keyframes mysubSpin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
   }
 }
 
