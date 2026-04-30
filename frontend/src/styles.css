@@ -1652,19 +1652,34 @@ th {
 
 .mysub-wrap {
   background:
-    radial-gradient(circle at 0% 0%, rgba(61, 158, 255, 0.22) 0%, transparent 42%),
-    radial-gradient(circle at 100% 100%, rgba(74, 222, 128, 0.14) 0%, transparent 45%),
-    #080913;
+    radial-gradient(900px 420px at -5% -8%, rgba(61, 158, 255, 0.26) 0%, transparent 58%),
+    radial-gradient(760px 360px at 108% 108%, rgba(74, 222, 128, 0.12) 0%, transparent 56%),
+    linear-gradient(180deg, #060c17 0%, #050812 100%);
   padding-bottom: 6.4rem;
 }
 
 .mysub-card {
   width: min(520px, 100%);
+  position: relative;
+  overflow: hidden;
   border-radius: 26px;
-  border-color: rgba(61, 158, 255, 0.34);
+  border-color: rgba(61, 158, 255, 0.4);
   background: linear-gradient(160deg, rgba(14, 22, 42, 0.96), rgba(10, 12, 26, 0.96));
-  box-shadow: 0 22px 44px rgba(1, 4, 20, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.04);
-  transition: transform 220ms ease, box-shadow 220ms ease;
+  box-shadow:
+    0 30px 65px rgba(1, 4, 20, 0.62),
+    inset 0 1px 0 rgba(255, 255, 255, 0.07),
+    inset 0 0 0 1px rgba(61, 158, 255, 0.1);
+  transition: transform 260ms ease, box-shadow 260ms ease;
+}
+
+.mysub-card::before {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  pointer-events: none;
+  background: linear-gradient(130deg, rgba(61, 158, 255, 0.22), transparent 30%, transparent 70%, rgba(61, 158, 255, 0.12));
+  opacity: 0.65;
 }
 
 .mysub-head {
@@ -1679,9 +1694,10 @@ th {
 }
 
 .mysub-name {
-  font-size: 2rem;
+  font-size: 2.08rem;
   font-weight: 700;
-  letter-spacing: 0.01em;
+  letter-spacing: 0.005em;
+  text-shadow: 0 4px 18px rgba(0, 0, 0, 0.35);
 }
 
 .mysub-title {
@@ -1691,10 +1707,20 @@ th {
 
 .mysub-section {
   border-radius: 22px;
-  border-color: rgba(61, 158, 255, 0.3);
+  border-color: rgba(61, 158, 255, 0.34);
   background: linear-gradient(180deg, rgba(17, 24, 45, 0.88), rgba(17, 17, 35, 0.9));
-  box-shadow: inset 0 0 0 1px rgba(61, 158, 255, 0.12), 0 14px 30px rgba(7, 8, 20, 0.45);
+  box-shadow:
+    inset 0 0 0 1px rgba(61, 158, 255, 0.15),
+    0 15px 32px rgba(7, 8, 20, 0.46);
   animation: mysubFadeUp 260ms ease both;
+  transition: border-color 180ms ease, transform 180ms ease, box-shadow 180ms ease;
+}
+
+.mysub-section:hover {
+  border-color: rgba(61, 158, 255, 0.46);
+  box-shadow:
+    inset 0 0 0 1px rgba(61, 158, 255, 0.2),
+    0 18px 36px rgba(7, 8, 20, 0.5);
 }
 
 .mysub-sub-box {
@@ -1708,6 +1734,7 @@ th {
   border-color: rgba(61, 158, 255, 0.34);
   background: rgba(10, 11, 25, 0.92);
   margin-bottom: 0.7rem;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.03);
 }
 
 .row-actions {
@@ -1759,6 +1786,7 @@ th {
   justify-content: center;
   flex-direction: column;
   gap: 0.2rem;
+  transition: all 160ms ease;
 }
 
 .mysub-nav-btn svg {
@@ -1774,19 +1802,38 @@ th {
 .mysub-nav-btn.active {
   color: var(--accent);
   border-color: rgba(61, 158, 255, 0.5);
-  background: rgba(61, 158, 255, 0.13);
+  background: linear-gradient(180deg, rgba(61, 158, 255, 0.2), rgba(61, 158, 255, 0.11));
+  box-shadow: inset 0 0 0 1px rgba(61, 158, 255, 0.28);
+}
+
+.mysub-nav-btn:hover {
+  color: #bcd9ff;
+  border-color: rgba(61, 158, 255, 0.34);
 }
 
 .mysub-card .primary {
   background: linear-gradient(180deg, #3d9eff, #2a77d4);
   border-radius: 14px;
   border: none;
+  box-shadow: 0 12px 24px rgba(61, 158, 255, 0.28);
+  transition: transform 150ms ease, box-shadow 150ms ease;
+}
+
+.mysub-card .primary:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 16px 28px rgba(61, 158, 255, 0.34);
 }
 
 .mysub-card .ghost {
   background: rgba(18, 18, 35, 0.72);
   border-radius: 14px;
   border: 1px solid rgba(61, 158, 255, 0.3);
+  transition: border-color 150ms ease, background 150ms ease;
+}
+
+.mysub-card .ghost:hover {
+  background: rgba(30, 38, 67, 0.82);
+  border-color: rgba(61, 158, 255, 0.44);
 }
 
 .mysub-card select,
@@ -1809,6 +1856,7 @@ th {
   color: var(--text);
   text-decoration: none;
   font-weight: 600;
+  box-shadow: inset 0 0 0 1px rgba(61, 158, 255, 0.2);
 }
 
 .mysub-file-btn {
@@ -1831,7 +1879,9 @@ th {
 
 .mysub-wrap .mysub-modal {
   overflow: hidden;
-  border-radius: 16px;
+  border-radius: 18px;
+  border-color: rgba(61, 158, 255, 0.4);
+  box-shadow: 0 26px 58px rgba(1, 4, 20, 0.62);
 }
 
 .mysub-wrap .mysub-modal .modal-body {
