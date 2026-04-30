@@ -1652,9 +1652,10 @@ th {
 
 .mysub-wrap {
   background:
-    radial-gradient(900px 420px at -5% -8%, rgba(61, 158, 255, 0.26) 0%, transparent 58%),
-    radial-gradient(760px 360px at 108% 108%, rgba(74, 222, 128, 0.12) 0%, transparent 56%),
-    linear-gradient(180deg, #060c17 0%, #050812 100%);
+    radial-gradient(720px 360px at -10% -12%, rgba(110, 168, 255, 0.28) 0%, transparent 60%),
+    radial-gradient(640px 300px at 110% 14%, rgba(158, 94, 255, 0.18) 0%, transparent 58%),
+    radial-gradient(520px 260px at 80% 100%, rgba(39, 174, 255, 0.14) 0%, transparent 60%),
+    linear-gradient(180deg, #050913 0%, #05070f 100%);
   padding-bottom: 6.4rem;
 }
 
@@ -1662,13 +1663,13 @@ th {
   width: min(520px, 100%);
   position: relative;
   overflow: hidden;
-  border-radius: 26px;
-  border-color: rgba(61, 158, 255, 0.4);
-  background: linear-gradient(160deg, rgba(14, 22, 42, 0.96), rgba(10, 12, 26, 0.96));
+  border-radius: 30px;
+  border-color: rgba(255, 255, 255, 0.06);
+  background: linear-gradient(160deg, rgba(12, 18, 34, 0.9), rgba(8, 11, 22, 0.92));
   box-shadow:
-    0 30px 65px rgba(1, 4, 20, 0.62),
-    inset 0 1px 0 rgba(255, 255, 255, 0.07),
-    inset 0 0 0 1px rgba(61, 158, 255, 0.1);
+    0 26px 60px rgba(1, 4, 20, 0.66),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.03);
   transition: transform 260ms ease, box-shadow 260ms ease;
 }
 
@@ -1678,8 +1679,8 @@ th {
   inset: -1px;
   border-radius: inherit;
   pointer-events: none;
-  background: linear-gradient(130deg, rgba(61, 158, 255, 0.22), transparent 30%, transparent 70%, rgba(61, 158, 255, 0.12));
-  opacity: 0.65;
+  background: linear-gradient(135deg, rgba(147, 196, 255, 0.2), transparent 30%, transparent 75%, rgba(175, 110, 255, 0.12));
+  opacity: 0.75;
 }
 
 .mysub-head {
@@ -1688,13 +1689,14 @@ th {
 
 .mysub-avatar,
 .mysub-avatar-fallback {
-  width: 66px;
-  height: 66px;
-  border: 2px solid rgba(255, 255, 255, 0.18);
+  width: 72px;
+  height: 72px;
+  border: 2px solid rgba(255, 255, 255, 0.22);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.4);
 }
 
 .mysub-name {
-  font-size: 2.08rem;
+  font-size: 2.16rem;
   font-weight: 700;
   letter-spacing: 0.005em;
   text-shadow: 0 4px 18px rgba(0, 0, 0, 0.35);
@@ -1732,38 +1734,38 @@ th {
 }
 
 .mysub-section {
-  border-radius: 22px;
-  border-color: rgba(61, 158, 255, 0.34);
-  background: linear-gradient(180deg, rgba(17, 24, 45, 0.88), rgba(17, 17, 35, 0.9));
+  border-radius: 24px;
+  border-color: rgba(255, 255, 255, 0.06);
+  background: linear-gradient(180deg, rgba(16, 25, 48, 0.82), rgba(13, 17, 32, 0.84));
   box-shadow:
-    inset 0 0 0 1px rgba(61, 158, 255, 0.15),
-    0 15px 32px rgba(7, 8, 20, 0.46);
+    inset 0 0 0 1px rgba(255, 255, 255, 0.04),
+    0 14px 28px rgba(7, 8, 20, 0.52);
   animation: mysubFadeUp 260ms ease both;
   transition: border-color 180ms ease, transform 180ms ease, box-shadow 180ms ease;
 }
 
 .mysub-section:hover {
-  border-color: rgba(61, 158, 255, 0.46);
+  border-color: rgba(255, 255, 255, 0.12);
   box-shadow:
-    inset 0 0 0 1px rgba(61, 158, 255, 0.2),
-    0 18px 36px rgba(7, 8, 20, 0.5);
+    inset 0 0 0 1px rgba(255, 255, 255, 0.08),
+    0 20px 38px rgba(7, 8, 20, 0.55);
 }
 
 .mysub-sub-box {
-  border-radius: 18px;
-  border-color: rgba(61, 158, 255, 0.24);
-  background: rgba(13, 16, 31, 0.68);
+  border-radius: 20px;
+  border-color: rgba(255, 255, 255, 0.06);
+  background: rgba(9, 14, 28, 0.74);
   box-shadow:
-    inset 0 0 0 1px rgba(61, 158, 255, 0.08),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.03),
     0 10px 20px rgba(0, 0, 0, 0.2);
 }
 
 .mysub-url {
-  border-radius: 14px;
-  border-color: rgba(61, 158, 255, 0.34);
-  background: rgba(10, 11, 25, 0.92);
+  border-radius: 15px;
+  border-color: rgba(255, 255, 255, 0.1);
+  background: rgba(5, 8, 18, 0.9);
   margin-bottom: 0.7rem;
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.03);
+  box-shadow: inset 0 0 0 1px rgba(147, 196, 255, 0.06);
   font-size: 0.78rem;
   line-height: 1.45;
 }
@@ -1780,11 +1782,11 @@ th {
 }
 
 .mysub-stat-list > div {
-  border: 1px solid rgba(61, 158, 255, 0.24);
+  border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 12px;
   padding: 0.48rem 0.6rem;
   color: var(--muted);
-  background: rgba(8, 10, 21, 0.58);
+  background: rgba(6, 9, 18, 0.62);
 }
 
 .mysub-stat-list > button {
@@ -1798,11 +1800,11 @@ th {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 0.45rem;
-  border: 1px solid rgba(61, 158, 255, 0.35);
-  border-radius: 26px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 24px;
   padding: 0.45rem;
-  background: rgba(14, 18, 33, 0.93);
-  backdrop-filter: blur(8px);
+  background: rgba(9, 12, 23, 0.84);
+  backdrop-filter: blur(12px);
 }
 
 .mysub-nav-btn {
@@ -1831,45 +1833,45 @@ th {
 }
 
 .mysub-nav-btn.active {
-  color: var(--accent);
-  border-color: rgba(61, 158, 255, 0.5);
-  background: linear-gradient(180deg, rgba(61, 158, 255, 0.2), rgba(61, 158, 255, 0.11));
-  box-shadow: inset 0 0 0 1px rgba(61, 158, 255, 0.28);
+  color: #e7f2ff;
+  border-color: rgba(147, 196, 255, 0.34);
+  background: linear-gradient(180deg, rgba(147, 196, 255, 0.18), rgba(93, 163, 255, 0.08));
+  box-shadow: inset 0 0 0 1px rgba(147, 196, 255, 0.2);
 }
 
 .mysub-nav-btn:hover {
-  color: #bcd9ff;
-  border-color: rgba(61, 158, 255, 0.34);
+  color: #dcecff;
+  border-color: rgba(255, 255, 255, 0.14);
 }
 
 .mysub-card .primary {
-  background: linear-gradient(180deg, #4ea7ff, #2d7ce0);
+  background: linear-gradient(180deg, #6fb4ff, #468cf1);
   border-radius: 14px;
   border: none;
-  box-shadow: 0 12px 24px rgba(61, 158, 255, 0.28);
+  box-shadow: 0 12px 26px rgba(70, 140, 241, 0.34);
   transition: transform 150ms ease, box-shadow 150ms ease;
 }
 
 .mysub-card .primary:hover {
   transform: translateY(-1px);
-  box-shadow: 0 16px 28px rgba(61, 158, 255, 0.34);
+  box-shadow: 0 18px 30px rgba(70, 140, 241, 0.4);
 }
 
 .mysub-card .ghost {
-  background: rgba(18, 18, 35, 0.72);
+  background: rgba(17, 22, 38, 0.8);
   border-radius: 14px;
-  border: 1px solid rgba(61, 158, 255, 0.3);
+  border: 1px solid rgba(255, 255, 255, 0.09);
   transition: border-color 150ms ease, background 150ms ease;
 }
 
 .mysub-card .ghost:hover {
-  background: rgba(30, 38, 67, 0.82);
-  border-color: rgba(61, 158, 255, 0.44);
+  background: rgba(26, 33, 56, 0.88);
+  border-color: rgba(255, 255, 255, 0.16);
 }
 
 .mysub-card select,
 .mysub-card input[type="file"] {
-  border: 1px solid rgba(61, 158, 255, 0.28);
+  border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 12px;
   background: rgba(7, 9, 20, 0.72);
 }
@@ -1882,20 +1884,20 @@ th {
   width: 100%;
   min-height: 2.85rem;
   border-radius: 12px;
-  border: 1px solid rgba(61, 158, 255, 0.45);
-  background: rgba(61, 158, 255, 0.16);
+  border: 1px solid rgba(147, 196, 255, 0.32);
+  background: rgba(147, 196, 255, 0.12);
   color: var(--text);
   text-decoration: none;
   font-weight: 600;
-  box-shadow: inset 0 0 0 1px rgba(61, 158, 255, 0.2);
+  box-shadow: inset 0 0 0 1px rgba(147, 196, 255, 0.16);
   backdrop-filter: blur(2px);
 }
 
 .mysub-highlight-box {
   margin-top: 0.8rem;
   border-radius: 14px;
-  border: 1px dashed rgba(61, 158, 255, 0.35);
-  background: rgba(61, 158, 255, 0.07);
+  border: 1px dashed rgba(255, 255, 255, 0.14);
+  background: rgba(147, 196, 255, 0.07);
   padding: 0.6rem 0.7rem;
   display: grid;
   gap: 0.2rem;
@@ -1915,8 +1917,8 @@ th {
   width: 100%;
   min-height: 2.7rem;
   border-radius: 12px;
-  border: 1px solid rgba(61, 158, 255, 0.35);
-  background: rgba(61, 158, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.13);
+  background: rgba(147, 196, 255, 0.1);
   color: var(--text);
   display: inline-flex;
   align-items: center;
@@ -1931,7 +1933,7 @@ th {
 .mysub-wrap .mysub-modal {
   overflow: hidden;
   border-radius: 18px;
-  border-color: rgba(61, 158, 255, 0.4);
+  border-color: rgba(255, 255, 255, 0.1);
   box-shadow: 0 26px 58px rgba(1, 4, 20, 0.62);
 }
 
@@ -1941,7 +1943,7 @@ th {
 
 .mysub-wrap .mysub-modal .modal-footer {
   margin: 0;
-  border-top: 1px solid rgba(61, 158, 255, 0.28);
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
   padding: 0.75rem 1rem;
 }
 
@@ -1966,8 +1968,8 @@ th {
   min-width: 2.2rem;
   min-height: 2.2rem;
   border-radius: 10px;
-  border: 1px solid rgba(61, 158, 255, 0.35);
-  background: rgba(61, 158, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(147, 196, 255, 0.12);
   color: var(--text);
   display: inline-flex;
   align-items: center;
