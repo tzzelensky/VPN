@@ -267,6 +267,10 @@ export default function MySubPage() {
 
             {tab === "home" ? (
               <section className="mysub-section mysub-section-anim">
+                <div className="mysub-hero-badges">
+                  <span className="mysub-hero-badge">Ultra Secure</span>
+                  <span className="mysub-hero-badge muted">Reality VPN</span>
+                </div>
                 <h3 className="mysub-title">Подключитесь за минуту</h3>
                 <p className="sub">Быстрый и надежный VPN для стабильного подключения.</p>
                 <div className="mysub-sub-box">
@@ -306,17 +310,21 @@ export default function MySubPage() {
                         void copySubscription(homeSub.subscription_url);
                       }}
                     >
-                      Скопировать конфиг
+                      ⚡ Скопировать конфиг
                     </button>
                     {data.subscriptions.length === 1 ? (
                       <button type="button" className="ghost" onClick={() => setTab("subscription")}>
-                        Купить еще подписку
+                        ✨ Купить еще подписку
                       </button>
                     ) : null}
                     <button type="button" className="ghost" onClick={() => setShowInstruction(true)}>
-                      Инструкция
+                      📘 Инструкция
                     </button>
                   </div>
+                </div>
+                <div className="mysub-highlight-box">
+                  <b>Почему выбирают нас?</b>
+                  <span>Стабильные сервера, высокий аптайм и быстрая поддержка.</span>
                 </div>
               </section>
             ) : tab === "subscription" ? (

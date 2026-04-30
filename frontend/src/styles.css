@@ -1702,7 +1702,33 @@ th {
 
 .mysub-title {
   margin: 0 0 0.45rem;
-  font-size: 1.35rem;
+  font-size: 1.5rem;
+  line-height: 1.2;
+}
+
+.mysub-hero-badges {
+  display: flex;
+  gap: 0.45rem;
+  margin-bottom: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.mysub-hero-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 1.75rem;
+  border-radius: 999px;
+  padding: 0 0.65rem;
+  font-size: 0.76rem;
+  color: #dbecff;
+  border: 1px solid rgba(61, 158, 255, 0.5);
+  background: linear-gradient(180deg, rgba(61, 158, 255, 0.28), rgba(61, 158, 255, 0.1));
+}
+
+.mysub-hero-badge.muted {
+  border-color: rgba(255, 255, 255, 0.2);
+  color: #b7c4d9;
+  background: rgba(255, 255, 255, 0.06);
 }
 
 .mysub-section {
@@ -1727,6 +1753,9 @@ th {
   border-radius: 18px;
   border-color: rgba(61, 158, 255, 0.24);
   background: rgba(13, 16, 31, 0.68);
+  box-shadow:
+    inset 0 0 0 1px rgba(61, 158, 255, 0.08),
+    0 10px 20px rgba(0, 0, 0, 0.2);
 }
 
 .mysub-url {
@@ -1735,6 +1764,8 @@ th {
   background: rgba(10, 11, 25, 0.92);
   margin-bottom: 0.7rem;
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.03);
+  font-size: 0.78rem;
+  line-height: 1.45;
 }
 
 .row-actions {
@@ -1812,7 +1843,7 @@ th {
 }
 
 .mysub-card .primary {
-  background: linear-gradient(180deg, #3d9eff, #2a77d4);
+  background: linear-gradient(180deg, #4ea7ff, #2d7ce0);
   border-radius: 14px;
   border: none;
   box-shadow: 0 12px 24px rgba(61, 158, 255, 0.28);
@@ -1857,6 +1888,26 @@ th {
   text-decoration: none;
   font-weight: 600;
   box-shadow: inset 0 0 0 1px rgba(61, 158, 255, 0.2);
+  backdrop-filter: blur(2px);
+}
+
+.mysub-highlight-box {
+  margin-top: 0.8rem;
+  border-radius: 14px;
+  border: 1px dashed rgba(61, 158, 255, 0.35);
+  background: rgba(61, 158, 255, 0.07);
+  padding: 0.6rem 0.7rem;
+  display: grid;
+  gap: 0.2rem;
+}
+
+.mysub-highlight-box b {
+  font-size: 0.88rem;
+}
+
+.mysub-highlight-box span {
+  color: var(--muted);
+  font-size: 0.82rem;
 }
 
 .mysub-file-btn {
