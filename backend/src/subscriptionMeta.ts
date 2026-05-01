@@ -84,7 +84,7 @@ export function setSubscriptionUserHeaders(res: Response, user: UserRow): void {
     res.setHeader("profile-title", rawTitle);
   }
 
-  res.setHeader("profile-update-interval", "24");
+  res.setHeader("profile-update-interval", "1");
 
   res.setHeader(
     "Access-Control-Expose-Headers",
