@@ -34,8 +34,14 @@ export type CreateUserInput = {
   reality_spx?: string;
   /** 0 = все развёрнутые серверы в подписке; иначе только первые N по порядку id. */
   subscription_server_count?: number;
+  /** Ограничение по количеству одновременно подключённых устройств. */
+  device_limit_enabled?: number;
+  /** Максимум устройств при включённом device_limit_enabled. */
+  device_limit_count?: number;
   /** Служебные поля синхронизации с Xray (не задавать из формы клиента). */
   online_snapshot?: number;
+  /** Текущее число онлайн-подключений по UUID (снимок последнего опроса). */
+  online_devices?: number;
   stats_synced_at?: number;
   /** Последний «сырой» снимок счётчиков Xray (для корректного инкремента после рестартов). */
   stats_raw_up?: number;
@@ -69,6 +75,12 @@ export type UserRow = {
   subscription_server_count: number;
   /** 1 = при последнем опросе Xray сообщал online>0 для этого UUID. */
   online_snapshot: number;
+  /** Число одновременных активных подключений по последнему опросу Xray. */
+  online_devices: number;
+  /** Ограничение устройств для подписки: 0=выкл, 1=вкл. */
+  device_limit_enabled: number;
+  /** Максимум устройств, когда ограничение включено. */
+  device_limit_count: number;
   /** Время последнего успешного sync трафика с узлов (ms). */
   stats_synced_at: number;
   /** Последний «сырой» снимок uplink/downlink из Xray; -1 = ещё не инициализировано. */
@@ -445,6 +457,9 @@ function normalizeUser(u: UserRow): UserRow {
     reality_spx: u.reality_spx ?? "/",
     subscription_server_count: Math.max(0, Math.floor(Number(u.subscription_server_count) || 0)),
     online_snapshot: u.online_snapshot === 1 ? 1 : 0,
+    online_devices: Math.max(0, Math.floor(Number((u as { online_devices?: unknown }).online_devices) || 0)),
+    device_limit_enabled: Number((u as { device_limit_enabled?: unknown }).device_limit_enabled) === 1 ? 1 : 0,
+    device_limit_count: Math.max(1, Math.floor(Number((u as { device_limit_count?: unknown }).device_limit_count) || 1)),
     stats_synced_at: Number.isFinite(Number(u.stats_synced_at))
       ? Math.max(0, Math.floor(Number(u.stats_synced_at)))
       : 0,
@@ -635,6 +650,13 @@ export function userAllowedOnServers(u: UserRow): boolean {
   return true;
 }
 
+export function userExceededDeviceLimit(u: Pick<UserRow, "device_limit_enabled" | "device_limit_count" | "online_devices">): boolean {
+  if (u.device_limit_enabled !== 1) return false;
+  const limit = Math.max(1, Math.floor(Number(u.device_limit_count) || 1));
+  const online = Math.max(0, Math.floor(Number(u.online_devices) || 0));
+  return online > limit;
+}
+
 export function listUsers(): UserRow[] {
   return [...readStore().users].sort((a, b) => a.id - b.id);
 }
@@ -798,6 +820,9 @@ export function createUser(input: CreateUserInput = {}): UserRow {
       reality_spx,
       subscription_server_count: Math.max(0, Math.floor(Number(input.subscription_server_count) || 0)),
       online_snapshot: 0,
+      online_devices: 0,
+      device_limit_enabled: input.device_limit_enabled === 1 ? 1 : 0,
+      device_limit_count: Math.max(1, Math.floor(Number(input.device_limit_count) || 1)),
       stats_synced_at: 0,
       stats_raw_up: -1,
       stats_raw_down: -1,
@@ -850,12 +875,26 @@ export function updateUserRow(id: number, patch: Partial<CreateUserInput>): User
         patch.subscription_server_count !== undefined
           ? Math.max(0, Math.floor(Number(patch.subscription_server_count) || 0))
           : cur.subscription_server_count,
+      device_limit_enabled:
+        patch.device_limit_enabled !== undefined
+          ? patch.device_limit_enabled === 1
+            ? 1
+            : 0
+          : cur.device_limit_enabled,
+      device_limit_count:
+        patch.device_limit_count !== undefined
+          ? Math.max(1, Math.floor(Number(patch.device_limit_count) || 1))
+          : cur.device_limit_count,
       online_snapshot:
         patch.online_snapshot !== undefined
           ? patch.online_snapshot === 1
             ? 1
             : 0
           : cur.online_snapshot,
+      online_devices:
+        patch.online_devices !== undefined
+          ? Math.max(0, Math.floor(Number(patch.online_devices) || 0))
+          : cur.online_devices,
       stats_synced_at:
         patch.stats_synced_at !== undefined
           ? Number.isFinite(Number(patch.stats_synced_at))
@@ -930,6 +969,7 @@ export function applyUsersTrafficSnapshot(
         traffic_up: up,
         traffic_down: down,
         online_snapshot: hit.online ? 1 : 0,
+        online_devices: Math.max(0, Math.floor(Number(hit.online) || 0)),
         stats_synced_at: syncedAtMs,
         stats_raw_up: candUp,
         stats_raw_down: candDown,

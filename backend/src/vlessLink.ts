@@ -190,3 +190,18 @@ export function buildSubscriptionPayload(links: string[]): string {
   const body = links.join("\n");
   return Buffer.from(body, "utf8").toString("base64");
 }
+
+function buildNoticeVlessUri(label: string): string {
+  const enc = encodeURIComponent(label.trim() || "VPN");
+  // Специальная «заглушка» для клиентов подписки: показывается как сервер в списке,
+  // но подключение к ней не рабочее и лишь доносит текст уведомления пользователю.
+  return `vless://00000000-0000-0000-0000-000000000000@127.0.0.1:443?encryption=none&security=none&type=tcp#${enc}`;
+}
+
+export function buildSubscriptionNoticePayload(lines: string[]): string {
+  const links = lines
+    .map((x) => String(x ?? "").trim())
+    .filter(Boolean)
+    .map((x) => buildNoticeVlessUri(x));
+  return buildSubscriptionPayload(links);
+}

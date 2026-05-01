@@ -449,6 +449,7 @@ export async function refreshUserTrafficFromServersIfDue(user: UserRow, log?: Ss
       // накопленные значения в дельту. Обновляем только онлайн-снимок и метку sync.
       updateUserRow(fresh.id, {
         online_snapshot: 0,
+        online_devices: 0,
         stats_synced_at: Date.now(),
       });
     }

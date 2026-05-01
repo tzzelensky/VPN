@@ -283,6 +283,7 @@ export default function UsersPage({ onLogout }: { onLogout: () => void }) {
                   <th>Трафик</th>
                   <th>Общий трафик</th>
                   <th>Дата окончания</th>
+                  <th>Устройства</th>
                   <th className="ud-th-nodes">Узлы</th>
                 </tr>
               </thead>
@@ -490,6 +491,12 @@ export default function UsersPage({ onLogout }: { onLogout: () => void }) {
                       </td>
                       <td>
                         <span className={`ud-pill ud-pill-expiry ud-expiry-${ex.variant}`}>{ex.text}</span>
+                      </td>
+                      <td>
+                        <span className="ud-pill ud-pill-total" title={u.device_limit_enabled ? `Лимит: ${u.device_limit_count}` : "Лимит устройств выключен"}>
+                          {u.online_devices}
+                          {u.device_limit_enabled ? ` / ${u.device_limit_count}` : ""}
+                        </span>
                       </td>
                       <td className="ud-td-nodes">
                         <div className="ud-nodes-main">{previews[u.id]?.count ?? "—"}</div>

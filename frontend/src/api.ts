@@ -205,8 +205,14 @@ export type UserDto = {
   reality_spx: string;
   /** 0 = все развёрнутые серверы в подписке */
   subscription_server_count: number;
+  /** Включено ли ограничение устройств для подписки. */
+  device_limit_enabled: boolean;
+  /** Максимум устройств при включенном ограничении. */
+  device_limit_count: number;
   /** Активность по данным Xray (обновляется при опросе узлов). */
   online: boolean;
+  /** Число текущих подключенных устройств (по последнему опросу узлов). */
+  online_devices: number;
   /** Unix ms последнего sync трафика с узлов. */
   stats_synced_at: number;
   created_at: string;
@@ -233,6 +239,8 @@ export type CreateUserPayload = {
   reality_sid?: string;
   reality_spx?: string;
   subscription_server_count?: number;
+  device_limit_enabled?: boolean;
+  device_limit_count?: number;
 };
 
 function bodyFromPayload(p: CreateUserPayload): Record<string, unknown> {

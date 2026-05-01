@@ -3,10 +3,11 @@ import {
   backfillDeployedServerRealityFromUser,
   getUserBySubToken,
   listUsers,
+  userExceededDeviceLimit,
   userAllowedOnServers,
   type UserRow,
 } from "../db.js";
-import { buildSubscriptionPayload } from "../vlessLink.js";
+import { buildSubscriptionNoticePayload, buildSubscriptionPayload } from "../vlessLink.js";
 import { subscriptionVlessLinksForUser } from "../subscriptionLinks.js";
 import { setSubscriptionUserHeaders } from "../subscriptionMeta.js";
 import { peekUserTrafficForSubscription, refreshUserTrafficFromServersIfDue } from "../xrayStatsPull.js";
@@ -71,6 +72,8 @@ router.get("/:token", async (req, res) => {
         ...base,
         traffic_up: headerUsage.up,
         traffic_down: headerUsage.down,
+        online_devices: Math.max(0, Math.floor(Number(peek.online) || 0)),
+        online_snapshot: Number(peek.online) > 0 ? 1 : 0,
       };
     } catch (e) {
       console.error("[subscription] peek traffic:", e instanceof Error ? e.message : e);
@@ -91,6 +94,16 @@ router.get("/:token", async (req, res) => {
 
     if (!userAllowedOnServers(base)) {
       res.send(buildSubscriptionPayload([]));
+      return;
+    }
+    if (userExceededDeviceLimit(headerUser)) {
+      res.send(
+        buildSubscriptionNoticePayload([
+          "Достигнут лимит устройств",
+          "Увеличить через бота в телеграмм",
+          "Достигнут лимит устройств",
+        ]),
+      );
       return;
     }
 

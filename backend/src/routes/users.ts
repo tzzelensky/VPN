@@ -9,6 +9,7 @@ import {
   getUser,
   listUsers,
   updateUserRow,
+  userExceededDeviceLimit,
   userAllowedOnServers,
   type CreateUserInput,
   type UserRow,
@@ -16,7 +17,7 @@ import {
 import { requireAuth } from "../middleware/requireAuth.js";
 import { pushClientListToAllDeployedServers, removeUserUuidFromAllServers } from "../userSync.js";
 import { initNdjsonStream, ndjsonLine, wantsNdjsonStream } from "../streamUtil.js";
-import { buildSubscriptionPayload } from "../vlessLink.js";
+import { buildSubscriptionNoticePayload, buildSubscriptionPayload } from "../vlessLink.js";
 import { subscriptionVlessLinksForUser } from "../subscriptionLinks.js";
 import { parseXuiInboundImport } from "../xuiImport.js";
 import { generateX25519RealityKeyPair } from "../realityKeygen.js";
@@ -34,7 +35,7 @@ const ONLINE_SNAPSHOT_TTL_MS = 75_000;
 function deriveOnlineFromRow(u: UserRow): boolean {
   const t = u.stats_synced_at;
   if (!t || !Number.isFinite(t) || Date.now() - t > ONLINE_SNAPSHOT_TTL_MS) return false;
-  return u.online_snapshot === 1;
+  return Number(u.online_devices) > 0 || u.online_snapshot === 1;
 }
 router.use(requireAuth);
 
@@ -135,7 +136,10 @@ function userDto(u: UserRow) {
     reality_sid: u.reality_sid,
     reality_spx: u.reality_spx,
     subscription_server_count: u.subscription_server_count,
+    device_limit_enabled: u.device_limit_enabled === 1,
+    device_limit_count: u.device_limit_count,
     online: deriveOnlineFromRow(u),
+    online_devices: Number(u.online_devices) || 0,
     stats_synced_at: u.stats_synced_at,
     connection_profile: u.connection_profile,
     created_at: u.created_at,
@@ -179,6 +183,17 @@ function parseCreateBody(req: import("express").Request): CreateUserInput & { na
     reality_spx: b.reality_spx != null ? String(b.reality_spx) : undefined,
     subscription_server_count:
       b.subscription_server_count != null ? Number(b.subscription_server_count) : undefined,
+    device_limit_enabled:
+      typeof b.device_limit_enabled === "boolean"
+        ? b.device_limit_enabled
+          ? 1
+          : 0
+        : b.device_limit_enabled === false || b.device_limit_enabled === 0
+          ? 0
+          : b.device_limit_enabled === true || b.device_limit_enabled === 1
+            ? 1
+            : undefined,
+    device_limit_count: b.device_limit_count != null ? Number(b.device_limit_count) : undefined,
     connection_profile:
       b.connection_profile != null && String(b.connection_profile).toLowerCase() === "reality" ? "reality" : undefined,
   };
@@ -336,6 +351,7 @@ router.post("/:id(\\d+)/reset-traffic", async (req, res) => {
     traffic_up: 0,
     traffic_down: 0,
     online_snapshot: 0,
+    online_devices: 0,
     stats_synced_at: Date.now(),
     stats_raw_up: rawUp,
     stats_raw_down: rawDown,
@@ -368,6 +384,15 @@ router.get("/:id(\\d+)/preview", async (req, res) => {
   }
   if (!userAllowedOnServers(u)) {
     res.json({ count: 0, links: [], base64: buildSubscriptionPayload([]) });
+    return;
+  }
+  if (userExceededDeviceLimit(u)) {
+    const links = [
+      "Достигнут лимит устройств",
+      "Увеличить через бота в телеграмм",
+      "Достигнут лимит устройств",
+    ];
+    res.json({ count: links.length, links, base64: buildSubscriptionNoticePayload(links) });
     return;
   }
   try {
