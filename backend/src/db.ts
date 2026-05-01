@@ -935,7 +935,13 @@ export function updateUserRow(id: number, patch: Partial<CreateUserInput>): User
 
 /** Обновить трафик и снимок «онлайн» из агрегата по UUID (только для пользователей из списка). */
 export function applyUsersTrafficSnapshot(
-  rows: Array<{ vless_uuid: string; traffic_up: number; traffic_down: number; online: boolean }>,
+  rows: Array<{
+    vless_uuid: string;
+    traffic_up: number;
+    traffic_down: number;
+    online?: boolean;
+    online_count?: number;
+  }>,
   syncedAtMs: number,
 ): number {
   let n = 0;
@@ -948,6 +954,11 @@ export function applyUsersTrafficSnapshot(
       const candDown = Number.isFinite(Number(hit.traffic_down))
         ? Math.max(0, Math.floor(Number(hit.traffic_down)))
         : u.traffic_down;
+      const onlineCount = Number.isFinite(Number(hit.online_count))
+        ? Math.max(0, Math.floor(Number(hit.online_count)))
+        : hit.online
+          ? 1
+          : 0;
       const prevRawUp = Number.isFinite(Number(u.stats_raw_up)) ? Number(u.stats_raw_up) : -1;
       const prevRawDown = Number.isFinite(Number(u.stats_raw_down)) ? Number(u.stats_raw_down) : -1;
       const hasRawBaseline = prevRawUp >= 0 && prevRawDown >= 0;
@@ -968,8 +979,8 @@ export function applyUsersTrafficSnapshot(
         ...u,
         traffic_up: up,
         traffic_down: down,
-        online_snapshot: hit.online ? 1 : 0,
-        online_devices: Math.max(0, Math.floor(Number(hit.online) || 0)),
+        online_snapshot: onlineCount > 0 ? 1 : 0,
+        online_devices: onlineCount,
         stats_synced_at: syncedAtMs,
         stats_raw_up: candUp,
         stats_raw_down: candDown,

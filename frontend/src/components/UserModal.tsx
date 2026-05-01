@@ -25,6 +25,13 @@ function randomShortIdHex(): string {
   return Array.from(a, (b) => b.toString(16).padStart(2, "0")).join("");
 }
 
+function sanitizePositiveIntInput(raw: string): string {
+  const digits = raw.replace(/[^\d]/g, "");
+  if (!digits) return "";
+  const n = Math.max(1, Math.floor(Number(digits) || 1));
+  return String(n);
+}
+
 type Props = {
   open: boolean;
   mode: UserModalMode;
@@ -404,28 +411,29 @@ export default function UserModal({
                 <p className="field-hint">Порядок — как в списке «Серверы» (по id). «Все» = каждый развёрнутый узел.</p>
               </div>
               <div className="form-field form-field-span-2">
-                <label style={{ display: "flex", alignItems: "center", gap: "0.55rem" }}>
-                  <input
-                    type="checkbox"
-                    checked={deviceLimitEnabled}
-                    onChange={(e) => setDeviceLimitEnabled(e.target.checked)}
+                <label>Ограничение по устройствам</label>
+                <div style={{ display: "flex", alignItems: "center", gap: "0.65rem" }}>
+                  <button
+                    type="button"
+                    className={`toggle ${deviceLimitEnabled ? "on" : ""}`}
+                    onClick={() => setDeviceLimitEnabled((v) => !v)}
                     disabled={saving}
+                    aria-pressed={deviceLimitEnabled}
+                    title={deviceLimitEnabled ? "Отключить лимит устройств" : "Включить лимит устройств"}
                   />
-                  Ограничение по устройствам
-                </label>
-                <p className="field-hint">По умолчанию выключено. При превышении клиент получает заглушку вместо серверов.</p>
-              </div>
-              {deviceLimitEnabled ? (
-                <div className="form-field">
-                  <label>Максимум устройств</label>
                   <input
                     value={deviceLimitCount}
-                    onChange={(e) => setDeviceLimitCount(e.target.value.replace(/[^\d]/g, ""))}
+                    onChange={(e) => setDeviceLimitCount(sanitizePositiveIntInput(e.target.value))}
+                    onBlur={() => setDeviceLimitCount((v) => (v ? sanitizePositiveIntInput(v) : "1"))}
                     inputMode="numeric"
-                    placeholder="например: 2"
+                    pattern="[1-9][0-9]*"
+                    placeholder="Количество"
+                    disabled={!deviceLimitEnabled || saving}
+                    style={{ width: "130px" }}
                   />
                 </div>
-              ) : null}
+                <p className="field-hint">По умолчанию выключено. При превышении клиент получает заглушку вместо серверов.</p>
+              </div>
             </div>
           </section>
 

@@ -65,7 +65,7 @@ router.post("/sync-stats", async (_req, res) => {
       vless_uuid: string;
       traffic_up: number;
       traffic_down: number;
-      online: boolean;
+      online_count: number;
     }> = [];
     for (const u of listUsers()) {
       const k = u.vless_uuid.trim().toLowerCase();
@@ -75,7 +75,7 @@ router.post("/sync-stats", async (_req, res) => {
           vless_uuid: u.vless_uuid,
           traffic_up: agg.up,
           traffic_down: agg.down,
-          online: agg.online > 0,
+          online_count: Math.max(0, Math.floor(Number(agg.online) || 0)),
         });
       }
     }

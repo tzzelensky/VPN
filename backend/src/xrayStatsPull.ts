@@ -344,7 +344,7 @@ export async function pullTrafficFromAllDeployedServers(log?: SshLog): Promise<{
         const cur = merged.get(nk) ?? { up: 0, down: 0, online: 0 };
         cur.up += v.up;
         cur.down += v.down;
-        cur.online = Math.max(cur.online, v.online);
+        cur.online += Math.max(0, Math.floor(Number(v.online) || 0));
         merged.set(nk, cur);
       }
     } catch (e) {
@@ -368,7 +368,7 @@ export async function peekUserTrafficFromServers(user: UserRow, log?: SshLog): P
       const cur = merged.get(uuidKey) ?? { up: 0, down: 0, online: 0 };
       cur.up += hit.up;
       cur.down += hit.down;
-      cur.online = Math.max(cur.online, hit.online);
+      cur.online += Math.max(0, Math.floor(Number(hit.online) || 0));
       merged.set(uuidKey, cur);
     } catch {
       /* skip */
@@ -423,7 +423,7 @@ export async function refreshUserTrafficFromServersIfDue(user: UserRow, log?: Ss
         const cur = merged.get(uuidKey) ?? { up: 0, down: 0, online: 0 };
         cur.up += hit.up;
         cur.down += hit.down;
-        cur.online = Math.max(cur.online, hit.online);
+        cur.online += Math.max(0, Math.floor(Number(hit.online) || 0));
         merged.set(uuidKey, cur);
       } catch {
         /* узел недоступен — пропускаем */
@@ -439,7 +439,7 @@ export async function refreshUserTrafficFromServersIfDue(user: UserRow, log?: Ss
             vless_uuid: fresh.vless_uuid,
             traffic_up: agg.up,
             traffic_down: agg.down,
-            online: agg.online > 0,
+            online_count: Math.max(0, Math.floor(Number(agg.online) || 0)),
           },
         ],
         Date.now(),
