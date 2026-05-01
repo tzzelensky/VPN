@@ -9,7 +9,6 @@ import {
   getUser,
   listUsers,
   updateUserRow,
-  userExceededDeviceLimit,
   userAllowedOnServers,
   type CreateUserInput,
   type UserRow,
@@ -17,7 +16,7 @@ import {
 import { requireAuth } from "../middleware/requireAuth.js";
 import { pushClientListToAllDeployedServers, removeUserUuidFromAllServers } from "../userSync.js";
 import { initNdjsonStream, ndjsonLine, wantsNdjsonStream } from "../streamUtil.js";
-import { buildSubscriptionNoticePayload, buildSubscriptionPayload } from "../vlessLink.js";
+import { buildSubscriptionPayload } from "../vlessLink.js";
 import { subscriptionVlessLinksForUser } from "../subscriptionLinks.js";
 import { parseXuiInboundImport } from "../xuiImport.js";
 import { generateX25519RealityKeyPair } from "../realityKeygen.js";
@@ -384,15 +383,6 @@ router.get("/:id(\\d+)/preview", async (req, res) => {
   }
   if (!userAllowedOnServers(u)) {
     res.json({ count: 0, links: [], base64: buildSubscriptionPayload([]) });
-    return;
-  }
-  if (userExceededDeviceLimit(u)) {
-    const links = [
-      "Достигнут лимит устройств",
-      "Увеличить через бота в телеграмм",
-      "Достигнут лимит устройств",
-    ];
-    res.json({ count: links.length, links, base64: buildSubscriptionNoticePayload(links) });
     return;
   }
   try {
