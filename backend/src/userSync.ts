@@ -1,8 +1,9 @@
 import {
-  clientUuidsForServer,
   getServer,
   listDeployedServers,
+  listUsers,
   updateServer,
+  userAllowedOnServers,
   type ServerRow,
 } from "./db.js";
 import {
@@ -10,6 +11,7 @@ import {
   TZADMIN_XRAY_CONFIG_PATH,
   removeClientUuidFromTzadmin,
   syncServerClientUuids,
+  type ManagedClientInput,
   type SshLog,
 } from "./ssh.js";
 
@@ -35,15 +37,52 @@ export async function resolveConfigPath(row: ServerRow, log?: SshLog): Promise<s
 let pushQueue: Promise<void> = Promise.resolve();
 /** Последняя успешно синхронизированная сигнатура UUID по server.id. */
 const lastSyncedSignatureByServerId = new Map<number, string>();
-/** Последний успешно синхронизированный набор UUID по server.id (для дельта-обновлений через Xray API). */
-const lastSyncedUuidSetByServerId = new Map<number, Set<string>>();
+/** Последняя успешно синхронизированная карта клиентов по server.id (id -> limitIp). */
+const lastSyncedClientMapByServerId = new Map<number, Map<string, number | undefined>>();
 
-function signatureForUuids(uuids: string[]): string {
-  return [...uuids].sort().join(",");
+function signatureForClients(clients: ManagedClientInput[]): string {
+  return [...clients]
+    .map((c) => ({ id: String(c.id ?? "").trim(), limitIp: Number(c.limitIp) }))
+    .filter((c) => c.id)
+    .sort((a, b) => a.id.localeCompare(b.id))
+    .map((c) => `${c.id}|${Number.isFinite(c.limitIp) && c.limitIp > 0 ? Math.floor(c.limitIp) : 0}`)
+    .join(",");
 }
 
-function setFromUuids(uuids: string[]): Set<string> {
-  return new Set(uuids.map((x) => x.trim()).filter(Boolean));
+function mapFromClients(clients: ManagedClientInput[]): Map<string, number | undefined> {
+  const out = new Map<string, number | undefined>();
+  for (const raw of clients) {
+    const id = String(raw.id ?? "").trim();
+    if (!id) continue;
+    const lim = Number(raw.limitIp);
+    out.set(id, Number.isFinite(lim) && lim > 0 ? Math.floor(lim) : undefined);
+  }
+  return out;
+}
+
+function managedClientsForServer(serverUuid: string | null): ManagedClientInput[] {
+  const out: ManagedClientInput[] = [];
+  const seen = new Set<string>();
+  const srv = String(serverUuid ?? "").trim();
+  if (srv) {
+    out.push({ id: srv });
+    seen.add(srv.toLowerCase());
+  }
+  for (const u of listUsers()) {
+    if (!userAllowedOnServers(u)) continue;
+    const id = String(u.vless_uuid ?? "").trim();
+    if (!id) continue;
+    const key = id.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({
+      id,
+      ...(u.device_limit_enabled === 1
+        ? { limitIp: Math.max(1, Math.floor(Number(u.device_limit_count) || 1)) }
+        : {}),
+    });
+  }
+  return out;
 }
 
 /** Обновить inbound на всех развёрнутых серверах по текущим пользователям в БД. */
@@ -51,43 +90,47 @@ export async function pushClientListToAllDeployedServers(log?: SshLog): Promise<
   const run = async () => {
     for (const row of listDeployedServers()) {
       const path = await resolveConfigPath(row, log);
-      const uuids = clientUuidsForServer(row.vless_uuid);
-      const sig = signatureForUuids(uuids);
+      const clients = managedClientsForServer(row.vless_uuid);
+      const sig = signatureForClients(clients);
       const prevSig = lastSyncedSignatureByServerId.get(row.id);
       if (prevSig === sig) {
-        log?.(`Синхронизация ${row.host} пропущена: список UUID не изменился.`);
+        log?.(`Синхронизация ${row.host} пропущена: список клиентов не изменился.`);
         continue;
       }
-      const nextSet = setFromUuids(uuids);
-      const prevSet = lastSyncedUuidSetByServerId.get(row.id);
-      if (prevSet) {
-        const add: string[] = [];
+      const nextMap = mapFromClients(clients);
+      const prevMap = lastSyncedClientMapByServerId.get(row.id);
+      if (prevMap) {
+        const add: ManagedClientInput[] = [];
         const rem: string[] = [];
-        for (const id of nextSet) if (!prevSet.has(id)) add.push(id);
-        for (const id of prevSet) if (!nextSet.has(id)) rem.push(id);
+        let hasMutableUpdates = false;
+        for (const [id, lim] of nextMap) {
+          if (!prevMap.has(id)) add.push({ id, ...(lim != null ? { limitIp: lim } : {}) });
+          else if ((prevMap.get(id) ?? undefined) !== lim) hasMutableUpdates = true;
+        }
+        for (const id of prevMap.keys()) if (!nextMap.has(id)) rem.push(id);
         // Быстрый путь без рестарта: точечный add/remove пользователей через HandlerService.
-        if (add.length + rem.length > 0 && add.length + rem.length <= 4) {
+        if (!hasMutableUpdates && add.length + rem.length > 0 && add.length + rem.length <= 4) {
           const fast = await alterInboundUsersViaApi(
             sshCfg(row),
-            { configPath: path, preferredVlessPort: row.vless_port, addUuids: add, removeUuids: rem },
+            { configPath: path, preferredVlessPort: row.vless_port, addClients: add, removeUuids: rem },
             log,
           );
           if (fast.ok) {
             log?.(`Быстрый sync ${row.host}: ${fast.detail}`);
             lastSyncedSignatureByServerId.set(row.id, sig);
-            lastSyncedUuidSetByServerId.set(row.id, nextSet);
+            lastSyncedClientMapByServerId.set(row.id, nextMap);
             continue;
           }
           log?.(`Быстрый sync недоступен на ${row.host}, fallback на полный sync: ${fast.detail}`);
         }
       }
-      log?.(`Синхронизация ${row.host} → ${path} (${uuids.length} UUID), порт ${row.vless_port}…`);
+      log?.(`Синхронизация ${row.host} → ${path} (${clients.length} клиентов), порт ${row.vless_port}…`);
       const r = await syncServerClientUuids(
         sshCfg(row),
         {
           configPath: path,
           vlessPort: row.vless_port,
-          clientUuids: uuids,
+          clientEntries: clients,
         },
         log,
       );
@@ -113,7 +156,7 @@ export async function pushClientListToAllDeployedServers(log?: SshLog): Promise<
         });
       }
       lastSyncedSignatureByServerId.set(row.id, sig);
-      lastSyncedUuidSetByServerId.set(row.id, nextSet);
+      lastSyncedClientMapByServerId.set(row.id, nextMap);
     }
   };
   const job = pushQueue.then(() => run());
@@ -131,7 +174,7 @@ export async function removeUserUuidFromAllServers(userVlessUuid: string, log?: 
     );
     if (fast.ok) {
       lastSyncedSignatureByServerId.delete(row.id);
-      lastSyncedUuidSetByServerId.delete(row.id);
+      lastSyncedClientMapByServerId.delete(row.id);
       continue;
     }
     const fresh = getServer(row.id);
@@ -150,7 +193,7 @@ export async function removeUserUuidFromAllServers(userVlessUuid: string, log?: 
     if (!r.ok) log?.(`Ошибка на ${row.host}: ${r.detail}`);
     else {
       lastSyncedSignatureByServerId.delete(row.id);
-      lastSyncedUuidSetByServerId.delete(row.id);
+      lastSyncedClientMapByServerId.delete(row.id);
     }
   }
 }

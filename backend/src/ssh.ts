@@ -18,6 +18,7 @@ export type SshConfig = {
 };
 
 export type SshLog = (message: string) => void;
+export type ManagedClientInput = { id: string; limitIp?: number };
 export const TZADMIN_XRAY_CONFIG_PATH = "/etc/tzadmin-xray/config.json";
 
 function exec(conn: Client, cmd: string): Promise<{ code: number | null; stdout: string; stderr: string }> {
@@ -361,12 +362,13 @@ export function ensureXrayStatsPolicyApi(config: Record<string, unknown>): void 
 
 function buildManagedClients(
   prevList: Array<Record<string, unknown>>,
-  clientUuids: string[],
+  clientEntries: ManagedClientInput[],
   defaultFlow: string,
   forceFlow: boolean,
 ): Array<Record<string, unknown>> {
   const prevById = new Map(prevList.map((c) => [String(c.id ?? "").toLowerCase(), c]));
-  return clientUuids.map((id) => {
+  return clientEntries.map((entry) => {
+    const id = String(entry.id ?? "").trim();
     const prev = prevById.get(id.toLowerCase());
     const base: Record<string, unknown> = prev && typeof prev === "object" ? { ...prev } : {};
     const flow = String(base.flow ?? "").trim();
@@ -376,6 +378,9 @@ function buildManagedClients(
       email: String(base.email ?? id).trim() || id,
       level: Number(base.level ?? 0) || 0,
     };
+    const lim = Number(entry.limitIp);
+    if (Number.isFinite(lim) && lim > 0) out.limitIp = Math.floor(lim);
+    else delete out.limitIp;
     if (defaultFlow && (forceFlow || !flow)) out.flow = defaultFlow;
     return out;
   });
@@ -420,12 +425,17 @@ function findCandidateVlessInboundIndex(
   return vlessIdx[0]!.i;
 }
 
-function buildMinimalConfig(clientUuids: string[], vlessPort: number): Record<string, unknown> {
-  const clients = [...new Set(clientUuids.filter(Boolean))].map((id) => ({
-    id,
-    email: id,
-    level: 0,
-  }));
+function buildMinimalConfig(clientEntries: ManagedClientInput[], vlessPort: number): Record<string, unknown> {
+  const clients = clientEntries.map((entry) => {
+    const id = String(entry.id ?? "").trim();
+    const lim = Number(entry.limitIp);
+    return {
+      id,
+      email: id,
+      level: 0,
+      ...(Number.isFinite(lim) && lim > 0 ? { limitIp: Math.floor(lim) } : {}),
+    };
+  });
   const cfg: Record<string, unknown> = {
     log: { loglevel: "warning" },
     stats: {},
@@ -467,13 +477,18 @@ function buildMinimalConfig(clientUuids: string[], vlessPort: number): Record<st
   return cfg;
 }
 
-function buildManagedInbound(clientUuids: string[], vlessPort: number): Record<string, unknown> {
-  const clients = [...new Set(clientUuids.filter(Boolean))].map((id) => ({
-    id,
-    email: id,
-    level: 0,
-    flow: "xtls-rprx-vision",
-  }));
+function buildManagedInbound(clientEntries: ManagedClientInput[], vlessPort: number): Record<string, unknown> {
+  const clients = clientEntries.map((entry) => {
+    const id = String(entry.id ?? "").trim();
+    const lim = Number(entry.limitIp);
+    return {
+      id,
+      email: id,
+      level: 0,
+      flow: "xtls-rprx-vision",
+      ...(Number.isFinite(lim) && lim > 0 ? { limitIp: Math.floor(lim) } : {}),
+    };
+  });
   const sni = (process.env.TZADMIN_REALITY_SNI ?? "www.oracle.com").trim() || "www.oracle.com";
   const sid = (process.env.TZADMIN_REALITY_SID ?? randomRealityShortId()).trim() || randomRealityShortId();
   const kp = generateX25519RealityKeyPair();
@@ -605,7 +620,13 @@ function xrayBinaryDetectScript(): string {
 
 export async function alterInboundUsersViaApi(
   cfg: SshConfig,
-  opts: { configPath: string; preferredVlessPort: number; addUuids?: string[]; removeUuids?: string[] },
+  opts: {
+    configPath: string;
+    preferredVlessPort: number;
+    addUuids?: string[];
+    addClients?: ManagedClientInput[];
+    removeUuids?: string[];
+  },
   log?: SshLog,
 ): Promise<{ ok: boolean; detail: string }> {
   try {
@@ -622,15 +643,29 @@ export async function alterInboundUsersViaApi(
         if (!tag) throw new Error("VLESS inbound без tag, API user ops невозможен");
         const sec = String(streamSettingsOfInbound(inbound).security ?? "").toLowerCase();
         const defaultFlow = sec === "reality" ? "xtls-rprx-vision" : "";
-        const addUuids = [...new Set((opts.addUuids ?? []).map((x) => String(x).trim()).filter(Boolean))];
+        const addById = new Map<string, ManagedClientInput>();
+        for (const id of opts.addUuids ?? []) {
+          const norm = String(id ?? "").trim();
+          if (!norm) continue;
+          addById.set(norm.toLowerCase(), { id: norm });
+        }
+        for (const c of opts.addClients ?? []) {
+          const norm = String(c.id ?? "").trim();
+          if (!norm) continue;
+          addById.set(norm.toLowerCase(), { id: norm, limitIp: c.limitIp });
+        }
+        const addClients = [...addById.values()];
         const removeUuids = [...new Set((opts.removeUuids ?? []).map((x) => String(x).trim()).filter(Boolean))];
-        if (addUuids.length === 0 && removeUuids.length === 0) return "no-op";
+        if (addClients.length === 0 && removeUuids.length === 0) return "no-op";
 
-        if (addUuids.length > 0) {
-          const clients = addUuids.map((id) => ({
-            id,
-            email: id,
+        if (addClients.length > 0) {
+          const clients = addClients.map((entry) => ({
+            id: String(entry.id),
+            email: String(entry.id),
             level: 0,
+            ...(Number.isFinite(Number(entry.limitIp)) && Number(entry.limitIp) > 0
+              ? { limitIp: Math.floor(Number(entry.limitIp)) }
+              : {}),
             ...(defaultFlow ? { flow: defaultFlow } : {}),
           }));
           const payload = {
@@ -677,8 +712,8 @@ export async function alterInboundUsersViaApi(
           }
         }
 
-        log?.(`Xray API user ops OK on inbound tag=${tag}: +${addUuids.length}, -${removeUuids.length}`);
-        return `ok +${addUuids.length} -${removeUuids.length}`;
+        log?.(`Xray API user ops OK on inbound tag=${tag}: +${addClients.length}, -${removeUuids.length}`);
+        return `ok +${addClients.length} -${removeUuids.length}`;
       },
       log,
     );
@@ -775,11 +810,23 @@ export async function detectXrayConfigPath(cfg: SshConfig, log?: SshLog): Promis
  */
 export async function deployOrSyncVless(
   cfg: SshConfig,
-  opts: { clientUuids: string[]; vlessPort: number; configPath: string },
+  opts: { clientUuids?: string[]; clientEntries?: ManagedClientInput[]; vlessPort: number; configPath: string },
   log?: SshLog,
 ): Promise<{ ok: boolean; detail: string; backup?: string; hints?: ServerLinkHints }> {
   const backup = `${opts.configPath}.bak.${Date.now()}`;
-  const clientUuids = [...new Set(opts.clientUuids.filter(Boolean))];
+  const byId = new Map<string, ManagedClientInput>();
+  for (const c of opts.clientEntries ?? []) {
+    const id = String(c.id ?? "").trim();
+    if (!id) continue;
+    byId.set(id.toLowerCase(), { id, ...(Number.isFinite(Number(c.limitIp)) ? { limitIp: Number(c.limitIp) } : {}) });
+  }
+  for (const rawId of opts.clientUuids ?? []) {
+    const id = String(rawId ?? "").trim();
+    if (!id) continue;
+    if (!byId.has(id.toLowerCase())) byId.set(id.toLowerCase(), { id });
+  }
+  const clientEntries = [...byId.values()];
+  const clientUuids = clientEntries.map((x) => x.id);
   const xuiConfigMode = /\/x-ui\//.test(opts.configPath);
   let hints: ServerLinkHints | undefined;
 
@@ -818,7 +865,7 @@ export async function deployOrSyncVless(
                 const candPrev = (candSettings.clients as Array<Record<string, unknown>>) ?? [];
                 const defaultFlow = defaultClientFlowForInbound(cand, candPrev);
                 const forceFlow = shouldForceClientFlowForInbound(cand);
-                candSettings.clients = buildManagedClients(candPrev, clientUuids, defaultFlow, forceFlow);
+                candSettings.clients = buildManagedClients(candPrev, clientEntries, defaultFlow, forceFlow);
                 candSettings.decryption = "none";
                 cand.settings = candSettings;
                 rows[candIdx] = cand;
@@ -826,7 +873,7 @@ export async function deployOrSyncVless(
                 config = parsed;
                 log?.(`x-ui режим: клиенты синхронизированы в inbound порт ${Number(cand.port) || 0}.`);
               } else {
-                config = buildMinimalConfig(clientUuids, opts.vlessPort);
+                config = buildMinimalConfig(clientEntries, opts.vlessPort);
                 log?.("VLESS inbound не найден — записан минимальный конфиг.");
               }
             } else if (idx >= 0) {
@@ -836,12 +883,12 @@ export async function deployOrSyncVless(
               // Управляемый inbound панели держим простым (как «рабочий» узел): VLESS TCP security=none.
               const managedPort = chooseManagedPort(inbounds as Record<string, unknown>[], opts.vlessPort);
               const rp = realityFromInboundOrNew(ib);
-              const managed = buildManagedInbound(clientUuids, managedPort);
+              const managed = buildManagedInbound(clientEntries, managedPort);
               const defaultFlow = defaultClientFlowForInbound(managed, prevList) || "xtls-rprx-vision";
               const forceFlow = shouldForceClientFlowForInbound(managed);
               managed.settings = {
                 ...(managed.settings as Record<string, unknown>),
-                clients: buildManagedClients(prevList, clientUuids, defaultFlow, forceFlow),
+                clients: buildManagedClients(prevList, clientEntries, defaultFlow, forceFlow),
               };
               managed.streamSettings = {
                 network: "tcp",
@@ -878,7 +925,7 @@ export async function deployOrSyncVless(
                 const candPrev = (candSettings.clients as Array<Record<string, unknown>>) ?? [];
                 const defaultFlow = defaultClientFlowForInbound(cand, candPrev);
                 const forceFlow = shouldForceClientFlowForInbound(cand);
-                candSettings.clients = buildManagedClients(candPrev, clientUuids, defaultFlow, forceFlow);
+                candSettings.clients = buildManagedClients(candPrev, clientEntries, defaultFlow, forceFlow);
                 candSettings.decryption = "none";
                 cand.settings = candSettings;
                 rowsAll[candIdx] = cand;
@@ -896,7 +943,7 @@ export async function deployOrSyncVless(
                 const candPrev = (candSettings.clients as Array<Record<string, unknown>>) ?? [];
                 const defaultFlow = defaultClientFlowForInbound(cand, candPrev);
                 const forceFlow = shouldForceClientFlowForInbound(cand);
-                candSettings.clients = buildManagedClients(candPrev, clientUuids, defaultFlow, forceFlow);
+                candSettings.clients = buildManagedClients(candPrev, clientEntries, defaultFlow, forceFlow);
                 candSettings.decryption = "none";
                 cand.settings = candSettings;
                 rows[candIdx] = cand;
@@ -906,17 +953,17 @@ export async function deployOrSyncVless(
               if (managedPort !== opts.vlessPort) {
                 log?.(`Порт ${opts.vlessPort} занят другим VLESS inbound, managed inbound создан на ${managedPort}.`);
               }
-              rows.push(buildManagedInbound(clientUuids, managedPort));
+              rows.push(buildManagedInbound(clientEntries, managedPort));
               parsed.inbounds = rows;
               config = parsed;
               log?.(`Создан отдельный inbound «${TZADMIN_VLESS_TAG}» (${clientUuids.length} UUID).`);
             }
           } else {
-            config = buildMinimalConfig(clientUuids, opts.vlessPort);
+            config = buildMinimalConfig(clientEntries, opts.vlessPort);
             log?.("Некорректные inbounds — записан минимальный конфиг.");
           }
         } catch {
-          config = buildMinimalConfig(clientUuids, opts.vlessPort);
+          config = buildMinimalConfig(clientEntries, opts.vlessPort);
           log?.("Файл отсутствует или не JSON — записан минимальный конфиг.");
         }
         ensureXrayStatsPolicyApi(config);
@@ -945,12 +992,17 @@ export async function deployOrSyncVless(
 /** Синхронизировать список UUID клиентов на сервере с БД (все пользователи + UUID узла). */
 export async function syncServerClientUuids(
   cfg: SshConfig,
-  opts: { configPath: string; vlessPort: number; clientUuids: string[] },
+  opts: { configPath: string; vlessPort: number; clientUuids?: string[]; clientEntries?: ManagedClientInput[] },
   log?: SshLog,
 ): Promise<{ ok: boolean; detail: string; hints?: ServerLinkHints }> {
   return deployOrSyncVless(
     cfg,
-    { clientUuids: opts.clientUuids, vlessPort: opts.vlessPort, configPath: opts.configPath },
+    {
+      clientUuids: opts.clientUuids ?? [],
+      clientEntries: opts.clientEntries ?? [],
+      vlessPort: opts.vlessPort,
+      configPath: opts.configPath,
+    },
     log,
   );
 }
