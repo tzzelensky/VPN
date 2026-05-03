@@ -18,7 +18,14 @@ export type SshConfig = {
 };
 
 export type SshLog = (message: string) => void;
-export type ManagedClientInput = { id: string; limitIp?: number };
+/** maxIPs через policy.levels[level].maxIPs; у клиента выставляется `level` (не limitIp — для VLESS+Vision часто бесполезен). */
+export type ManagedClientInput = { id: string; deviceLimit?: number };
+
+/** Уровень политики = base + N, где N — max одновременных исходящих IP для UUID. */
+export function deviceLimitPolicyLevel(maxIps: number): number {
+  const n = Math.max(1, Math.floor(maxIps));
+  return 200 + n;
+}
 export const TZADMIN_XRAY_CONFIG_PATH = "/etc/tzadmin-xray/config.json";
 
 function exec(conn: Client, cmd: string): Promise<{ code: number | null; stdout: string; stderr: string }> {
@@ -360,6 +367,30 @@ export function ensureXrayStatsPolicyApi(config: Record<string, unknown>): void 
   config.routing = { ...prevRouting, rules };
 }
 
+/** Добавляет в config.policy.levels записи с maxIPs для всех ненулевых deviceLimit. Вызывать до ensureXrayStatsPolicyApi. */
+export function ensureDeviceLimitPolicyLevels(
+  config: Record<string, unknown>,
+  clientEntries: ManagedClientInput[],
+): void {
+  const prevPol = (config.policy as Record<string, unknown>) || {};
+  const levels = { ...((prevPol.levels as Record<string, Record<string, unknown>>) || {}) };
+  const byLevel = new Map<number, number>();
+  for (const e of clientEntries) {
+    const n = Number(e.deviceLimit);
+    if (!Number.isFinite(n) || n <= 0) continue;
+    const maxIPs = Math.floor(n);
+    const lv = deviceLimitPolicyLevel(maxIPs);
+    byLevel.set(lv, maxIPs);
+  }
+  for (const [lvNum, maxIPs] of byLevel) {
+    const k = String(lvNum);
+    const lv = { ...(levels[k] || {}) };
+    lv.maxIPs = maxIPs;
+    levels[k] = lv;
+  }
+  config.policy = { ...prevPol, levels };
+}
+
 function buildManagedClients(
   prevList: Array<Record<string, unknown>>,
   clientEntries: ManagedClientInput[],
@@ -376,11 +407,14 @@ function buildManagedClients(
       ...base,
       id,
       email: String(base.email ?? id).trim() || id,
-      level: Number(base.level ?? 0) || 0,
     };
-    const lim = Number(entry.limitIp);
-    if (Number.isFinite(lim) && lim > 0) out.limitIp = Math.floor(lim);
-    else delete out.limitIp;
+    delete out.limitIp;
+    const devLim = Number(entry.deviceLimit);
+    if (Number.isFinite(devLim) && devLim > 0) {
+      out.level = deviceLimitPolicyLevel(Math.floor(devLim));
+    } else {
+      out.level = 0;
+    }
     if (defaultFlow && (forceFlow || !flow)) out.flow = defaultFlow;
     return out;
   });
@@ -428,12 +462,13 @@ function findCandidateVlessInboundIndex(
 function buildMinimalConfig(clientEntries: ManagedClientInput[], vlessPort: number): Record<string, unknown> {
   const clients = clientEntries.map((entry) => {
     const id = String(entry.id ?? "").trim();
-    const lim = Number(entry.limitIp);
+    const devLim = Number(entry.deviceLimit);
+    const level =
+      Number.isFinite(devLim) && devLim > 0 ? deviceLimitPolicyLevel(Math.floor(devLim)) : 0;
     return {
       id,
       email: id,
-      level: 0,
-      ...(Number.isFinite(lim) && lim > 0 ? { limitIp: Math.floor(lim) } : {}),
+      level,
     };
   });
   const cfg: Record<string, unknown> = {
@@ -473,6 +508,7 @@ function buildMinimalConfig(clientEntries: ManagedClientInput[], vlessPort: numb
       rules: [{ type: "field", inboundTag: ["api"], outboundTag: "api" }],
     },
   };
+  ensureDeviceLimitPolicyLevels(cfg, clientEntries);
   ensureXrayStatsPolicyApi(cfg);
   return cfg;
 }
@@ -480,13 +516,14 @@ function buildMinimalConfig(clientEntries: ManagedClientInput[], vlessPort: numb
 function buildManagedInbound(clientEntries: ManagedClientInput[], vlessPort: number): Record<string, unknown> {
   const clients = clientEntries.map((entry) => {
     const id = String(entry.id ?? "").trim();
-    const lim = Number(entry.limitIp);
+    const devLim = Number(entry.deviceLimit);
+    const level =
+      Number.isFinite(devLim) && devLim > 0 ? deviceLimitPolicyLevel(Math.floor(devLim)) : 0;
     return {
       id,
       email: id,
-      level: 0,
+      level,
       flow: "xtls-rprx-vision",
-      ...(Number.isFinite(lim) && lim > 0 ? { limitIp: Math.floor(lim) } : {}),
     };
   });
   const sni = (process.env.TZADMIN_REALITY_SNI ?? "www.oracle.com").trim() || "www.oracle.com";
@@ -652,22 +689,24 @@ export async function alterInboundUsersViaApi(
         for (const c of opts.addClients ?? []) {
           const norm = String(c.id ?? "").trim();
           if (!norm) continue;
-          addById.set(norm.toLowerCase(), { id: norm, limitIp: c.limitIp });
+          addById.set(norm.toLowerCase(), { id: norm, deviceLimit: c.deviceLimit });
         }
         const addClients = [...addById.values()];
         const removeUuids = [...new Set((opts.removeUuids ?? []).map((x) => String(x).trim()).filter(Boolean))];
         if (addClients.length === 0 && removeUuids.length === 0) return "no-op";
 
         if (addClients.length > 0) {
-          const clients = addClients.map((entry) => ({
-            id: String(entry.id),
-            email: String(entry.id),
-            level: 0,
-            ...(Number.isFinite(Number(entry.limitIp)) && Number(entry.limitIp) > 0
-              ? { limitIp: Math.floor(Number(entry.limitIp)) }
-              : {}),
-            ...(defaultFlow ? { flow: defaultFlow } : {}),
-          }));
+          const clients = addClients.map((entry) => {
+            const devLim = Number(entry.deviceLimit);
+            const level =
+              Number.isFinite(devLim) && devLim > 0 ? deviceLimitPolicyLevel(Math.floor(devLim)) : 0;
+            return {
+              id: String(entry.id),
+              email: String(entry.id),
+              level,
+              ...(defaultFlow ? { flow: defaultFlow } : {}),
+            };
+          });
           const payload = {
             inbounds: [
               {
@@ -818,7 +857,12 @@ export async function deployOrSyncVless(
   for (const c of opts.clientEntries ?? []) {
     const id = String(c.id ?? "").trim();
     if (!id) continue;
-    byId.set(id.toLowerCase(), { id, ...(Number.isFinite(Number(c.limitIp)) ? { limitIp: Number(c.limitIp) } : {}) });
+    byId.set(id.toLowerCase(), {
+      id,
+      ...(Number.isFinite(Number(c.deviceLimit)) && Number(c.deviceLimit) > 0
+        ? { deviceLimit: Math.floor(Number(c.deviceLimit)) }
+        : {}),
+    });
   }
   for (const rawId of opts.clientUuids ?? []) {
     const id = String(rawId ?? "").trim();
@@ -966,6 +1010,7 @@ export async function deployOrSyncVless(
           config = buildMinimalConfig(clientEntries, opts.vlessPort);
           log?.("Файл отсутствует или не JSON — записан минимальный конфиг.");
         }
+        ensureDeviceLimitPolicyLevels(config, clientEntries);
         ensureXrayStatsPolicyApi(config);
 
         hints = extractVlessLinkHintsFromConfig(config, opts.vlessPort);

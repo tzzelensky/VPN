@@ -37,15 +37,18 @@ export async function resolveConfigPath(row: ServerRow, log?: SshLog): Promise<s
 let pushQueue: Promise<void> = Promise.resolve();
 /** Последняя успешно синхронизированная сигнатура UUID по server.id. */
 const lastSyncedSignatureByServerId = new Map<number, string>();
-/** Последняя успешно синхронизированная карта клиентов по server.id (id -> limitIp). */
+/** Последняя успешно синхронизированная карта клиентов по server.id (id -> deviceLimit maxIPs). */
 const lastSyncedClientMapByServerId = new Map<number, Map<string, number | undefined>>();
 
 function signatureForClients(clients: ManagedClientInput[]): string {
   return [...clients]
-    .map((c) => ({ id: String(c.id ?? "").trim(), limitIp: Number(c.limitIp) }))
+    .map((c) => ({ id: String(c.id ?? "").trim(), deviceLimit: Number(c.deviceLimit) }))
     .filter((c) => c.id)
     .sort((a, b) => a.id.localeCompare(b.id))
-    .map((c) => `${c.id}|${Number.isFinite(c.limitIp) && c.limitIp > 0 ? Math.floor(c.limitIp) : 0}`)
+    .map(
+      (c) =>
+        `${c.id}|${Number.isFinite(c.deviceLimit) && c.deviceLimit > 0 ? Math.floor(c.deviceLimit) : 0}`,
+    )
     .join(",");
 }
 
@@ -54,7 +57,7 @@ function mapFromClients(clients: ManagedClientInput[]): Map<string, number | und
   for (const raw of clients) {
     const id = String(raw.id ?? "").trim();
     if (!id) continue;
-    const lim = Number(raw.limitIp);
+    const lim = Number(raw.deviceLimit);
     out.set(id, Number.isFinite(lim) && lim > 0 ? Math.floor(lim) : undefined);
   }
   return out;
@@ -78,7 +81,7 @@ function managedClientsForServer(serverUuid: string | null): ManagedClientInput[
     out.push({
       id,
       ...(u.device_limit_enabled === 1
-        ? { limitIp: Math.max(1, Math.floor(Number(u.device_limit_count) || 1)) }
+        ? { deviceLimit: Math.max(1, Math.floor(Number(u.device_limit_count) || 1)) }
         : {}),
     });
   }
@@ -104,12 +107,18 @@ export async function pushClientListToAllDeployedServers(log?: SshLog): Promise<
         const rem: string[] = [];
         let hasMutableUpdates = false;
         for (const [id, lim] of nextMap) {
-          if (!prevMap.has(id)) add.push({ id, ...(lim != null ? { limitIp: lim } : {}) });
+          if (!prevMap.has(id)) add.push({ id, ...(lim != null ? { deviceLimit: lim } : {}) });
           else if ((prevMap.get(id) ?? undefined) !== lim) hasMutableUpdates = true;
         }
         for (const id of prevMap.keys()) if (!nextMap.has(id)) rem.push(id);
-        // Быстрый путь без рестарта: точечный add/remove пользователей через HandlerService.
-        if (!hasMutableUpdates && add.length + rem.length > 0 && add.length + rem.length <= 4) {
+        const addNeedsFullSync = add.some((c) => Number(c.deviceLimit) > 0);
+        // Быстрый путь без рестарта: только без лимита устройств (иначе не обновится policy.maxIPs в рантайме).
+        if (
+          !hasMutableUpdates &&
+          !addNeedsFullSync &&
+          add.length + rem.length > 0 &&
+          add.length + rem.length <= 4
+        ) {
           const fast = await alterInboundUsersViaApi(
             sshCfg(row),
             { configPath: path, preferredVlessPort: row.vless_port, addClients: add, removeUuids: rem },
