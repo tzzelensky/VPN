@@ -160,9 +160,11 @@ export default function ReferralProgramPage({ onLogout }: { onLogout: () => void
               />
             </div>
             </div>
-            <aside className="referral-program-feed" aria-label="Лог приглашений">
+            <aside className="referral-program-feed" aria-label="Журнал приглашений и наград">
               <label className="referral-feed-label">Приглашения и награды</label>
-              <p className="field-hint referral-feed-hint">Формат: User N invite User A — User N select gift …</p>
+              <p className="field-hint referral-feed-hint">
+                Кто кого пригласил и что выбрал пригласивший: ГБ, дни или ещё не выбрал.
+              </p>
               <div className="ref-ios-wheel" role="log">
                 <div className="ref-ios-wheel-mask" aria-hidden="true" />
                 <div className="ref-ios-wheel-scroll">

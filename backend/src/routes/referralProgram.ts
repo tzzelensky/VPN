@@ -20,15 +20,21 @@ router.get("/", (_req, res) => {
 router.get("/rewards-log", (_req, res) => {
   const entries = listAllReferralRewards().map((r) => {
     const inv = getUser(r.inviter_user_id);
-    const invLabel = inv ? `User #${inv.id} ${String(inv.name ?? "").trim()}`.trim() : `User #${r.inviter_user_id}`;
-    const invitee = (r.invitee_name && r.invitee_name.trim()) || `tg:${r.invitee_tg_user_id}`;
-    const inviteeLabel = `User ${invitee}`;
-    let gift: string;
-    if (r.status === "pending") gift = "pending";
-    else if (r.claimed_kind === "gb") gift = `+${r.reward_gb} GB`;
-    else if (r.claimed_kind === "days") gift = `+${r.reward_days} days`;
-    else gift = "claimed";
-    const line = `${invLabel} invite ${inviteeLabel} - ${invLabel} select gift ${gift}`;
+    const invStr = inv ? `#${inv.id} ${String(inv.name ?? "").trim()}`.trim() : `#${r.inviter_user_id}`;
+    const inviteeStr = (r.invitee_name && r.invitee_name.trim()) || `Telegram ${r.invitee_tg_user_id}`;
+
+    let giftRu: string;
+    if (r.status === "pending") {
+      giftRu = "награда ещё не выбрана";
+    } else if (r.claimed_kind === "gb") {
+      giftRu = `выбран подарок: +${r.reward_gb} ГБ`;
+    } else if (r.claimed_kind === "days") {
+      giftRu = `выбран подарок: +${r.reward_days} дн.`;
+    } else {
+      giftRu = "награда получена (в старых записях тип подарка не сохранялся)";
+    }
+
+    const line = `${invStr} пригласил «${inviteeStr}» — для пригласившего (${invStr}): ${giftRu}.`;
     return { line, created_at: r.created_at };
   });
   res.json({ entries });

@@ -967,9 +967,9 @@ th {
 
 .referral-program-layout {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(17rem, 22rem);
-  gap: 1.25rem 1.5rem;
-  align-items: start;
+  grid-template-columns: minmax(0, min(52rem, 46%)) minmax(0, 1fr);
+  gap: 1.25rem 1.75rem;
+  align-items: stretch;
 }
 
 @media (max-width: 920px) {
@@ -979,6 +979,7 @@ th {
 
   .referral-program-feed {
     position: static;
+    max-width: none;
   }
 }
 
@@ -990,6 +991,12 @@ th {
   position: sticky;
   top: 0.75rem;
   min-width: 0;
+  width: 100%;
+  max-width: none;
+  display: flex;
+  flex-direction: column;
+  align-self: stretch;
+  min-height: min(70vh, 36rem);
 }
 
 .referral-feed-label {
@@ -1004,10 +1011,14 @@ th {
   margin: 0 0 0.5rem;
 }
 
-/* Лог приглашений: фиксированная высота, «колесо» как в будильнике iOS */
+/* Лог приглашений: занимает свободную ширину колонки и тянется по высоте, скролл «как в iOS» */
 .ref-ios-wheel {
   position: relative;
-  height: 320px;
+  flex: 1 1 auto;
+  width: 100%;
+  min-height: clamp(18rem, 42vh, 22rem);
+  height: auto;
+  max-height: min(72vh, 52rem);
   border-radius: 14px;
   border: 1px solid var(--border);
   background: linear-gradient(180deg, #1a2230 0%, #151c27 50%, #121823 100%);
@@ -1067,10 +1078,9 @@ th {
 
 .ref-ios-line {
   display: block;
-  font-size: 0.78rem;
-  line-height: 1.4;
+  font-size: 0.84rem;
+  line-height: 1.45;
   color: var(--text);
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
   word-break: break-word;
 }
 
