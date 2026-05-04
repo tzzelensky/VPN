@@ -30,7 +30,7 @@ fi
 
 cat >/etc/systemd/system/vpn-admin-api.service <<EOF
 [Unit]
-Description=VPN Admin API
+Description=Панель управления (API)
 After=network.target
 
 [Service]

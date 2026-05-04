@@ -20,7 +20,7 @@ export default function DashboardLayout({
   return (
     <div className="layout">
       <header className="topbar">
-        <div className="brand">VPN Admin</div>
+        <div className="brand">Панель управления</div>
         <nav className="nav-tabs">
           <NavLink to="/servers" className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
             Сервера

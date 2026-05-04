@@ -257,7 +257,7 @@ sudo nano /etc/systemd/system/vpn-admin-api.service
 
 ```ini
 [Unit]
-Description=VPN Admin API
+Description=Панель управления (API)
 After=network.target
 
 [Service]

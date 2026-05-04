@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type SVGProps } from "react";
+import { useCallback, useEffect, useMemo, useState, type SVGProps } from "react";
 import {
   createUser,
   deleteUser,
@@ -49,6 +49,30 @@ function expiryPill(u: UserDto): { text: string; variant: "ok" | "bad" | "muted"
   if (days >= 2 && days <= 4) return { text: `через ${days} дня`, variant: "ok" };
   return { text: `через ${days} дней`, variant: "ok" };
 }
+
+function expirySortKeyNearest(u: UserDto): number {
+  return u.expiry_time > 0 ? u.expiry_time : Number.POSITIVE_INFINITY;
+}
+
+function expirySortKeyFurthest(u: UserDto): number {
+  return u.expiry_time > 0 ? u.expiry_time : Number.MAX_SAFE_INTEGER;
+}
+
+/** Текст подсказки: до какой даты и времени действует подписка (expiry_time — момент окончания в браузере). */
+function formatExpiryDetailText(u: UserDto): string {
+  if (!u.expiry_time || u.expiry_time <= 0) return "Подписка без ограничения по дате и времени.";
+  const d = new Date(u.expiry_time);
+  return `Действует до: ${d.toLocaleString("ru-RU", {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  })}`;
+}
+
+type SortTri = 0 | 1 | 2;
 
 function clientAlive(u: UserDto): boolean {
   if (!u.enable) return false;
@@ -129,6 +153,41 @@ export default function UsersPage({ onLogout }: { onLogout: () => void }) {
   const [resetBusyId, setResetBusyId] = useState<number | null>(null);
   const [syncBusy, setSyncBusy] = useState(false);
   const [expandedInfoId, setExpandedInfoId] = useState<number | null>(null);
+  const [expirySort, setExpirySort] = useState<SortTri>(0);
+  const [trafficSort, setTrafficSort] = useState<SortTri>(0);
+  const [expiryTipUserId, setExpiryTipUserId] = useState<number | null>(null);
+
+  const sortedUsers = useMemo(() => {
+    const arr = [...users];
+    if (expirySort === 1) {
+      arr.sort((a, b) => expirySortKeyNearest(a) - expirySortKeyNearest(b) || a.id - b.id);
+    } else if (expirySort === 2) {
+      arr.sort((a, b) => expirySortKeyFurthest(b) - expirySortKeyFurthest(a) || a.id - b.id);
+    } else if (trafficSort === 1) {
+      arr.sort((a, b) => usedBytes(a) - usedBytes(b) || a.id - b.id);
+    } else if (trafficSort === 2) {
+      arr.sort((a, b) => usedBytes(b) - usedBytes(a) || a.id - b.id);
+    }
+    return arr;
+  }, [users, expirySort, trafficSort]);
+
+  useEffect(() => {
+    if (expiryTipUserId == null) return;
+    const onDocDown = (e: MouseEvent) => {
+      const el = document.getElementById(`ud-expiry-host-${expiryTipUserId}`);
+      if (el && e.target instanceof Node && el.contains(e.target)) return;
+      setExpiryTipUserId(null);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setExpiryTipUserId(null);
+    };
+    document.addEventListener("mousedown", onDocDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDocDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [expiryTipUserId]);
 
   const tableLocked =
     refreshing || deleteBusyId !== null || notifyBusyId !== null || resetBusyId !== null || syncBusy;
@@ -280,15 +339,75 @@ export default function UsersPage({ onLogout }: { onLogout: () => void }) {
                   <th>Включить</th>
                   <th>Онлайн</th>
                   <th>Клиент</th>
-                  <th>Трафик</th>
-                  <th>Общий трафик</th>
-                  <th>Дата окончания</th>
+                  <th>
+                    <button
+                      type="button"
+                      className="ud-th-sort"
+                      title={
+                        trafficSort === 0
+                          ? "Нажмите: сначала меньше израсходовано"
+                          : trafficSort === 1
+                            ? "Нажмите: сначала больше израсходовано"
+                            : "Нажмите: обычный порядок"
+                      }
+                      onClick={() => {
+                        setExpirySort(0);
+                        setTrafficSort((s) => ((s + 1) % 3) as SortTri);
+                      }}
+                    >
+                      Трафик
+                      {trafficSort === 1 ? <span className="ud-th-sort-mark"> ↑</span> : null}
+                      {trafficSort === 2 ? <span className="ud-th-sort-mark"> ↓</span> : null}
+                    </button>
+                  </th>
+                  <th>
+                    <button
+                      type="button"
+                      className="ud-th-sort"
+                      title={
+                        trafficSort === 0
+                          ? "Нажмите: сначала меньше израсходовано"
+                          : trafficSort === 1
+                            ? "Нажмите: сначала больше израсходовано"
+                            : "Нажмите: обычный порядок"
+                      }
+                      onClick={() => {
+                        setExpirySort(0);
+                        setTrafficSort((s) => ((s + 1) % 3) as SortTri);
+                      }}
+                    >
+                      Общий трафик
+                      {trafficSort === 1 ? <span className="ud-th-sort-mark"> ↑</span> : null}
+                      {trafficSort === 2 ? <span className="ud-th-sort-mark"> ↓</span> : null}
+                    </button>
+                  </th>
+                  <th>
+                    <button
+                      type="button"
+                      className="ud-th-sort"
+                      title={
+                        expirySort === 0
+                          ? "Нажмите: сначала ближайшая дата окончания"
+                          : expirySort === 1
+                            ? "Нажмите: сначала самая дальняя дата окончания"
+                            : "Нажмите: обычный порядок"
+                      }
+                      onClick={() => {
+                        setTrafficSort(0);
+                        setExpirySort((s) => ((s + 1) % 3) as SortTri);
+                      }}
+                    >
+                      Дата окончания
+                      {expirySort === 1 ? <span className="ud-th-sort-mark"> ↑</span> : null}
+                      {expirySort === 2 ? <span className="ud-th-sort-mark"> ↓</span> : null}
+                    </button>
+                  </th>
                   <th>Устройства</th>
                   <th className="ud-th-nodes">Узлы</th>
                 </tr>
               </thead>
               <tbody>
-                {users.map((u) => {
+                {sortedUsers.map((u) => {
                   const pct = trafficPercent(u);
                   const ex = expiryPill(u);
                   const alive = clientAlive(u);
@@ -489,8 +608,26 @@ export default function UsersPage({ onLogout }: { onLogout: () => void }) {
                       <td>
                         <span className="ud-pill ud-pill-total">{formatUsedGb(u)}</span>
                       </td>
-                      <td>
-                        <span className={`ud-pill ud-pill-expiry ud-expiry-${ex.variant}`}>{ex.text}</span>
+                      <td className="ud-td-expiry" id={`ud-expiry-host-${u.id}`}>
+                        <div className="ud-expiry-wrap">
+                          <button
+                            type="button"
+                            className={`ud-pill ud-pill-expiry ud-expiry-${ex.variant} ud-expiry-pill-btn`}
+                            title="Нажмите, чтобы показать дату и время окончания"
+                            aria-expanded={expiryTipUserId === u.id}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setExpiryTipUserId((id) => (id === u.id ? null : u.id));
+                            }}
+                          >
+                            {ex.text}
+                          </button>
+                          {expiryTipUserId === u.id ? (
+                            <div className="ud-expiry-tooltip" role="tooltip">
+                              {formatExpiryDetailText(u)}
+                            </div>
+                          ) : null}
+                        </div>
                       </td>
                       <td>
                         <span className="ud-pill ud-pill-total" title={u.device_limit_enabled ? `Лимит: ${u.device_limit_count}` : "Лимит устройств выключен"}>

@@ -91,7 +91,7 @@ app.use(
 
 app.get("/", (_req, res) => {
   res.type("text/plain; charset=utf-8").send(
-    `VPN Admin API. Откройте в браузере фронтенд: ${FRONTEND_ORIGIN}\n` +
+    `Панель управления (API). Откройте в браузере фронтенд: ${FRONTEND_ORIGIN}\n` +
       "Либо http://127.0.0.1:5173 — порт 4000 только для API.\n",
   );
 });

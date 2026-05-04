@@ -70,7 +70,7 @@ export default function LoginPage({ onSuccess }: { onSuccess: () => void }) {
     <div className="login-wrap">
       <div className="panel login-card">
         <div className="brand" style={{ marginBottom: "0.25rem" }}>
-          Панель управления серверами
+          Панель управления
         </div>
         <p className="sub" style={{ marginBottom: "1rem" }}>
           {awaitingCode ? "Введите код из Telegram" : "Вход в панель управления"}
