@@ -49,6 +49,7 @@ export default function MySubPage() {
   const [payPlanId, setPayPlanId] = useState<number>(1);
   const [payPhoto, setPayPhoto] = useState<File | null>(null);
   const [busyPay, setBusyPay] = useState(false);
+  const [payTargetId, setPayTargetId] = useState<number>(0); // 0 = "Новая подписка"
   const [newSubName, setNewSubName] = useState("");
   const [profileSubModalId, setProfileSubModalId] = useState<number>(0);
   const [homeSubId, setHomeSubId] = useState<number>(0);
@@ -112,6 +113,10 @@ export default function MySubPage() {
   const hasActiveSubscription = useMemo(() => {
     return (data?.subscriptions ?? []).some((s) => s.allowed);
   }, [data]);
+  const payTargetSub = useMemo(() => {
+    if (!data || payTargetId <= 0) return null;
+    return data.subscriptions.find((s) => s.id === payTargetId) ?? null;
+  }, [data, payTargetId]);
 
   async function copySubscription(url: string) {
     setMsg("");
@@ -157,11 +162,11 @@ export default function MySubPage() {
       setMsg("Выберите тариф и фото чека.");
       return;
     }
-    if (data.subscriptions.length > 0 && !pickedSub) {
-      setMsg("Выберите подписку.");
+    if (payTargetId > 0 && !payTargetSub) {
+      setMsg("Выберите подписку для продления.");
       return;
     }
-    if (data.subscriptions.length === 0 && !newSubName.trim()) {
+    if (payTargetId === 0 && !newSubName.trim()) {
       setMsg("Введите название новой подписки.");
       return;
     }
@@ -171,16 +176,16 @@ export default function MySubPage() {
       const compressed = await compressImage(payPhoto);
       await sendMySubPaymentProof({
         init_data: initData,
-        user_id: pickedSub?.id,
+        user_id: payTargetId > 0 ? payTargetId : undefined,
         plan_id: payPlanId,
         photo_base64: compressed.base64,
         photo_mime: compressed.mime,
         photo_name: compressed.name,
-        new_subscription_name: data.subscriptions.length === 0 ? newSubName.trim().slice(0, 25) : undefined,
+        new_subscription_name: payTargetId === 0 ? newSubName.trim().slice(0, 25) : undefined,
       });
       setMsg("Чек получен. Администратор проверит оплату и примет решение. Обычно это занимает немного времени. После подтверждения подписка придет в чат");
       setPayPhoto(null);
-      if (data.subscriptions.length === 0) setNewSubName("");
+      if (payTargetId === 0) setNewSubName("");
     } catch (e) {
       const m = e instanceof Error ? e.message : String(e);
       if (m.includes("tg_webapp_auth_required")) setErr("Требуется авторизация через тг.");
@@ -341,12 +346,37 @@ export default function MySubPage() {
             ) : tab === "subscription" ? (
               <section className="mysub-section mysub-section-anim">
                 <h3 className="mysub-title">Подписка</h3>
-                {data.subscriptions.length === 0 ? (
-                  <div className="mysub-sub-box">
-                    <p className="sub" style={{ marginBottom: "0.5rem" }}>
-                      У вас пока нет подписок. Выберите тариф и отправьте чек, после подтверждения администратором создадим подписку.
-                    </p>
+                <div className="mysub-sub-box" style={{ marginBottom: "0.65rem" }}>
+                  <div className="form-field" style={{ marginBottom: "0.6rem" }}>
+                    <label>Куда зачислить оплату</label>
+                    <button
+                      type="button"
+                      className={payTargetId === 0 ? "primary" : "ghost"}
+                      onClick={() => setPayTargetId(0)}
+                      style={{ width: "100%" }}
+                    >
+                      Новая подписка
+                    </button>
+                  </div>
+                  {data.subscriptions.length > 0 ? (
                     <div className="form-field">
+                      <label>Все подписки пользователя</label>
+                      <div className="mysub-stat-list">
+                        {data.subscriptions.map((s) => (
+                          <button
+                            key={`pay-target-${s.id}`}
+                            type="button"
+                            className={payTargetId === s.id ? "primary" : "ghost"}
+                            onClick={() => setPayTargetId(s.id)}
+                          >
+                            #{s.id} {s.name}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
+                  {payTargetId === 0 ? (
+                    <div className="form-field" style={{ marginTop: "0.6rem" }}>
                       <label>Название новой подписки</label>
                       <input
                         value={newSubName}
@@ -354,6 +384,17 @@ export default function MySubPage() {
                         placeholder='Например: "Для мамы"'
                       />
                     </div>
+                  ) : (
+                    <p className="sub" style={{ margin: "0.5rem 0 0" }}>
+                      Оплата будет зачислена в: #{payTargetSub?.id} {payTargetSub?.name}
+                    </p>
+                  )}
+                </div>
+                {data.subscriptions.length === 0 ? (
+                  <div className="mysub-sub-box">
+                    <p className="sub" style={{ marginBottom: "0.5rem" }}>
+                      У вас пока нет подписок. Выберите тариф и отправьте чек, после подтверждения администратором создадим подписку.
+                    </p>
                     <div className="form-field">
                       <label>Тариф</label>
                       <select value={payPlanId} onChange={(e) => setPayPlanId(Number(e.target.value) || 1)}>
