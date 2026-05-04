@@ -92,6 +92,7 @@ export default function UserModal({
   const [serverCount, setServerCount] = useState(0);
   const [deviceLimitEnabled, setDeviceLimitEnabled] = useState(false);
   const [deviceLimitCount, setDeviceLimitCount] = useState("2");
+  const [whitelistHappEnabled, setWhitelistHappEnabled] = useState(false);
   const [remotePort, setRemotePort] = useState("");
   const [realityPbk, setRealityPbk] = useState("");
   const [realityFp, setRealityFp] = useState("chrome");
@@ -121,6 +122,7 @@ export default function UserModal({
       setServerCount(0);
       setDeviceLimitEnabled(false);
       setDeviceLimitCount("2");
+      setWhitelistHappEnabled(false);
       setRemotePort("");
       setRealityPbk("");
       setRealityFp("chrome");
@@ -143,6 +145,7 @@ export default function UserModal({
     setServerCount(Math.max(0, Math.floor(Number(user.subscription_server_count) || 0)));
     setDeviceLimitEnabled(Boolean(user.device_limit_enabled));
     setDeviceLimitCount(String(Math.max(1, Math.floor(Number(user.device_limit_count) || 1))));
+    setWhitelistHappEnabled(Boolean(user.whitelist_happ_enabled));
     setRemotePort(user.remote_port != null ? String(user.remote_port) : "");
     setRealityPbk(user.reality_pbk ?? "");
     setRealityFp(user.reality_fp || "chrome");
@@ -198,6 +201,7 @@ export default function UserModal({
       subscription_server_count: serverCount,
       device_limit_enabled: deviceLimitEnabled,
       device_limit_count: Math.max(1, Math.floor(Number(deviceLimitCount) || 1)),
+      whitelist_happ_enabled: whitelistHappEnabled,
     };
     if (isCreate) return base;
     return {
@@ -433,6 +437,23 @@ export default function UserModal({
                   />
                 </div>
                 <p className="field-hint">По умолчанию выключено. При превышении клиент получает заглушку вместо серверов.</p>
+              </div>
+              <div className="form-field form-field-span-2">
+                <label>Включить белые списки</label>
+                <div style={{ display: "flex", alignItems: "center", gap: "0.65rem" }}>
+                  <button
+                    type="button"
+                    className={`toggle ${whitelistHappEnabled ? "on" : ""}`}
+                    onClick={() => setWhitelistHappEnabled((v) => !v)}
+                    disabled={saving}
+                    aria-pressed={whitelistHappEnabled}
+                    title={whitelistHappEnabled ? "Отключить режим белых списков" : "Включить режим белых списков"}
+                  />
+                </div>
+                <p className="field-hint">
+                  По умолчанию выключено. Если включено: в подписке только <b>последние 4</b> узла (после учёта «Серверов в
+                  подписке») и одна строка Happ для белых списков.
+                </p>
               </div>
             </div>
           </section>

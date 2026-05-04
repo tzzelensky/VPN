@@ -137,6 +137,7 @@ function userDto(u: UserRow) {
     subscription_server_count: u.subscription_server_count,
     device_limit_enabled: u.device_limit_enabled === 1,
     device_limit_count: u.device_limit_count,
+    whitelist_happ_enabled: u.whitelist_happ_enabled === 1,
     online: deriveOnlineFromRow(u),
     online_devices: Number(u.online_devices) || 0,
     stats_synced_at: u.stats_synced_at,
@@ -193,6 +194,16 @@ function parseCreateBody(req: import("express").Request): CreateUserInput & { na
             ? 1
             : undefined,
     device_limit_count: b.device_limit_count != null ? Number(b.device_limit_count) : undefined,
+    whitelist_happ_enabled:
+      typeof b.whitelist_happ_enabled === "boolean"
+        ? b.whitelist_happ_enabled
+          ? 1
+          : 0
+        : b.whitelist_happ_enabled === false || b.whitelist_happ_enabled === 0
+          ? 0
+          : b.whitelist_happ_enabled === true || b.whitelist_happ_enabled === 1
+            ? 1
+            : undefined,
     connection_profile:
       b.connection_profile != null && String(b.connection_profile).toLowerCase() === "reality" ? "reality" : undefined,
   };

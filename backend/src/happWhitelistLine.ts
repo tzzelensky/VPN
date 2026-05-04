@@ -1,0 +1,7 @@
+/**
+ * Доп. строка подписки Happ (белые списки), подключается только при whitelist_happ_enabled у пользователя.
+ * Значение из панели; при необходимости можно переопределить env HAPP_WHITELIST_CRYPT_LINE.
+ */
+export const HAPP_WHITELIST_SUBSCRIPTION_LINE =
+  String(process.env.HAPP_WHITELIST_CRYPT_LINE ?? "").trim() ||
+  "happ://crypt5/hfqabSECHkYpeRG24m100t81JH5H6ILJipQGtMrrYtBarWMipMbrGQ3I5VkCECp+kBxahlHhecxotcGg2L/9Cv1Yj/P8jjFoCh7uCBnmKYLbnbOgoJqod+kV==lgQbeG9T+ZDhFeoj2T+3lKsdpJHjgUl4Xa9hnW12bikGCS2c6z4ZN7hJJGZ6y6n0Co3DH+Pum4VZDKg0G9MJEUIFMo/HkO4U48w3j3JnN+Fhuc6yjAdjyGrbsHup/kr7MT9L1GMkrbig8/e+oq8xa57qzMHB2b6aizo5KuVpZCWSIOS1gjfTfY4jEtOWsSwblzeBJoqj85jKX1vf4FHU+1fuLazewCJ4pJfL81kgFwvj9ZyFh1CutmzWtc7JA2i3dqxA9TOletXvv2aHucVu/iMryP8g6g3B0Pc9vRnsPnWkbeYbC+fJrOtowChl8Jgy0bc1BqV0oEUxD8CtNn7JbF4KnivlOlldFVF3ooAVgYfbTeNf+18mAEr6MmbnqsdSLdzAxIp1KUJ+8nfacwxGLimDN6nUOZ11/Qlvy2TEdDo+HyCy7GnTE4h+E4tm7aHIeCp4T30CyE7rjqR2xl9Rlhr9bO//3P8g+/E9GWNRsvcZ35+fFvnXp1xSkjgQMZKgiMq0u0x1PCx3fMx8Z7gloUDRlRu2kLuWwaXcFkjED2WITZu6Nx/j/ImEc+M9VGbzygMyF4t0byQtSqNo53YHFKbKlyD6F/YvRLmCDoeV3kezViRrdYfg1QiMT0c//JPFf/f9PDbtCnG6ISPxwPevF88LQa6TgQDbmSgtSKcDlWE=q+xctr";

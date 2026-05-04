@@ -38,6 +38,8 @@ export type CreateUserInput = {
   device_limit_enabled?: number;
   /** Максимум устройств при включённом device_limit_enabled. */
   device_limit_count?: number;
+  /** 1 = в подписке только последние 4 узла + строка Happ (белые списки). По умолчанию выкл. */
+  whitelist_happ_enabled?: number;
   /** Служебные поля синхронизации с Xray (не задавать из формы клиента). */
   online_snapshot?: number;
   /** Текущее число онлайн-подключений по UUID (снимок последнего опроса). */
@@ -81,6 +83,8 @@ export type UserRow = {
   device_limit_enabled: number;
   /** Максимум устройств, когда ограничение включено. */
   device_limit_count: number;
+  /** 1 = подписка: последние 4 сервера + happ-строка белых списков. */
+  whitelist_happ_enabled: number;
   /** Время последнего успешного sync трафика с узлов (ms). */
   stats_synced_at: number;
   /** Последний «сырой» снимок uplink/downlink из Xray; -1 = ещё не инициализировано. */
@@ -462,6 +466,7 @@ function normalizeUser(u: UserRow): UserRow {
     online_devices: Math.max(0, Math.floor(Number((u as { online_devices?: unknown }).online_devices) || 0)),
     device_limit_enabled: Number((u as { device_limit_enabled?: unknown }).device_limit_enabled) === 1 ? 1 : 0,
     device_limit_count: Math.max(1, Math.floor(Number((u as { device_limit_count?: unknown }).device_limit_count) || 1)),
+    whitelist_happ_enabled: Number((u as { whitelist_happ_enabled?: unknown }).whitelist_happ_enabled) === 1 ? 1 : 0,
     stats_synced_at: Number.isFinite(Number(u.stats_synced_at))
       ? Math.max(0, Math.floor(Number(u.stats_synced_at)))
       : 0,
@@ -828,6 +833,7 @@ export function createUser(input: CreateUserInput = {}): UserRow {
       online_devices: 0,
       device_limit_enabled: input.device_limit_enabled === 1 ? 1 : 0,
       device_limit_count: Math.max(1, Math.floor(Number(input.device_limit_count) || 1)),
+      whitelist_happ_enabled: input.whitelist_happ_enabled === 1 ? 1 : 0,
       stats_synced_at: 0,
       stats_raw_up: -1,
       stats_raw_down: -1,
@@ -890,6 +896,12 @@ export function updateUserRow(id: number, patch: Partial<CreateUserInput>): User
         patch.device_limit_count !== undefined
           ? Math.max(1, Math.floor(Number(patch.device_limit_count) || 1))
           : cur.device_limit_count,
+      whitelist_happ_enabled:
+        patch.whitelist_happ_enabled !== undefined
+          ? patch.whitelist_happ_enabled === 1
+            ? 1
+            : 0
+          : cur.whitelist_happ_enabled,
       online_snapshot:
         patch.online_snapshot !== undefined
           ? patch.online_snapshot === 1

@@ -209,6 +209,8 @@ export type UserDto = {
   device_limit_enabled: boolean;
   /** Максимум устройств при включенном ограничении. */
   device_limit_count: number;
+  /** Последние 4 узла в подписке + Happ (белые списки). По умолчанию выкл. */
+  whitelist_happ_enabled: boolean;
   /** Активность по данным Xray (обновляется при опросе узлов). */
   online: boolean;
   /** Число текущих подключенных устройств (по последнему опросу узлов). */
@@ -241,6 +243,7 @@ export type CreateUserPayload = {
   subscription_server_count?: number;
   device_limit_enabled?: boolean;
   device_limit_count?: number;
+  whitelist_happ_enabled?: boolean;
 };
 
 function bodyFromPayload(p: CreateUserPayload): Record<string, unknown> {
