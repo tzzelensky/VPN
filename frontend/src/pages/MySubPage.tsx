@@ -3,6 +3,20 @@ import { claimMySubReferralReward, loadMySubWebAppProfile, sendMySubPaymentProof
 
 type Tab = "home" | "subscription" | "friends" | "profile";
 
+/** Если название не ввели: имя последней подписки (max id) + порядковый номер (следующий по счёту). */
+function defaultNewSubscriptionName(subs: MySubProfileDto["subscriptions"]): string {
+  const ord = subs.length + 1;
+  const ordStr = String(ord);
+  if (!subs.length) return `Новая подписка ${ordStr}`.slice(0, 25);
+  let latest = subs[0]!;
+  for (const s of subs) if (s.id > latest.id) latest = s;
+  const base = String(latest.name ?? "").trim() || "Подписка";
+  const suffix = ` ${ordStr}`;
+  const maxBase = Math.max(1, 25 - suffix.length);
+  const trimmedBase = (base.length > maxBase ? base.slice(0, maxBase) : base).trimEnd();
+  return `${trimmedBase}${suffix}`.slice(0, 25);
+}
+
 function NavIcon({ tab }: { tab: Tab }) {
   if (tab === "home") {
     return (
@@ -117,6 +131,10 @@ export default function MySubPage() {
     if (!data || payTargetId <= 0) return null;
     return data.subscriptions.find((s) => s.id === payTargetId) ?? null;
   }, [data, payTargetId]);
+  const suggestedNewSubName = useMemo(() => {
+    if (!data) return "";
+    return defaultNewSubscriptionName(data.subscriptions);
+  }, [data]);
 
   async function copySubscription(url: string) {
     setMsg("");
@@ -166,10 +184,8 @@ export default function MySubPage() {
       setMsg("Выберите подписку для продления.");
       return;
     }
-    if (payTargetId === 0 && !newSubName.trim()) {
-      setMsg("Введите название новой подписки.");
-      return;
-    }
+    const chosenNewName =
+      payTargetId === 0 ? (newSubName.trim() || defaultNewSubscriptionName(data.subscriptions)) : "";
     setBusyPay(true);
     setMsg("");
     try {
@@ -181,7 +197,7 @@ export default function MySubPage() {
         photo_base64: compressed.base64,
         photo_mime: compressed.mime,
         photo_name: compressed.name,
-        new_subscription_name: payTargetId === 0 ? newSubName.trim().slice(0, 25) : undefined,
+        new_subscription_name: payTargetId === 0 ? chosenNewName.slice(0, 25) : undefined,
       });
       setMsg("Чек получен. Администратор проверит оплату и примет решение. Обычно это занимает немного времени. После подтверждения подписка придет в чат");
       setPayPhoto(null);
@@ -381,8 +397,13 @@ export default function MySubPage() {
                       <input
                         value={newSubName}
                         onChange={(e) => setNewSubName(e.target.value.slice(0, 25))}
-                        placeholder='Например: "Для мамы"'
+                        placeholder={suggestedNewSubName || "Например: Для мамы"}
                       />
+                      {suggestedNewSubName ? (
+                        <p className="field-hint" style={{ marginTop: "0.3rem" }}>
+                          Если оставить пустым, будет: «{suggestedNewSubName}».
+                        </p>
+                      ) : null}
                     </div>
                   ) : (
                     <p className="sub" style={{ margin: "0.5rem 0 0" }}>
