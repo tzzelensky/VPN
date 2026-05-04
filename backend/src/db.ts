@@ -160,8 +160,10 @@ export type ReferralRewardRow = {
   reward_gb: number;
   reward_days: number;
   status: "pending" | "claimed";
+  /** Заполняется при выборе награды в боте / WebApp (старые записи могут быть без поля). */
+  claimed_kind?: "gb" | "days";
   created_at: string;
- };
+};
 
 export type ServerRow = {
   id: number;
@@ -518,6 +520,8 @@ function readStore(): FileStore {
         if (!id || !Number.isFinite(inviterUserId) || inviterUserId <= 0 || !Number.isFinite(inviteeTgUserId) || inviteeTgUserId <= 0) {
           return null;
         }
+        const ck = String(o.claimed_kind ?? "").trim().toLowerCase();
+        const claimed_kind = ck === "gb" || ck === "days" ? (ck as "gb" | "days") : undefined;
         return {
           id,
           inviter_user_id: Math.floor(inviterUserId),
@@ -526,6 +530,7 @@ function readStore(): FileStore {
           reward_gb: Math.max(1, Math.floor(Number(o.reward_gb) || 1)),
           reward_days: Math.max(1, Math.floor(Number(o.reward_days) || 1)),
           status: o.status === "claimed" ? "claimed" : "pending",
+          ...(claimed_kind ? { claimed_kind } : {}),
           created_at: String(o.created_at ?? new Date().toISOString()),
         } as ReferralRewardRow;
       })
@@ -1207,17 +1212,31 @@ export function getReferralReward(id: string): ReferralRewardRow | undefined {
   return readStore().referral_rewards.find((r) => r.id === id);
 }
 
-export function claimReferralReward(id: string): ReferralRewardRow | undefined {
+export function claimReferralReward(id: string, kind?: "gb" | "days"): ReferralRewardRow | undefined {
   let out: ReferralRewardRow | undefined;
   mutate((store) => {
     const rows = store.referral_rewards ?? [];
     const i = rows.findIndex((r) => r.id === id && r.status === "pending");
     if (i === -1) return;
-    const next = { ...rows[i]!, status: "claimed" as const };
+    const next: ReferralRewardRow = {
+      ...rows[i]!,
+      status: "claimed",
+      ...(kind === "gb" || kind === "days" ? { claimed_kind: kind } : {}),
+    };
     rows[i] = next;
     out = next;
   });
   return out;
+}
+
+/** Все реферальные награды (новые сверху) для админ-лога. */
+export function listAllReferralRewards(): ReferralRewardRow[] {
+  const rows = readStore().referral_rewards ?? [];
+  return [...rows].sort((a, b) => {
+    const ta = Date.parse(a.created_at);
+    const tb = Date.parse(b.created_at);
+    return (Number.isFinite(tb) ? tb : 0) - (Number.isFinite(ta) ? ta : 0);
+  });
 }
 
 export function listReferralRewardsForInviterUsers(inviterUserIds: number[]): ReferralRewardRow[] {

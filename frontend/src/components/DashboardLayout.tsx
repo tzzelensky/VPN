@@ -44,7 +44,7 @@ export default function DashboardLayout({
             to="/referral-program"
             className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}
           >
-            Реферальная программая
+            Реферальная программа
           </NavLink>
         </nav>
         <button type="button" className="ghost" onClick={() => void doLogout()}>

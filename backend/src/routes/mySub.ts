@@ -262,7 +262,7 @@ router.post("/webapp/referral-reward", async (req, res) => {
     const base = Math.max(Date.now(), inviter.expiry_time > 0 ? inviter.expiry_time : 0);
     updateUserRow(inviter.id, { expiry_time: base + reward.reward_days * 86400000 });
   }
-  claimReferralReward(reward.id);
+  claimReferralReward(reward.id, kind);
   try {
     await pushClientListToAllDeployedServers();
   } catch {

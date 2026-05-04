@@ -469,6 +469,13 @@ export async function saveReferralProgram(body: ReferralProgramDto): Promise<Ref
   return handle(res);
 }
 
+export type ReferralRewardLogEntry = { line: string; created_at: string };
+
+export async function loadReferralRewardsLog(): Promise<{ entries: ReferralRewardLogEntry[] }> {
+  const res = await fetch("/api/referral-program/rewards-log", { credentials: "include" });
+  return handle(res);
+}
+
 export type MySubProfileDto = {
   tg_id: number;
   name: string;

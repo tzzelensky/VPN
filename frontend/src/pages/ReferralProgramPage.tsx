@@ -3,15 +3,18 @@ import DashboardLayout from "../components/DashboardLayout";
 import Spinner from "../components/Spinner";
 import {
   loadReferralProgram,
+  loadReferralRewardsLog,
   loadSubscriptionShop,
   saveReferralProgram,
   type ReferralProgramDto,
+  type ReferralRewardLogEntry,
   type SubscriptionShopDto,
 } from "../api";
 
 export default function ReferralProgramPage({ onLogout }: { onLogout: () => void }) {
   const [cfg, setCfg] = useState<ReferralProgramDto | null>(null);
   const [shop, setShop] = useState<SubscriptionShopDto | null>(null);
+  const [rewardLog, setRewardLog] = useState<ReferralRewardLogEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState<{ type: "ok" | "err"; text: string } | null>(null);
@@ -20,9 +23,10 @@ export default function ReferralProgramPage({ onLogout }: { onLogout: () => void
     setLoading(true);
     setMsg(null);
     try {
-      const [c, s] = await Promise.all([loadReferralProgram(), loadSubscriptionShop()]);
+      const [c, s, log] = await Promise.all([loadReferralProgram(), loadSubscriptionShop(), loadReferralRewardsLog()]);
       setCfg(c);
       setShop(s);
+      setRewardLog(log.entries ?? []);
     } catch (e) {
       setMsg({ type: "err", text: String(e) });
     } finally {
@@ -64,7 +68,7 @@ export default function ReferralProgramPage({ onLogout }: { onLogout: () => void
       <section className="panel users-hero-panel">
         <div className="users-hero-top">
           <div>
-            <h1>Реферальная программая</h1>
+            <h1>Реферальная программа</h1>
             <p className="sub users-hero-sub">Настройка кнопки в боте, скидки приглашенному и награды пригласившему.</p>
           </div>
           <div className="users-hero-actions">
@@ -91,7 +95,8 @@ export default function ReferralProgramPage({ onLogout }: { onLogout: () => void
         </section>
       ) : (
         <section className="panel">
-          <div className="user-form-grid" style={{ maxWidth: "52rem" }}>
+          <div className="referral-program-layout">
+            <div className="referral-program-form user-form-grid">
             <div className="form-field form-field-span-2 shop-toggle-row">
               <div>
                 <label>Реферальная программа</label>
@@ -154,6 +159,28 @@ export default function ReferralProgramPage({ onLogout }: { onLogout: () => void
                 placeholder="Я пользуюсь этим VPN, вот тебе скидка на первую покупку."
               />
             </div>
+            </div>
+            <aside className="referral-program-feed" aria-label="Лог приглашений">
+              <label className="referral-feed-label">Приглашения и награды</label>
+              <p className="field-hint referral-feed-hint">Формат: User N invite User A — User N select gift …</p>
+              <div className="ref-ios-wheel" role="log">
+                <div className="ref-ios-wheel-mask" aria-hidden="true" />
+                <div className="ref-ios-wheel-scroll">
+                  {rewardLog.length === 0 ? (
+                    <p className="sub ref-ios-empty">Пока нет записей.</p>
+                  ) : (
+                    rewardLog.map((e, idx) => (
+                      <div key={`${e.created_at}-${idx}`} className="ref-ios-row">
+                        <span className="ref-ios-line">{e.line}</span>
+                        <span className="ref-ios-date">
+                          {e.created_at ? new Date(e.created_at).toLocaleString("ru-RU", { dateStyle: "short", timeStyle: "short" }) : ""}
+                        </span>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            </aside>
           </div>
         </section>
       )}

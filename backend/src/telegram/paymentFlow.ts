@@ -660,7 +660,7 @@ export async function onReferralRewardChosen(
       return;
     }
     updateUserRow(inviter.id, { total_gb: inviter.total_gb + reward.reward_gb });
-    claimReferralReward(reward.id);
+    claimReferralReward(reward.id, "gb");
     await answerCallbackQuery(callbackQueryId, { text: `Начислено +${reward.reward_gb} ГБ` });
     await sendTelegramHtml(
       tgFromId,
@@ -670,7 +670,7 @@ export async function onReferralRewardChosen(
   } else {
     const base = Math.max(Date.now(), inviter.expiry_time > 0 ? inviter.expiry_time : 0);
     updateUserRow(inviter.id, { expiry_time: snapExpiryTimeToNoonLocal(base + reward.reward_days * DAY_MS) });
-    claimReferralReward(reward.id);
+    claimReferralReward(reward.id, "days");
     await answerCallbackQuery(callbackQueryId, { text: `Добавлено +${reward.reward_days} дней` });
     await sendTelegramHtml(
       tgFromId,
