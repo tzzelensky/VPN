@@ -127,6 +127,13 @@ export default function MySubPage() {
   const hasActiveSubscription = useMemo(() => {
     return (data?.subscriptions ?? []).some((s) => s.allowed);
   }, [data]);
+  /** Свечение за аватаром: нет подписок — голубое; есть активная — зелёное; иначе (истекла/лимит/выкл.) — красное. */
+  const headGlowClass = useMemo(() => {
+    if (!data) return "";
+    if (data.subscriptions.length === 0) return "mysub-head--glow-blue";
+    if (hasActiveSubscription) return "active-sub";
+    return "mysub-head--glow-red";
+  }, [data, hasActiveSubscription]);
   const payTargetSub = useMemo(() => {
     if (!data || payTargetId <= 0) return null;
     return data.subscriptions.find((s) => s.id === payTargetId) ?? null;
@@ -285,7 +292,7 @@ export default function MySubPage() {
         {err ? <div className="flash err">{err}</div> : null}
         {data ? (
           <>
-            <div className={`mysub-head ${hasActiveSubscription ? "active-sub" : ""}`}>
+            <div className={`mysub-head ${headGlowClass}`.trim()}>
               {data.avatar_url ? (
                 <img src={data.avatar_url} alt="avatar" className="mysub-avatar" />
               ) : (
