@@ -209,7 +209,7 @@ export type UserDto = {
   device_limit_enabled: boolean;
   /** Максимум устройств при включенном ограничении. */
   device_limit_count: number;
-  /** Последние 4 узла в подписке + Happ (белые списки). По умолчанию выкл. */
+  /** К подписке дописываются последние 4 узла + happ (белые списки). По умолчанию выкл. */
   whitelist_happ_enabled: boolean;
   /** Активность по данным Xray (обновляется при опросе узлов). */
   online: boolean;

@@ -38,7 +38,7 @@ export type CreateUserInput = {
   device_limit_enabled?: number;
   /** Максимум устройств при включённом device_limit_enabled. */
   device_limit_count?: number;
-  /** 1 = в подписке только последние 4 узла + строка Happ (белые списки). По умолчанию выкл. */
+  /** 1 = к подписке дописать последние 4 узла + строка Happ (белые списки). По умолчанию выкл. */
   whitelist_happ_enabled?: number;
   /** Служебные поля синхронизации с Xray (не задавать из формы клиента). */
   online_snapshot?: number;
@@ -83,7 +83,7 @@ export type UserRow = {
   device_limit_enabled: number;
   /** Максимум устройств, когда ограничение включено. */
   device_limit_count: number;
-  /** 1 = подписка: последние 4 сервера + happ-строка белых списков. */
+  /** 1 = к подписке дописываются последние 4 сервера + happ-строка белых списков. */
   whitelist_happ_enabled: number;
   /** Время последнего успешного sync трафика с узлов (ms). */
   stats_synced_at: number;
