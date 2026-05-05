@@ -401,7 +401,6 @@ export default function CommunicationsPage({ onLogout }: { onLogout: () => void 
           </div>
           <aside className="comms-right" aria-label="Список клиентов и статус чата">
             <label className="referral-feed-label">Все пользователи</label>
-            <p className="field-hint referral-feed-hint">`tg-id` и наличие диалога с ботом.</p>
             <div className="ref-ios-wheel" role="log">
               <div className="ref-ios-wheel-mask" aria-hidden="true" />
               <div className="ref-ios-wheel-scroll">

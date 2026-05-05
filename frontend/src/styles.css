@@ -1681,37 +1681,28 @@ th {
 }
 
 .comms-layout {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 360px);
+  gap: 1rem 1.1rem;
   align-items: flex-start;
-  gap: 1.25rem;
 }
 
-.comms-layout > .comms-left {
-  flex: 1 1 62%;
+.comms-left {
   min-width: 0;
-}
-
-.comms-layout > .comms-right {
-  flex: 0 0 35%;
-  min-width: 320px;
-  max-width: 520px;
-}
-
-.comms-layout {
-  gap: 1rem 1.25rem;
-  align-items: flex-start;
 }
 
 .comms-right {
   min-width: 0;
+  max-width: none;
   display: flex;
   flex-direction: column;
   align-self: flex-start;
 }
 
 .comms-right .ref-ios-wheel {
-  min-height: clamp(22rem, 58vh, 36rem);
-  max-height: min(78vh, 44rem);
+  height: min(56vh, 28rem);
+  min-height: 18rem;
+  max-height: min(56vh, 28rem);
 }
 
 .comms-chat-meta {
@@ -1857,16 +1848,9 @@ th {
   color: var(--muted);
 }
 
-@media (max-width: 1080px) {
+@media (max-width: 980px) {
   .comms-layout {
-    display: grid;
     grid-template-columns: 1fr;
-  }
-
-  .comms-layout > .comms-right {
-    min-width: 0;
-    max-width: none;
-    flex: 1 1 auto;
   }
 }
 
