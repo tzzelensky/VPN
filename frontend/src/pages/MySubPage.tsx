@@ -17,6 +17,11 @@ function defaultNewSubscriptionName(subs: MySubProfileDto["subscriptions"]): str
   return `${trimmedBase}${suffix}`.slice(0, 25);
 }
 
+function formatMySubPlanMeta(p: { total_gb: number; days: number }): string {
+  const gb = p.total_gb > 0 ? `${p.total_gb} ГБ` : "безлимит";
+  return `${gb} · ${p.days} дн.`;
+}
+
 function NavIcon({ tab }: { tab: Tab }) {
   if (tab === "home") {
     return (
@@ -59,7 +64,6 @@ export default function MySubPage() {
   const [err, setErr] = useState<string>("");
   const [showInstruction, setShowInstruction] = useState(false);
   const [showPickModal, setShowPickModal] = useState(false);
-  const [pickTarget, setPickTarget] = useState<"copy" | "pay">("copy");
   const [payPlanId, setPayPlanId] = useState<number>(1);
   const [payPhoto, setPayPhoto] = useState<File | null>(null);
   const [busyPay, setBusyPay] = useState(false);
@@ -109,13 +113,12 @@ export default function MySubPage() {
     })();
   }, []);
   useEffect(() => {
+    if (payTargetId > 0) setPickedSubId(payTargetId);
+  }, [payTargetId]);
+  useEffect(() => {
     setMsg("");
   }, [tab]);
 
-  const pickedSub = useMemo(() => {
-    if (!data) return null;
-    return data.subscriptions.find((s) => s.id === pickedSubId) ?? null;
-  }, [data, pickedSubId]);
   const homeSub = useMemo(() => {
     if (!data) return null;
     const targetId = homeSubId > 0 ? homeSubId : pickedSubId;
@@ -218,13 +221,11 @@ export default function MySubPage() {
     }
   }
 
-  function openPick(which: "copy" | "pay") {
+  function openPickForCopy() {
     if (!data) return;
-    setPickTarget(which);
     if (pickedSubId <= 0 && data.subscriptions[0]) setPickedSubId(data.subscriptions[0].id);
     if (data.subscriptions.length <= 1) {
       setPickedSubId(data.subscriptions[0]?.id ?? 0);
-      if (which === "pay") setTab("subscription");
       return;
     }
     setShowPickModal(true);
@@ -340,7 +341,7 @@ export default function MySubPage() {
                       disabled={!homeSub}
                       onClick={() => {
                         if (!homeSub || (data.subscriptions.length > 1 && !showPickModal)) {
-                          openPick("copy");
+                          openPickForCopy();
                           return;
                         }
                         void copySubscription(homeSub.subscription_url);
@@ -368,22 +369,22 @@ export default function MySubPage() {
               </section>
             ) : tab === "subscription" ? (
               <section className="mysub-section mysub-section-anim">
-                <h3 className="mysub-title">Подписка</h3>
-                <div className="mysub-sub-box" style={{ marginBottom: "0.65rem" }}>
-                  <div className="form-field" style={{ marginBottom: "0.6rem" }}>
-                    <label>Куда зачислить оплату</label>
-                    <button
-                      type="button"
-                      className={payTargetId === 0 ? "primary" : "ghost"}
-                      onClick={() => setPayTargetId(0)}
-                      style={{ width: "100%" }}
-                    >
-                      Новая подписка
-                    </button>
-                  </div>
-                  {data.subscriptions.length > 0 ? (
+                <h3 className="mysub-title">Оплата</h3>
+                {data.subscriptions.length > 0 ? (
+                  <div className="mysub-sub-box" style={{ marginBottom: "0.65rem" }}>
+                    <div className="form-field" style={{ marginBottom: "0.6rem" }}>
+                      <label>Новая подписка</label>
+                      <button
+                        type="button"
+                        className={payTargetId === 0 ? "primary" : "ghost"}
+                        onClick={() => setPayTargetId(0)}
+                        style={{ width: "100%" }}
+                      >
+                        Оформить ещё одну
+                      </button>
+                    </div>
                     <div className="form-field">
-                      <label>Все подписки пользователя</label>
+                      <label>Продлить или пополнить</label>
                       <div className="mysub-stat-list">
                         {data.subscriptions.map((s) => (
                           <button
@@ -393,174 +394,101 @@ export default function MySubPage() {
                             onClick={() => setPayTargetId(s.id)}
                           >
                             #{s.id} {s.name}
+                            {s.allowed ? " · активна" : ""}
                           </button>
                         ))}
                       </div>
                     </div>
-                  ) : null}
-                  {payTargetId === 0 ? (
-                    <div className="form-field" style={{ marginTop: "0.6rem" }}>
-                      <label>Название новой подписки</label>
-                      <input
-                        value={newSubName}
-                        onChange={(e) => setNewSubName(e.target.value.slice(0, 25))}
-                        placeholder={suggestedNewSubName || "Например: Для мамы"}
-                      />
-                      {suggestedNewSubName ? (
-                        <p className="field-hint" style={{ marginTop: "0.3rem" }}>
-                          Если оставить пустым, будет: «{suggestedNewSubName}».
-                        </p>
-                      ) : null}
-                    </div>
-                  ) : (
-                    <p className="sub" style={{ margin: "0.5rem 0 0" }}>
-                      Оплата будет зачислена в: #{payTargetSub?.id} {payTargetSub?.name}
-                    </p>
-                  )}
-                </div>
-                {data.subscriptions.length === 0 ? (
-                  <div className="mysub-sub-box">
-                    <p className="sub" style={{ marginBottom: "0.5rem" }}>
-                      У вас пока нет подписок. Выберите тариф и отправьте чек, после подтверждения администратором создадим подписку.
-                    </p>
-                    <div className="form-field">
-                      <label>Тариф</label>
-                      <select value={payPlanId} onChange={(e) => setPayPlanId(Number(e.target.value) || 1)}>
-                        {data.plans.map((p) => (
-                          <option key={p.id} value={p.id}>
-                            Тариф {p.id}: {p.total_gb > 0 ? `${p.total_gb} ГБ` : "безлимит"} / {p.days} дн. / {p.price_rub} ₽
-                          </option>
-                        ))}
-                      </select>
-                      <a className="mysub-pay-link-btn" href={data.payment_url} target="_blank" rel="noreferrer">
-                        Оплатить по ссылке
-                      </a>
-                    </div>
-                    <div className="form-field">
-                      <label>Фото чека</label>
-                      <label className="mysub-file-btn">
+                    {payTargetId === 0 ? (
+                      <div className="form-field" style={{ marginTop: "0.6rem" }}>
+                        <label>Название новой подписки</label>
                         <input
-                          className="mysub-file-input"
-                          type="file"
-                          accept="image/*"
-                          onChange={(e) => setPayPhoto(e.target.files?.[0] ?? null)}
+                          value={newSubName}
+                          onChange={(e) => setNewSubName(e.target.value.slice(0, 25))}
+                          placeholder={suggestedNewSubName || "Например: Для мамы"}
                         />
-                        Выберите файл
-                      </label>
-                      <p className="field-hint">{payPhoto ? `Выбрано: ${payPhoto.name}` : "Фото не выбрано."}</p>
-                    </div>
-                    <button type="button" className="primary" disabled={busyPay} onClick={() => void submitPaymentProof()}>
-                      {busyPay ? "Отправка..." : "Подтвердить оплату"}
-                    </button>
-                  </div>
-                ) : null}
-                {data.subscriptions.length > 1 ? (
-                  <div className="form-field">
-                    <label>Выберите подписку</label>
-                    <select
-                      value={pickedSubId > 0 ? String(pickedSubId) : ""}
-                      onChange={(e) => setPickedSubId(Number(e.target.value) || 0)}
-                    >
-                      <option value="">Выберите</option>
-                      {data.subscriptions.map((s) => (
-                        <option key={s.id} value={s.id}>
-                          #{s.id} {s.name}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                ) : null}
-                {pickedSub ? (
-                  <div className="mysub-sub-box">
-                    <p className="sub" style={{ marginBottom: "0.55rem" }}>
-                      #{pickedSub.id} {pickedSub.name} {pickedSub.allowed ? "• активна" : "• ограничена"}
-                    </p>
-                    <div className="mysub-stat-list">
-                      <div>Использовано: {pickedSub.used_text}</div>
-                      <div>Лимит: {pickedSub.total_text}</div>
-                      <div>
-                        Осталось:{" "}
-                        {pickedSub.total_gb > 0
-                          ? `${Math.max(
-                              0,
-                              pickedSub.total_gb -
-                                Math.floor((pickedSub.traffic_up + pickedSub.traffic_down) / (1024 * 1024 * 1024) * 100) / 100,
-                            ).toFixed(2)} ГБ`
-                          : "∞"}
+                        {suggestedNewSubName ? (
+                          <p className="field-hint" style={{ marginTop: "0.3rem" }}>
+                            Если оставить пустым, будет: «{suggestedNewSubName}».
+                          </p>
+                        ) : null}
                       </div>
-                      <div>
-                        Срок:{" "}
-                        {pickedSub.expiry_time > 0
-                          ? new Date(pickedSub.expiry_time).toLocaleDateString("ru-RU")
-                          : "без срока"}
-                      </div>
-                    </div>
-                    <div className="row-actions">
-                      <button
-                        type="button"
-                        className="ghost"
-                        onClick={() => {
-                          if (data.subscriptions.length > 1) openPick("copy");
-                          else void copySubscription(pickedSub.subscription_url);
-                        }}
-                      >
-                        Копировать подписку
-                      </button>
-                    </div>
-                    <hr style={{ borderColor: "var(--border)", opacity: 0.45, margin: "0.8rem 0" }} />
-                    <div className="form-field">
-                      <label>Тариф для оплаты</label>
-                      <select value={payPlanId} onChange={(e) => setPayPlanId(Number(e.target.value) || 1)}>
-                        {data.plans.map((p) => (
-                          <option key={p.id} value={p.id}>
-                            Тариф {p.id}: {p.total_gb > 0 ? `${p.total_gb} ГБ` : "безлимит"} / {p.days} дн. / {p.price_rub} ₽
-                          </option>
-                        ))}
-                      </select>
-                      <p className="field-hint" style={{ marginTop: "0.45rem" }}>
-                        1) Нажмите кнопку оплаты ниже.
-                        <br />
-                        2) В комментарии укажите номер тарифа.
-                        <br />
-                        3) Прикрепите фото чека ниже.
+                    ) : (
+                      <p className="sub" style={{ margin: "0.5rem 0 0" }}>
+                        Средства зачислим в подписку #{payTargetSub?.id} {payTargetSub?.name}
                       </p>
-                      <a className="mysub-pay-link-btn" href={data.payment_url} target="_blank" rel="noreferrer">
-                        Оплатить по ссылке
-                      </a>
+                    )}
+                  </div>
+                ) : null}
+                <div className="mysub-sub-box mysub-pay-panel">
+                  <p className="mysub-pay-lead">
+                    {data.subscriptions.length === 0
+                      ? "У вас пока нет подписок. Выберите тариф, оплатите и отправьте чек — после проверки администратором появится доступ."
+                      : payTargetId === 0
+                        ? "Оплата пойдёт на новую подписку — после подтверждения чека вы получите отдельный конфиг."
+                        : `Оплата для продления: #${payTargetSub?.id} ${payTargetSub?.name}.`}
+                  </p>
+                  <div className="mysub-pay-flow">
+                    <div className="mysub-pay-step">
+                      <span className="mysub-pay-step-badge">1</span>
+                      <div className="mysub-pay-step-body">
+                        <p className="mysub-pay-step-title">Тариф</p>
+                        <div className="mysub-plan-grid" role="radiogroup" aria-label="Тариф">
+                          {data.plans.map((p) => (
+                            <button
+                              key={p.id}
+                              type="button"
+                              role="radio"
+                              aria-checked={payPlanId === p.id}
+                              className={`mysub-plan-card ${payPlanId === p.id ? "is-selected" : ""}`.trim()}
+                              onClick={() => setPayPlanId(p.id)}
+                            >
+                              <span className="mysub-plan-card-title">{p.title.trim() || `Тариф ${p.id}`}</span>
+                              <span className="mysub-plan-card-meta">{formatMySubPlanMeta(p)}</span>
+                              <span className="mysub-plan-card-price">{p.price_rub} ₽</span>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
                     </div>
-                    <div className="form-field">
-                      <label>Фото чека</label>
-                      <label className="mysub-file-btn">
-                        <input
-                          className="mysub-file-input"
-                          type="file"
-                          accept="image/*"
-                          onChange={(e) => setPayPhoto(e.target.files?.[0] ?? null)}
-                        />
-                        Выберите файл
-                      </label>
-                      <p className="field-hint">{payPhoto ? `Выбрано: ${payPhoto.name}` : "Фото не выбрано."}</p>
+                    <div className="mysub-pay-step">
+                      <span className="mysub-pay-step-badge">2</span>
+                      <div className="mysub-pay-step-body">
+                        <p className="mysub-pay-step-title">Оплата</p>
+                        <p className="sub">В комментарии к переводу укажите номер тарифа: <b>{payPlanId}</b>.</p>
+                        <a className="mysub-pay-link-btn" href={data.payment_url} target="_blank" rel="noreferrer">
+                          Перейти к оплате
+                        </a>
+                      </div>
                     </div>
-                    <div className="row-actions">
-                      <button
-                        type="button"
-                        className="primary"
-                        disabled={busyPay}
-                        onClick={() => {
-                          if (data.subscriptions.length > 1 && !pickedSub) {
-                            openPick("pay");
-                            return;
-                          }
-                          void submitPaymentProof();
-                        }}
-                      >
-                        {busyPay ? "Отправка..." : "Подтвердить оплату"}
-                      </button>
+                    <div className="mysub-pay-step">
+                      <span className="mysub-pay-step-badge">3</span>
+                      <div className="mysub-pay-step-body">
+                        <p className="mysub-pay-step-title">Чек</p>
+                        <p className="sub">Прикрепите фото или скриншот чека — так мы быстрее найдём платёж.</p>
+                        <label className="mysub-file-btn">
+                          <input
+                            className="mysub-file-input"
+                            type="file"
+                            accept="image/*"
+                            onChange={(e) => setPayPhoto(e.target.files?.[0] ?? null)}
+                          />
+                          {payPhoto ? "Заменить файл" : "Выбрать фото чека"}
+                        </label>
+                        <p className="field-hint">{payPhoto ? `Выбрано: ${payPhoto.name}` : "Файл не выбран."}</p>
+                      </div>
                     </div>
                   </div>
-                ) : (
-                  <p className="sub">Выберите подписку, чтобы открыть ссылку.</p>
-                )}
+                  <button
+                    type="button"
+                    className="primary"
+                    style={{ width: "100%", marginTop: "0.35rem" }}
+                    disabled={busyPay}
+                    onClick={() => void submitPaymentProof()}
+                  >
+                    {busyPay ? "Отправка..." : "Отправить чек на проверку"}
+                  </button>
+                </div>
               </section>
             ) : tab === "friends" ? (
               <section className="mysub-section mysub-section-anim">
@@ -653,7 +581,7 @@ export default function MySubPage() {
             <div className="mysub-bottom-actions">
               {([
                 ["home", "Главная"],
-                ["subscription", "Подписка"],
+                ["subscription", "Оплата"],
                 ["friends", "Друзья"],
                 ["profile", "Профиль"],
               ] as Array<[Tab, string]>).map(([t, label]) => (
@@ -738,8 +666,7 @@ export default function MySubPage() {
                   setShowPickModal(false);
                   if (!selected) return;
                   setPickedSubId(selected.id);
-                  if (pickTarget === "copy") void copySubscription(selected.subscription_url);
-                  else setTab("subscription");
+                  void copySubscription(selected.subscription_url);
                 }}
               >
                 Выбрать
