@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { getUser, listUsers } from "../db.js";
 import { requireAuth } from "../middleware/requireAuth.js";
-import { sendTelegramHtml, sendTelegramPhotoBinary } from "../telegram/api.js";
+import { sendTelegramHtml, sendTelegramPhotoBinary, telegramHasDialog } from "../telegram/api.js";
 import { getTelegramBotToken } from "../telegram/env.js";
 
 const router = Router();
@@ -53,13 +53,20 @@ function uniqTargets(rows: TargetUserLite[]): Array<{ chatId: number; userId: nu
   return out;
 }
 
-router.get("/targets", (_req, res) => {
-  const users = listUsers().map((u) => ({
+router.get("/targets", async (_req, res) => {
+  const base = listUsers().map((u) => ({
     id: u.id,
     name: u.name,
     tg_id: u.tg_id,
     enable: u.enable === 1,
   }));
+  const users = await Promise.all(
+    base.map(async (u) => {
+      const chatId = toChatId(u.tg_id);
+      const has_chat = chatId ? await telegramHasDialog(chatId) : false;
+      return { ...u, has_chat };
+    }),
+  );
   res.json({ users });
 });
 

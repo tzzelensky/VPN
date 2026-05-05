@@ -83,6 +83,15 @@ export async function sendTelegramHtml(
   if (!r.ok) throw new Error(r.description ?? "sendMessage failed");
 }
 
+/**
+ * Проверка, есть ли у бота доступ к чату (диалог начат и бот не заблокирован).
+ * Возвращает false при любой ошибке/недоступности.
+ */
+export async function telegramHasDialog(chatId: number): Promise<boolean> {
+  const r = await tgCall<unknown>("getChat", { chat_id: chatId });
+  return r.ok;
+}
+
 export async function answerCallbackQuery(
   callbackQueryId: string,
   opts?: { text?: string; show_alert?: boolean },

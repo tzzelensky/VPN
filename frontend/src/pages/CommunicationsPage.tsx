@@ -254,148 +254,177 @@ export default function CommunicationsPage({ onLogout }: { onLogout: () => void 
       </section>
 
       <section className="panel comms-panel">
-        <div className="comms-mode-row">
-          <button
-            type="button"
-            className={mode === "global" ? "primary" : "ghost"}
-            disabled={busy}
-            onClick={() => setMode("global")}
-          >
-            Глобально всем клиентам
-          </button>
-          <button
-            type="button"
-            className={mode === "single" ? "primary" : "ghost"}
-            disabled={busy}
-            onClick={() => setMode("single")}
-          >
-            Сообщение выбранному клиенту
-          </button>
-          <button
-            type="button"
-            className={mode === "selected" ? "primary" : "ghost"}
-            disabled={busy}
-            onClick={() => setMode("selected")}
-          >
-            Выбор клиентов
-          </button>
-        </div>
-
-        <div className="form-field" style={{ marginTop: "0.75rem" }}>
-          <div className="shop-toggle-row">
-            <div>
-              <label>Пометка сообщения</label>
-              <p className="field-hint" style={{ marginTop: "0.2rem" }}>
-                Автосохранение включено. По умолчанию используется «Сообщение от администратора».
-              </p>
-            </div>
-            <button
-              type="button"
-              className={`toggle ${markEnabled ? "on" : ""}`}
-              aria-pressed={markEnabled}
-              disabled={busy}
-              onClick={() => setMarkEnabled((v) => !v)}
-            />
-          </div>
-          {markEnabled ? (
-            <input
-              value={markText}
-              disabled={busy}
-              onChange={(e) => setMarkText(e.target.value)}
-              placeholder="Сообщение от администратора"
-            />
-          ) : null}
-        </div>
-
-        {mode === "single" ? (
-          <div className="form-field" style={{ marginTop: "0.9rem" }}>
-            <label>Клиент</label>
-            <select
-              value={userId > 0 ? String(userId) : ""}
-              disabled={busy}
-              onChange={(e) => setUserId(Number(e.target.value) || 0)}
-            >
-              <option value="">Выберите клиента</option>
-              {reachable.map((u) => (
-                <option key={u.id} value={u.id}>
-                  #{u.id} {u.name} ({u.enable ? "вкл" : "выкл"})
-                </option>
-              ))}
-            </select>
-          </div>
-        ) : mode === "selected" ? (
-          <div className="form-field" style={{ marginTop: "0.9rem" }}>
-            <label>Выбранные клиенты</label>
-            <div className="comms-selected-row">
-              <button type="button" className="ghost" disabled={busy} onClick={openPicker}>
+        <div className="comms-layout">
+          <div className="comms-left">
+            <div className="comms-mode-row">
+              <button
+                type="button"
+                className={mode === "global" ? "primary" : "ghost"}
+                disabled={busy}
+                onClick={() => setMode("global")}
+              >
+                Глобально всем клиентам
+              </button>
+              <button
+                type="button"
+                className={mode === "single" ? "primary" : "ghost"}
+                disabled={busy}
+                onClick={() => setMode("single")}
+              >
+                Сообщение выбранному клиенту
+              </button>
+              <button
+                type="button"
+                className={mode === "selected" ? "primary" : "ghost"}
+                disabled={busy}
+                onClick={() => setMode("selected")}
+              >
                 Выбор клиентов
               </button>
-              <span className="field-hint">Выбрано: {selectedUsers.length}</span>
             </div>
-            {selectedUsers.length > 0 ? (
-              <div className="comms-selected-chips">
-                {selectedUsers.slice(0, 8).map((u) => (
-                  <span key={u.id} className="comms-chip">
-                    #{u.id} {u.name}
-                  </span>
-                ))}
-                {selectedUsers.length > 8 ? <span className="comms-chip">+{selectedUsers.length - 8}</span> : null}
+
+            <div className="form-field" style={{ marginTop: "0.75rem" }}>
+              <div className="shop-toggle-row">
+                <div>
+                  <label>Пометка сообщения</label>
+                  <p className="field-hint" style={{ marginTop: "0.2rem" }}>
+                    Автосохранение включено. По умолчанию используется «Сообщение от администратора».
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  className={`toggle ${markEnabled ? "on" : ""}`}
+                  aria-pressed={markEnabled}
+                  disabled={busy}
+                  onClick={() => setMarkEnabled((v) => !v)}
+                />
+              </div>
+              {markEnabled ? (
+                <input
+                  value={markText}
+                  disabled={busy}
+                  onChange={(e) => setMarkText(e.target.value)}
+                  placeholder="Сообщение от администратора"
+                />
+              ) : null}
+            </div>
+
+            {mode === "single" ? (
+              <div className="form-field" style={{ marginTop: "0.9rem" }}>
+                <label>Клиент</label>
+                <select
+                  value={userId > 0 ? String(userId) : ""}
+                  disabled={busy}
+                  onChange={(e) => setUserId(Number(e.target.value) || 0)}
+                >
+                  <option value="">Выберите клиента</option>
+                  {reachable.map((u) => (
+                    <option key={u.id} value={u.id}>
+                      #{u.id} {u.name} ({u.enable ? "вкл" : "выкл"})
+                    </option>
+                  ))}
+                </select>
+              </div>
+            ) : mode === "selected" ? (
+              <div className="form-field" style={{ marginTop: "0.9rem" }}>
+                <label>Выбранные клиенты</label>
+                <div className="comms-selected-row">
+                  <button type="button" className="ghost" disabled={busy} onClick={openPicker}>
+                    Выбор клиентов
+                  </button>
+                  <span className="field-hint">Выбрано: {selectedUsers.length}</span>
+                </div>
+                {selectedUsers.length > 0 ? (
+                  <div className="comms-selected-chips">
+                    {selectedUsers.slice(0, 8).map((u) => (
+                      <span key={u.id} className="comms-chip">
+                        #{u.id} {u.name}
+                      </span>
+                    ))}
+                    {selectedUsers.length > 8 ? <span className="comms-chip">+{selectedUsers.length - 8}</span> : null}
+                  </div>
+                ) : null}
+              </div>
+            ) : (
+              <p className="sub" style={{ marginTop: "0.9rem", marginBottom: "0.6rem" }}>
+                Будет отправлено по {reachable.length} Telegram chat id.
+              </p>
+            )}
+
+            <div className="form-field">
+              <label>Текст сообщения</label>
+              <textarea
+                className="comms-textarea"
+                value={text}
+                disabled={busy}
+                onChange={(e) => setText(e.target.value)}
+                placeholder="Введите сообщение для отправки..."
+              />
+            </div>
+
+            <div className="form-field" style={{ marginTop: "0.8rem" }}>
+              <label>Фото (опционально)</label>
+              <div className="comms-file-row">
+                <label className={`ghost comms-file-btn ${busy ? "disabled" : ""}`}>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    disabled={busy}
+                    className="comms-file-input"
+                    onChange={(e) => setPhoto(e.target.files?.[0] ?? null)}
+                  />
+                  Выбор файла
+                </label>
+                <span className="comms-file-name">{photo ? photo.name : "Не выбран ни один файл"}</span>
+              </div>
+              <p className="field-hint">{photo ? `Фото: ${photo.name}` : "Фото не выбрано."}</p>
+            </div>
+
+            <div className="row-actions">
+              <button type="button" className="primary" disabled={busy} onClick={() => void submit()}>
+                {busy ? "Отправка..." : "Отправить"}
+              </button>
+            </div>
+
+            {lastResult && lastResult.failures.length > 0 ? (
+              <div className="comms-failures">
+                <h3>Ошибки доставки</h3>
+                <ul>
+                  {lastResult.failures.map((f) => (
+                    <li key={`${f.user_id}:${f.error}`}>
+                      #{f.user_id} {f.user_name}: {f.error}
+                    </li>
+                  ))}
+                </ul>
               </div>
             ) : null}
           </div>
-        ) : (
-          <p className="sub" style={{ marginTop: "0.9rem", marginBottom: "0.6rem" }}>
-            Будет отправлено по {reachable.length} Telegram chat id.
-          </p>
-        )}
-
-        <div className="form-field">
-          <label>Текст сообщения</label>
-          <textarea
-            className="comms-textarea"
-            value={text}
-            disabled={busy}
-            onChange={(e) => setText(e.target.value)}
-            placeholder="Введите сообщение для отправки..."
-          />
+          <aside className="comms-right" aria-label="Список клиентов и статус чата">
+            <label className="referral-feed-label">Все пользователи</label>
+            <p className="field-hint referral-feed-hint">`tg-id` и наличие диалога с ботом.</p>
+            <div className="ref-ios-wheel" role="log">
+              <div className="ref-ios-wheel-mask" aria-hidden="true" />
+              <div className="ref-ios-wheel-scroll">
+                {targets.length === 0 ? (
+                  <p className="sub ref-ios-empty">Пользователей пока нет.</p>
+                ) : (
+                  targets.map((u) => {
+                    const hasChat = u.has_chat === true;
+                    return (
+                      <div key={u.id} className="ref-ios-row">
+                        <span className="ref-ios-line">
+                          #{u.id} {u.name}
+                        </span>
+                        <span className="ref-ios-date">tg-id: {u.tg_id || "—"}</span>
+                        <span className={`comms-chat-pill ${hasChat ? "ok" : "no"}`}>{hasChat ? "чат есть" : "чата нет"}</span>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+          </aside>
         </div>
-
-        <div className="form-field" style={{ marginTop: "0.8rem" }}>
-          <label>Фото (опционально)</label>
-          <div className="comms-file-row">
-            <label className={`ghost comms-file-btn ${busy ? "disabled" : ""}`}>
-              <input
-                type="file"
-                accept="image/*"
-                disabled={busy}
-                className="comms-file-input"
-                onChange={(e) => setPhoto(e.target.files?.[0] ?? null)}
-              />
-              Выбор файла
-            </label>
-            <span className="comms-file-name">{photo ? photo.name : "Не выбран ни один файл"}</span>
-          </div>
-          <p className="field-hint">{photo ? `Фото: ${photo.name}` : "Фото не выбрано."}</p>
-        </div>
-
-        <div className="row-actions">
-          <button type="button" className="primary" disabled={busy} onClick={() => void submit()}>
-            {busy ? "Отправка..." : "Отправить"}
-          </button>
-        </div>
-
-        {lastResult && lastResult.failures.length > 0 ? (
-          <div className="comms-failures">
-            <h3>Ошибки доставки</h3>
-            <ul>
-              {lastResult.failures.map((f) => (
-                <li key={`${f.user_id}:${f.error}`}>
-                  #{f.user_id} {f.user_name}: {f.error}
-                </li>
-              ))}
-            </ul>
-          </div>
-        ) : null}
       </section>
 
       {pickerOpen ? (

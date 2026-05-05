@@ -422,6 +422,7 @@ export type CommunicationTargetDto = {
   name: string;
   tg_id: string;
   enable: boolean;
+  has_chat: boolean;
 };
 
 export async function listCommunicationTargets(): Promise<{ users: CommunicationTargetDto[] }> {
