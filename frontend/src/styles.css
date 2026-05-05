@@ -1113,13 +1113,14 @@ th {
 
 .shop-layout-with-feed {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(18rem, 22rem);
+  grid-template-columns: minmax(0, 1.55fr) minmax(0, 1fr);
   gap: 1rem 1.25rem;
   align-items: stretch;
 }
 
 .shop-feed {
   min-width: 0;
+  width: 100%;
   display: flex;
   flex-direction: column;
   align-self: stretch;

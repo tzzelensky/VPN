@@ -193,9 +193,9 @@ export default function SubscriptionShopPage({ onLogout }: { onLogout: () => voi
                   </div>
                 ))}
               </div>
-              <aside className="shop-feed" aria-label="Кто и какой тариф купил">
-                <label className="referral-feed-label">Покупки тарифов</label>
-                <p className="field-hint referral-feed-hint">Клиент и активированный тариф.</p>
+              <aside className="shop-feed" aria-label="Текущие тарифы пользователей">
+                <label className="referral-feed-label">Тарифы у пользователей сейчас</label>
+                <p className="field-hint referral-feed-hint">Клиент и его текущий тариф/лимит.</p>
                 <div className="ref-ios-wheel" role="log">
                   <div className="ref-ios-wheel-mask" aria-hidden="true" />
                   <div className="ref-ios-wheel-scroll">
