@@ -92,6 +92,7 @@ export default function CommunicationsPage({ onLogout }: { onLogout: () => void 
   const [pickerLeft, setPickerLeft] = useState<number[]>([]);
   const [pickerRight, setPickerRight] = useState<number[]>([]);
   const [query, setQuery] = useState("");
+  const [usersQuery, setUsersQuery] = useState("");
   const [text, setText] = useState("");
   const [photo, setPhoto] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
@@ -135,6 +136,11 @@ export default function CommunicationsPage({ onLogout }: { onLogout: () => void 
   const pickerRightList = useMemo(() => {
     return pickerRight.map((id) => reachableById.get(id)).filter((x): x is CommunicationTargetDto => Boolean(x));
   }, [pickerRight, reachableById]);
+  const usersRightList = useMemo(() => {
+    const q = usersQuery.trim().toLowerCase();
+    if (!q) return targets;
+    return targets.filter((u) => `${u.id} ${u.name} ${u.tg_id}`.toLowerCase().includes(q));
+  }, [targets, usersQuery]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -401,13 +407,19 @@ export default function CommunicationsPage({ onLogout }: { onLogout: () => void 
           </div>
           <aside className="comms-right" aria-label="Список клиентов и статус чата">
             <label className="referral-feed-label">Все пользователи</label>
+            <input
+              className="comms-users-search"
+              value={usersQuery}
+              onChange={(e) => setUsersQuery(e.target.value)}
+              placeholder="Поиск: id, имя, tg-id"
+            />
             <div className="ref-ios-wheel" role="log">
               <div className="ref-ios-wheel-mask" aria-hidden="true" />
               <div className="ref-ios-wheel-scroll">
-                {targets.length === 0 ? (
+                {usersRightList.length === 0 ? (
                   <p className="sub ref-ios-empty">Пользователей пока нет.</p>
                 ) : (
-                  targets.map((u) => {
+                  usersRightList.map((u) => {
                     const hasChat = u.has_chat === true;
                     return (
                       <div key={u.id} className="ref-ios-row">
