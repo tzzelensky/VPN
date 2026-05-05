@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import {
+  applyPromoCodeForUser,
   claimReferralReward,
   findUsersByTelegramChatId,
   getReferralReward,
@@ -9,6 +10,7 @@ import {
   getUser,
   listReferralRewardsForInviterUsers,
   markPaymentSessionPendingAdmin,
+  registerPromoCodeUsage,
   startPaymentAwaitingProof,
   updateUserRow,
   userAllowedOnServers,
@@ -38,6 +40,7 @@ type SendProofBody = {
   photo_mime?: unknown;
   photo_name?: unknown;
   new_subscription_name?: unknown;
+  promo_code?: unknown;
 };
 type ClaimReferralBody = {
   init_data?: unknown;
@@ -271,6 +274,42 @@ router.post("/webapp/referral-reward", async (req, res) => {
   res.json({ ok: true });
 });
 
+router.post("/webapp/promo/preview", async (req, res) => {
+  const body = (req.body ?? {}) as { init_data?: unknown; code?: unknown; original_price_rub?: unknown };
+  const initData = String(body.init_data ?? "").trim();
+  const ver = verifyTelegramWebAppInitData(initData);
+  if (!ver.ok) {
+    res.status(401).json({ error: "tg_webapp_auth_required", reason: ver.reason });
+    return;
+  }
+  const tgId = parseTgId(String(ver.user.id ?? ""));
+  const code = String(body.code ?? "").trim();
+  const original = Math.max(0, Math.floor(Number(body.original_price_rub) || 0));
+  if (!tgId || !code) {
+    res.status(400).json({ error: "bad_payload" });
+    return;
+  }
+  try {
+    const calc = applyPromoCodeForUser({
+      code,
+      tg_user_id: tgId,
+      original_price_rub: original,
+    });
+    res.json(calc);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    if (msg === "promo_not_found") {
+      res.status(404).json({ error: msg });
+      return;
+    }
+    if (msg === "promo_already_used") {
+      res.status(409).json({ error: msg });
+      return;
+    }
+    res.status(400).json({ error: msg });
+  }
+});
+
 function parseDataUrl(input: string): { mime: string; bytes: Uint8Array } | null {
   const m = /^data:([^;,]+);base64,(.+)$/i.exec(input.trim());
   if (!m) return null;
@@ -302,6 +341,7 @@ router.post("/webapp/payment-proof", async (req, res) => {
     return;
   }
   const newSubscriptionName = String(body.new_subscription_name ?? "").trim().slice(0, 25);
+  const promoCode = String(body.promo_code ?? "").trim().toUpperCase();
   const linked = findUsersByTelegramChatId(tgId);
   const target = userId > 0 ? linked.find((u) => u.id === userId) ?? null : null;
   if (userId > 0 && !target) {
@@ -320,6 +360,32 @@ router.post("/webapp/payment-proof", async (req, res) => {
     res.status(400).json({ error: "bad_plan" });
     return;
   }
+  let finalPrice = plan.price_rub;
+  let discountLine = "";
+  if (promoCode) {
+    try {
+      const calc = applyPromoCodeForUser({
+        code: promoCode,
+        tg_user_id: tgId,
+        original_price_rub: plan.price_rub,
+      });
+      finalPrice = calc.final_price_rub;
+      discountLine = `\nПромокод: <b>${calc.promo.code}</b> (скидка ${calc.discount_percent}%)`;
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (msg === "promo_not_found") {
+        res.status(404).json({ error: msg });
+        return;
+      }
+      if (msg === "promo_already_used") {
+        res.status(409).json({ error: msg });
+        return;
+      }
+      res.status(400).json({ error: msg });
+      return;
+    }
+  }
+
   const caption =
     `<b>Оплата из WebApp</b>\n` +
     `Пользователь: <b>${String(ver.user.first_name ?? "").trim() || target?.name || "Пользователь"}</b> (chat <code>${tgId}</code>)\n` +
@@ -327,7 +393,8 @@ router.post("/webapp/payment-proof", async (req, res) => {
       ? `Подписка: <b>#${target.id} ${target.name}</b>\n`
       : `Новая подписка: <b>${newSubscriptionName || "Без названия"}</b>\n`) +
     `Тариф: <b>${plan.id}</b> — ${plan.total_gb > 0 ? `${plan.total_gb} ГБ` : "безлимит"} / ${plan.days} дн.\n` +
-    `Сумма: <b>${plan.price_rub} ₽</b>`;
+    (promoCode ? `Сумма: <s>${plan.price_rub} ₽</s> <b>${finalPrice} ₽</b>` : `Сумма: <b>${plan.price_rub} ₽</b>`) +
+    discountLine;
   const sessionId = startPaymentAwaitingProof(
     tgId,
     tgId,
@@ -337,6 +404,19 @@ router.post("/webapp/payment-proof", async (req, res) => {
     target ? undefined : newSubscriptionName || "Новая подписка",
     { username: String(ver.user.username ?? "").trim() || undefined, first_name: String(ver.user.first_name ?? "").trim() || undefined },
   );
+  if (promoCode) {
+    try {
+      registerPromoCodeUsage({
+        code: promoCode,
+        tg_user_id: tgId,
+        tg_username: String(ver.user.username ?? "").trim() || undefined,
+        tg_first_name: String(ver.user.first_name ?? "").trim() || undefined,
+        session_id: sessionId,
+      });
+    } catch {
+      // no-op: validated above, ignore race
+    }
+  }
   markPaymentSessionPendingAdmin(sessionId, "webapp");
 
   let sent = 0;

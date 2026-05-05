@@ -1,4 +1,5 @@
 import {
+  applyPromoCodeForUser,
   claimReferralReward,
   consumeReferralInviteByTgUser,
   createReferralReward,
@@ -12,8 +13,10 @@ import {
   getReferralProgram,
   getReferralReward,
   getUser,
+  getPromoCodeByText,
   getPaymentSession,
   getSubscriptionShop,
+  registerPromoCodeUsage,
   markPaymentSessionPendingAdmin,
   snapExpiryTimeToNoonLocal,
   startPaymentAwaitingProof,
@@ -42,6 +45,17 @@ export type TopUpPlanRuntimeMeta = {
   add_gb: number;
   priceRub: number;
 };
+
+type PromoContext = {
+  target_user_id?: number;
+  new_subscription_name?: string;
+};
+
+const promoContextByChat = new Map<number, PromoContext>();
+
+export function getPromoContext(chatId: number): PromoContext | undefined {
+  return promoContextByChat.get(chatId);
+}
 
 export function getPlanRuntimeMeta(planId: PaymentPlanId): PlanRuntimeMeta {
   const row = getSubscriptionShop().plans.find((p) => p.id === planId);
@@ -125,6 +139,7 @@ export function vpnPlansKeyboard(targetUserId?: number) {
   const rows = shop.plans.map((p) => [
     { text: planPickerButtonLabel(p), callback_data: targetUserId ? `pplan:${p.id}:${targetUserId}` : `pplan:${p.id}` },
   ]);
+  rows.push([{ text: "🎟 Применить промокод", callback_data: "promoask" }]);
   rows.push([{ text: "« Главное меню", callback_data: "home" }]);
   return { inline_keyboard: rows };
 }
@@ -135,6 +150,7 @@ export function vpnPlansKeyboardDiscounted(discountPercent: number) {
     const newPrice = Math.max(0, Math.floor(p.price_rub - (p.price_rub * discountPercent) / 100));
     return [{ text: planPickerButtonLabelWithPrice(p, newPrice), callback_data: `pplan:${p.id}` }];
   });
+  rows.push([{ text: "🎟 Применить промокод", callback_data: "promoask" }]);
   rows.push([{ text: "« Главное меню", callback_data: "home" }]);
   return { inline_keyboard: rows };
 }
@@ -152,6 +168,27 @@ function referralRewardKeyboard(rewardId: string, gb: number, days: number) {
 export function vpnPlansKeyboardForNew() {
   const shop = getSubscriptionShop();
   const rows = shop.plans.map((p) => [{ text: planPickerButtonLabel(p), callback_data: `pplannew:${p.id}` }]);
+  rows.push([{ text: "🎟 Применить промокод", callback_data: "promoask" }]);
+  rows.push([{ text: "« Главное меню", callback_data: "home" }]);
+  return { inline_keyboard: rows };
+}
+
+export function vpnPlansKeyboardPromo(code: string, targetUserId?: number) {
+  const promo = String(code ?? "").trim().toUpperCase();
+  const promoRow = getPromoCodeByText(promo);
+  if (!promoRow) return vpnPlansKeyboard(targetUserId);
+  const shop = getSubscriptionShop();
+  const rows = shop.plans.map((p) => {
+    const finalPrice = Math.max(0, Math.floor(p.price_rub - (p.price_rub * promoRow.discount_percent) / 100));
+    const gb = p.total_gb > 0 ? `${p.total_gb} ГБ` : "безлимит";
+    const text = `${p.id} — ${gb} / ${p.days} дн. — ${finalPrice} ₽`;
+    return [
+      {
+        text: text.length > 58 ? `${text.slice(0, 55)}…` : text,
+        callback_data: targetUserId ? `pplanpromo:${p.id}:${promo}:${targetUserId}` : `pplanpromo:${p.id}:${promo}`,
+      },
+    ];
+  });
   rows.push([{ text: "« Главное меню", callback_data: "home" }]);
   return { inline_keyboard: rows };
 }
@@ -194,6 +231,12 @@ export async function sendVpnPlanPicker(
   targetUserId?: number,
   newSubscriptionName?: string,
 ): Promise<void> {
+  promoContextByChat.set(chatId, {
+    ...(targetUserId && targetUserId > 0 ? { target_user_id: targetUserId } : {}),
+    ...(newSubscriptionName && String(newSubscriptionName).trim()
+      ? { new_subscription_name: String(newSubscriptionName).trim() }
+      : {}),
+  });
   const linked = findUsersByTelegramChatId(tgUserId);
   const shop = getSubscriptionShop();
   if (linked.length === 0 && shop.sales_disabled) {
@@ -276,6 +319,7 @@ export async function onVpnPlanChosen(
   targetUserId?: number,
   newSubscriptionName?: string,
   from?: TgFromLite,
+  promoCode?: string,
 ): Promise<void> {
   const linked = findUsersByTelegramChatId(tgUserId);
   const shop = getSubscriptionShop();
@@ -298,12 +342,28 @@ export async function onVpnPlanChosen(
   const refCfg = getReferralProgram();
   const discountPercent =
     !target && !newName && linked.length === 0 && invite && refCfg.enabled ? refCfg.invited_discount_percent : 0;
-  const finalPrice = Math.max(0, Math.floor(meta.priceRub - (meta.priceRub * discountPercent) / 100));
+  const cleanPromo = String(promoCode ?? "").trim().toUpperCase();
+  const promoCalc =
+    cleanPromo && getPromoCodeByText(cleanPromo)
+      ? applyPromoCodeForUser({ code: cleanPromo, tg_user_id: tgUserId, original_price_rub: meta.priceRub })
+      : null;
+  const finalPrice = promoCalc
+    ? promoCalc.final_price_rub
+    : Math.max(0, Math.floor(meta.priceRub - (meta.priceRub * discountPercent) / 100));
   const payUrl = effectivePaymentUrl();
-  startPaymentAwaitingProof(chatId, tgUserId, planId, "subscription", target?.id, newName || undefined, {
+  const sessionId = startPaymentAwaitingProof(chatId, tgUserId, planId, "subscription", target?.id, newName || undefined, {
     username: from?.username,
     first_name: from?.first_name,
   }, { inviter_user_id: invite?.inviter_user_id, discount_percent: discountPercent });
+  if (promoCalc) {
+    registerPromoCodeUsage({
+      code: promoCalc.promo.code,
+      tg_user_id: tgUserId,
+      tg_username: from?.username,
+      tg_first_name: from?.first_name,
+      session_id: sessionId,
+    });
+  }
   const linkEsc = escHtml(payUrl);
   const body =
     `<b>Выбрано:</b> ${escHtml(planSummary(meta))}\n` +
@@ -312,7 +372,12 @@ export async function onVpnPlanChosen(
       : target
         ? `<b>Подписка:</b> ${escHtml(userTargetTitle(target))}\n`
         : "") +
-    (discountPercent > 0
+    (promoCalc
+      ? `<b>Скидка применилась! Стоимость тарифа ${promoCalc.final_price_rub} руб</b>\n` +
+        `<b>Сумма к оплате:</b> <s>${meta.priceRub} ₽</s> <b>${promoCalc.final_price_rub} ₽</b> (промокод ${escHtml(
+          promoCalc.promo.code,
+        )})\n\n`
+      : discountPercent > 0
       ? `<b>Сумма к оплате:</b> <s>${meta.priceRub} ₽</s> <b>${finalPrice} ₽</b> (скидка ${discountPercent}%)\n\n`
       : `<b>Сумма к оплате:</b> ${meta.priceRub} ₽\n\n`) +
     `<b>Ссылка для оплаты:</b>\n<a href="${linkEsc}">${linkEsc}</a>\n\n` +

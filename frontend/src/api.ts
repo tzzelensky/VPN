@@ -548,6 +548,7 @@ export async function sendMySubPaymentProof(payload: {
   photo_mime?: string;
   photo_name?: string;
   new_subscription_name?: string;
+  promo_code?: string;
 }): Promise<{ ok: boolean }> {
   const res = await fetch("/api/mysub/webapp/payment-proof", {
     method: "POST",
@@ -563,6 +564,72 @@ export async function claimMySubReferralReward(payload: {
   kind: "gb" | "days";
 }): Promise<{ ok: boolean }> {
   const res = await fetch("/api/mysub/webapp/referral-reward", {
+    method: "POST",
+    headers: jsonHeaders,
+    body: JSON.stringify(payload),
+  });
+  return handle(res);
+}
+
+export type PromoCodeDto = {
+  id: string;
+  name: string;
+  code: string;
+  discount_percent: number;
+  one_time_per_user: boolean;
+  created_at: string;
+  updated_at: string;
+  usages_count: number;
+};
+
+export type PromoCodeUsageDto = {
+  id: string;
+  promo_id: string;
+  promo_code: string;
+  tg_user_id: number;
+  tg_username?: string;
+  tg_first_name?: string;
+  applied_at: string;
+  session_id?: string;
+};
+
+export async function listPromoCodes(): Promise<{ promos: PromoCodeDto[] }> {
+  const res = await fetch("/api/promo-codes", { credentials: "include" });
+  return handle(res);
+}
+
+export async function createPromoCode(payload: {
+  name: string;
+  code: string;
+  discount_percent: number;
+  one_time_per_user: boolean;
+}): Promise<PromoCodeDto> {
+  const res = await fetch("/api/promo-codes", {
+    method: "POST",
+    credentials: "include",
+    headers: jsonHeaders,
+    body: JSON.stringify(payload),
+  });
+  return handle(res);
+}
+
+export async function listPromoCodeUsages(promoId: string): Promise<{ usages: PromoCodeUsageDto[] }> {
+  const res = await fetch(`/api/promo-codes/${encodeURIComponent(promoId)}/usages`, { credentials: "include" });
+  return handle(res);
+}
+
+export async function previewMySubPromoCode(payload: {
+  init_data: string;
+  code: string;
+  original_price_rub: number;
+}): Promise<{
+  promo: { code: string; discount_percent: number };
+  final_price_rub: number;
+  original_price_rub: number;
+  discount_rub: number;
+  discount_percent: number;
+}> {
+  const res = await fetch("/api/mysub/webapp/promo/preview", {
     method: "POST",
     headers: jsonHeaders,
     body: JSON.stringify(payload),

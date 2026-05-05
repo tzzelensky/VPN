@@ -7,6 +7,7 @@ import UsersPage from "./pages/UsersPage";
 import SubscriptionShopPage from "./pages/SubscriptionShopPage";
 import CommunicationsPage from "./pages/CommunicationsPage";
 import ReferralProgramPage from "./pages/ReferralProgramPage";
+import PromoCodesPage from "./pages/PromoCodesPage";
 import MySubPage from "./pages/MySubPage";
 
 function useSession() {
@@ -79,6 +80,10 @@ export default function App() {
       <Route
         path="/referral-program"
         element={loggedIn ? <ReferralProgramPage onLogout={() => setLoggedIn(false)} /> : <Navigate to="/login" replace />}
+      />
+      <Route
+        path="/promo-codes"
+        element={loggedIn ? <PromoCodesPage onLogout={() => setLoggedIn(false)} /> : <Navigate to="/login" replace />}
       />
       <Route path="/mysub" element={<MySubPage />} />
       <Route path="/mysub/:tgId" element={<MySubPage />} />

@@ -46,6 +46,9 @@ export default function DashboardLayout({
           >
             Реферальная программа
           </NavLink>
+          <NavLink to="/promo-codes" className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
+            Промокоды
+          </NavLink>
         </nav>
         <button type="button" className="ghost" onClick={() => void doLogout()}>
           Выйти

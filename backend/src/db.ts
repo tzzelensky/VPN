@@ -182,6 +182,27 @@ export type ReferralRewardRow = {
   created_at: string;
 };
 
+export type PromoCodeRow = {
+  id: string;
+  name: string;
+  code: string;
+  discount_percent: number;
+  one_time_per_user: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+export type PromoCodeUsageRow = {
+  id: string;
+  promo_id: string;
+  promo_code: string;
+  tg_user_id: number;
+  tg_username?: string;
+  tg_first_name?: string;
+  applied_at: string;
+  session_id?: string;
+};
+
 export type ServerRow = {
   id: number;
   name: string;
@@ -226,6 +247,8 @@ type FileStore = {
   referral_program: ReferralProgramConfig;
   referral_invites: ReferralInviteRow[];
   referral_rewards: ReferralRewardRow[];
+  promo_codes: PromoCodeRow[];
+  promo_code_usages: PromoCodeUsageRow[];
 };
 
 function defaultSubscriptionShop(): SubscriptionShopConfig {
@@ -268,6 +291,49 @@ function emptyStore(): FileStore {
     referral_program: defaultReferralProgram(),
     referral_invites: [],
     referral_rewards: [],
+    promo_codes: [],
+    promo_code_usages: [],
+  };
+}
+
+function normalizePromoCode(raw: unknown): PromoCodeRow | null {
+  if (!raw || typeof raw !== "object") return null;
+  const o = raw as Record<string, unknown>;
+  const id = String(o.id ?? "").trim();
+  const code = String(o.code ?? "")
+    .trim()
+    .toUpperCase();
+  if (!id || !code) return null;
+  return {
+    id,
+    name: String(o.name ?? "").trim() || code,
+    code,
+    discount_percent: Math.min(99, Math.max(1, Math.floor(Number(o.discount_percent) || 0))),
+    one_time_per_user: o.one_time_per_user === true || o.one_time_per_user === 1 || o.one_time_per_user === "1",
+    created_at: String(o.created_at ?? new Date().toISOString()),
+    updated_at: String(o.updated_at ?? o.created_at ?? new Date().toISOString()),
+  };
+}
+
+function normalizePromoCodeUsage(raw: unknown): PromoCodeUsageRow | null {
+  if (!raw || typeof raw !== "object") return null;
+  const o = raw as Record<string, unknown>;
+  const id = String(o.id ?? "").trim();
+  const promo_id = String(o.promo_id ?? "").trim();
+  const promo_code = String(o.promo_code ?? "")
+    .trim()
+    .toUpperCase();
+  const tg_user_id = Number(o.tg_user_id);
+  if (!id || !promo_id || !promo_code || !Number.isFinite(tg_user_id) || tg_user_id <= 0) return null;
+  return {
+    id,
+    promo_id,
+    promo_code,
+    tg_user_id: Math.floor(tg_user_id),
+    tg_username: String(o.tg_username ?? "").trim() || undefined,
+    tg_first_name: String(o.tg_first_name ?? "").trim() || undefined,
+    applied_at: String(o.applied_at ?? new Date().toISOString()),
+    session_id: String(o.session_id ?? "").trim() || undefined,
   };
 }
 
@@ -584,6 +650,16 @@ function readStore(): FileStore {
         } as ReferralRewardRow;
       })
       .filter((x): x is ReferralRewardRow => x != null);
+    const promoCodesRaw = Array.isArray((parsed as { promo_codes?: unknown }).promo_codes)
+      ? (parsed as { promo_codes: unknown[] }).promo_codes
+      : [];
+    const promo_codes = promoCodesRaw.map((x) => normalizePromoCode(x)).filter((x): x is PromoCodeRow => x != null);
+    const promoUsagesRaw = Array.isArray((parsed as { promo_code_usages?: unknown }).promo_code_usages)
+      ? (parsed as { promo_code_usages: unknown[] }).promo_code_usages
+      : [];
+    const promo_code_usages = promoUsagesRaw
+      .map((x) => normalizePromoCodeUsage(x))
+      .filter((x): x is PromoCodeUsageRow => x != null);
     return {
       subscription_token: parsed.subscription_token ?? null,
       next_server_id: Number(parsed.next_server_id) > 0 ? Number(parsed.next_server_id) : 1,
@@ -598,6 +674,8 @@ function readStore(): FileStore {
       referral_program: normalizeReferralProgram((parsed as { referral_program?: unknown }).referral_program),
       referral_invites,
       referral_rewards,
+      promo_codes,
+      promo_code_usages,
     };
   } catch {
     return emptyStore();
@@ -1346,4 +1424,133 @@ export function initDb(): void {
   }
   repairBrokenSubTokens();
   repairUsersRealityFromPeers();
+}
+
+export function listPromoCodes(): PromoCodeRow[] {
+  const rows = readStore().promo_codes ?? [];
+  return [...rows].sort((a, b) => {
+    const ta = Date.parse(a.created_at);
+    const tb = Date.parse(b.created_at);
+    return (Number.isFinite(tb) ? tb : 0) - (Number.isFinite(ta) ? ta : 0);
+  });
+}
+
+export function getPromoCodeByText(code: string): PromoCodeRow | undefined {
+  const key = String(code ?? "")
+    .trim()
+    .toUpperCase();
+  if (!key) return undefined;
+  return listPromoCodes().find((p) => p.code === key);
+}
+
+export function createPromoCode(input: {
+  name: string;
+  code: string;
+  discount_percent: number;
+  one_time_per_user: boolean;
+}): PromoCodeRow {
+  const name = String(input.name ?? "").trim();
+  const code = String(input.code ?? "")
+    .trim()
+    .toUpperCase();
+  if (!name) throw new Error("promo_name_required");
+  if (!code) throw new Error("promo_code_required");
+  if (!/^[A-Z0-9_-]{3,40}$/.test(code)) throw new Error("promo_code_invalid");
+  const discount = Math.min(99, Math.max(1, Math.floor(Number(input.discount_percent) || 0)));
+  if (!Number.isFinite(discount) || discount <= 0) throw new Error("promo_discount_invalid");
+  let out: PromoCodeRow | undefined;
+  mutate((store) => {
+    const rows = store.promo_codes ?? [];
+    if (rows.some((r) => r.code === code)) throw new Error("promo_code_exists");
+    out = {
+      id: randomBytes(8).toString("hex"),
+      name,
+      code,
+      discount_percent: discount,
+      one_time_per_user: input.one_time_per_user === true,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    store.promo_codes = [out!, ...rows];
+  });
+  return out!;
+}
+
+export function listPromoCodeUsages(promoId: string): PromoCodeUsageRow[] {
+  const rows = readStore().promo_code_usages ?? [];
+  return rows
+    .filter((r) => r.promo_id === promoId)
+    .sort((a, b) => {
+      const ta = Date.parse(a.applied_at);
+      const tb = Date.parse(b.applied_at);
+      return (Number.isFinite(tb) ? tb : 0) - (Number.isFinite(ta) ? ta : 0);
+    });
+}
+
+export function hasPromoCodeUsageByUser(promoId: string, tgUserId: number): boolean {
+  const uid = Math.floor(Number(tgUserId));
+  if (!Number.isFinite(uid) || uid <= 0) return false;
+  return (readStore().promo_code_usages ?? []).some((r) => r.promo_id === promoId && r.tg_user_id === uid);
+}
+
+export function validatePromoCodeForUser(code: string, tgUserId: number): PromoCodeRow {
+  const promo = getPromoCodeByText(code);
+  if (!promo) throw new Error("promo_not_found");
+  const uid = Math.floor(Number(tgUserId));
+  if (!Number.isFinite(uid) || uid <= 0) throw new Error("promo_bad_user");
+  if (promo.one_time_per_user && hasPromoCodeUsageByUser(promo.id, uid)) {
+    throw new Error("promo_already_used");
+  }
+  return promo;
+}
+
+export function registerPromoCodeUsage(input: {
+  code: string;
+  tg_user_id: number;
+  tg_username?: string;
+  tg_first_name?: string;
+  session_id?: string;
+}): PromoCodeUsageRow {
+  const promo = validatePromoCodeForUser(input.code, input.tg_user_id);
+  const uid = Math.floor(Number(input.tg_user_id));
+  let out: PromoCodeUsageRow | undefined;
+  mutate((store) => {
+    const rows = store.promo_code_usages ?? [];
+    out = {
+      id: randomBytes(8).toString("hex"),
+      promo_id: promo.id,
+      promo_code: promo.code,
+      tg_user_id: uid,
+      tg_username: String(input.tg_username ?? "").trim() || undefined,
+      tg_first_name: String(input.tg_first_name ?? "").trim() || undefined,
+      applied_at: new Date().toISOString(),
+      session_id: String(input.session_id ?? "").trim() || undefined,
+    };
+    rows.push(out!);
+    store.promo_code_usages = rows.slice(-20_000);
+  });
+  return out!;
+}
+
+export function applyPromoCodeForUser(input: {
+  code: string;
+  tg_user_id: number;
+  original_price_rub: number;
+}): { promo: PromoCodeRow; final_price_rub: number; original_price_rub: number; discount_rub: number; discount_percent: number } {
+  const promo = getPromoCodeByText(input.code);
+  if (!promo) throw new Error("promo_not_found");
+  const uid = Math.floor(Number(input.tg_user_id));
+  if (!Number.isFinite(uid) || uid <= 0) throw new Error("promo_bad_user");
+  if (promo.one_time_per_user && hasPromoCodeUsageByUser(promo.id, uid)) {
+    throw new Error("promo_already_used");
+  }
+  const original = Math.max(0, Math.floor(Number(input.original_price_rub) || 0));
+  const final = Math.max(0, Math.floor(original - (original * promo.discount_percent) / 100));
+  return {
+    promo,
+    original_price_rub: original,
+    final_price_rub: final,
+    discount_rub: Math.max(0, original - final),
+    discount_percent: promo.discount_percent,
+  };
 }

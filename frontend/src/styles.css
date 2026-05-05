@@ -1038,6 +1038,8 @@ th {
   scrollbar-width: thin;
   scrollbar-color: rgba(148, 163, 184, 0.5) transparent;
   padding: 2.75rem 0.65rem 3rem;
+  overscroll-behavior: contain;
+  touch-action: pan-y;
 }
 
 .ref-ios-wheel-scroll::-webkit-scrollbar {
@@ -1697,6 +1699,7 @@ th {
   display: flex;
   flex-direction: column;
   align-self: flex-start;
+  min-height: 0;
 }
 
 .comms-users-search {
@@ -1707,6 +1710,23 @@ th {
   height: min(56vh, 28rem);
   min-height: 18rem;
   max-height: min(56vh, 28rem);
+}
+
+.promos-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 420px);
+  gap: 1rem;
+}
+
+.promos-create {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.promos-list {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
 }
 
 .comms-chat-meta {
@@ -1854,6 +1874,9 @@ th {
 
 @media (max-width: 980px) {
   .comms-layout {
+    grid-template-columns: 1fr;
+  }
+  .promos-layout {
     grid-template-columns: 1fr;
   }
 }

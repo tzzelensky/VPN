@@ -1,5 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
-import { claimMySubReferralReward, loadMySubWebAppProfile, sendMySubPaymentProof, type MySubProfileDto } from "../api";
+import {
+  claimMySubReferralReward,
+  loadMySubWebAppProfile,
+  previewMySubPromoCode,
+  sendMySubPaymentProof,
+  type MySubProfileDto,
+} from "../api";
 
 type Tab = "home" | "subscription" | "friends" | "profile";
 
@@ -73,6 +79,8 @@ export default function MySubPage() {
   const [homeSubId, setHomeSubId] = useState<number>(0);
   const [friendRewardId, setFriendRewardId] = useState("");
   const [friendRewardBusy, setFriendRewardBusy] = useState(false);
+  const [promoCodeInput, setPromoCodeInput] = useState("");
+  const [promoApplied, setPromoApplied] = useState<{ code: string; discount_percent: number; final_price_rub: number } | null>(null);
 
   function getInitData(): string {
     const tgWebApp = (window as unknown as {
@@ -145,6 +153,14 @@ export default function MySubPage() {
     if (!data) return "";
     return defaultNewSubscriptionName(data.subscriptions);
   }, [data]);
+  const selectedPlan = useMemo(() => {
+    if (!data) return null;
+    return data.plans.find((p) => p.id === payPlanId) ?? null;
+  }, [data, payPlanId]);
+
+  useEffect(() => {
+    setPromoApplied(null);
+  }, [payPlanId, payTargetId]);
 
   async function copySubscription(url: string) {
     setMsg("");
@@ -208,6 +224,7 @@ export default function MySubPage() {
         photo_mime: compressed.mime,
         photo_name: compressed.name,
         new_subscription_name: payTargetId === 0 ? chosenNewName.slice(0, 25) : undefined,
+        promo_code: promoApplied?.code,
       });
       setMsg("Чек получен. Администратор проверит оплату и примет решение. Обычно это занимает немного времени. После подтверждения подписка придет в чат");
       setPayPhoto(null);
@@ -218,6 +235,37 @@ export default function MySubPage() {
       else setMsg(m);
     } finally {
       setBusyPay(false);
+    }
+  }
+
+  async function applyPromoCode() {
+    if (!selectedPlan) {
+      setMsg("Сначала выберите тариф.");
+      return;
+    }
+    const code = promoCodeInput.trim().toUpperCase();
+    if (!code) {
+      setMsg("Введите промокод.");
+      return;
+    }
+    try {
+      const calc = await previewMySubPromoCode({
+        init_data: initData,
+        code,
+        original_price_rub: selectedPlan.price_rub,
+      });
+      setPromoApplied({
+        code: calc.promo.code,
+        discount_percent: calc.discount_percent,
+        final_price_rub: calc.final_price_rub,
+      });
+      setMsg(`Скидка применилась! Стоимость тарифа ${calc.final_price_rub} руб`);
+    } catch (e) {
+      setPromoApplied(null);
+      const m = e instanceof Error ? e.message : String(e);
+      if (m.includes("promo_already_used")) setMsg("Этот промокод уже был использован вами.");
+      else if (m.includes("promo_not_found")) setMsg("Промокод не найден.");
+      else setMsg("Не удалось применить промокод.");
     }
   }
 
@@ -445,7 +493,13 @@ export default function MySubPage() {
                             >
                               <span className="mysub-plan-card-title">{p.title.trim() || `Тариф ${p.id}`}</span>
                               <span className="mysub-plan-card-meta">{formatMySubPlanMeta(p)}</span>
-                              <span className="mysub-plan-card-price">{p.price_rub} ₽</span>
+                              {promoApplied && payPlanId === p.id ? (
+                                <span className="mysub-plan-card-price">
+                                  <s>{p.price_rub} ₽</s> {promoApplied.final_price_rub} ₽
+                                </span>
+                              ) : (
+                                <span className="mysub-plan-card-price">{p.price_rub} ₽</span>
+                              )}
                             </button>
                           ))}
                         </div>
@@ -456,6 +510,16 @@ export default function MySubPage() {
                       <div className="mysub-pay-step-body">
                         <p className="mysub-pay-step-title">Оплата</p>
                         <p className="sub">В комментарии к переводу укажите номер тарифа: <b>{payPlanId}</b>.</p>
+                        <div className="comms-file-row" style={{ marginBottom: "0.5rem" }}>
+                          <input
+                            value={promoCodeInput}
+                            onChange={(e) => setPromoCodeInput(e.target.value.toUpperCase())}
+                            placeholder="Введите промокод"
+                          />
+                          <button type="button" className="ghost" onClick={() => void applyPromoCode()}>
+                            Применить промокод
+                          </button>
+                        </div>
                         <a className="mysub-pay-link-btn" href={data.payment_url} target="_blank" rel="noreferrer">
                           Перейти к оплате
                         </a>
