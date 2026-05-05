@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
 import {
+  loadSubscriptionShopActivity,
   loadSubscriptionShop,
   saveSubscriptionShop,
+  type SubscriptionShopActivityEntry,
   type SubscriptionShopDto,
   type SubscriptionShopPlanDto,
   type TopUpShopPlanDto,
@@ -23,13 +25,21 @@ export default function SubscriptionShopPage({ onLogout }: { onLogout: () => voi
   const [msg, setMsg] = useState<{ type: "ok" | "err"; text: string } | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [activity, setActivity] = useState<{ subscriptions: SubscriptionShopActivityEntry[]; topups: SubscriptionShopActivityEntry[] }>({
+    subscriptions: [],
+    topups: [],
+  });
 
   const refresh = useCallback(async () => {
     setLoading(true);
     setMsg(null);
     try {
-      const s = await loadSubscriptionShop();
+      const [s, a] = await Promise.all([loadSubscriptionShop(), loadSubscriptionShopActivity()]);
       setShop(cloneShop(s));
+      setActivity({
+        subscriptions: a.subscriptions ?? [],
+        topups: a.topups ?? [],
+      });
     } catch (e) {
       setMsg({ type: "err", text: String(e) });
     } finally {
@@ -143,81 +153,131 @@ export default function SubscriptionShopPage({ onLogout }: { onLogout: () => voi
             </div>
           </section>
 
-          <section className="panel">
+          <section className="panel shop-section-gap">
             <h2 style={{ fontSize: "1rem", marginTop: 0 }}>Тарифы (кнопки 1, 2, 3 в боте)</h2>
-            <div className="shop-plans-grid">
-              {shop.plans.map((p) => (
-                <div key={p.id} className="user-modal-card shop-plan-card">
-                  <h3 className="user-modal-section-title">Тариф #{p.id}</h3>
-                  <div className="user-form-grid">
-                    <div className="form-field form-field-span-2">
-                      <label>Название</label>
-                      <input value={p.title} onChange={(e) => updatePlan(p.id, { title: e.target.value })} />
-                    </div>
-                    <div className="form-field">
-                      <label>ГБ / мес (0 = безлимит)</label>
-                      <input
-                        inputMode="numeric"
-                        value={p.total_gb}
-                        onChange={(e) => updatePlan(p.id, { total_gb: Math.max(0, Math.floor(Number(e.target.value) || 0)) })}
-                      />
-                    </div>
-                    <div className="form-field">
-                      <label>Дней</label>
-                      <input
-                        inputMode="numeric"
-                        value={p.days}
-                        onChange={(e) => updatePlan(p.id, { days: Math.max(1, Math.floor(Number(e.target.value) || 1)) })}
-                      />
-                    </div>
-                    <div className="form-field form-field-span-2">
-                      <label>Цена, ₽</label>
-                      <input
-                        inputMode="numeric"
-                        value={p.price_rub}
-                        onChange={(e) => updatePlan(p.id, { price_rub: Math.max(0, Math.floor(Number(e.target.value) || 0)) })}
-                      />
+            <div className="shop-layout-with-feed">
+              <div className="shop-plans-grid">
+                {shop.plans.map((p) => (
+                  <div key={p.id} className="user-modal-card shop-plan-card">
+                    <h3 className="user-modal-section-title">Тариф #{p.id}</h3>
+                    <div className="user-form-grid">
+                      <div className="form-field form-field-span-2">
+                        <label>Название</label>
+                        <input value={p.title} onChange={(e) => updatePlan(p.id, { title: e.target.value })} />
+                      </div>
+                      <div className="form-field">
+                        <label>ГБ / мес (0 = безлимит)</label>
+                        <input
+                          inputMode="numeric"
+                          value={p.total_gb}
+                          onChange={(e) => updatePlan(p.id, { total_gb: Math.max(0, Math.floor(Number(e.target.value) || 0)) })}
+                        />
+                      </div>
+                      <div className="form-field">
+                        <label>Дней</label>
+                        <input
+                          inputMode="numeric"
+                          value={p.days}
+                          onChange={(e) => updatePlan(p.id, { days: Math.max(1, Math.floor(Number(e.target.value) || 1)) })}
+                        />
+                      </div>
+                      <div className="form-field form-field-span-2">
+                        <label>Цена, ₽</label>
+                        <input
+                          inputMode="numeric"
+                          value={p.price_rub}
+                          onChange={(e) => updatePlan(p.id, { price_rub: Math.max(0, Math.floor(Number(e.target.value) || 0)) })}
+                        />
+                      </div>
                     </div>
                   </div>
+                ))}
+              </div>
+              <aside className="shop-feed" aria-label="Кто и какой тариф купил">
+                <label className="referral-feed-label">Покупки тарифов</label>
+                <p className="field-hint referral-feed-hint">Клиент и активированный тариф.</p>
+                <div className="ref-ios-wheel" role="log">
+                  <div className="ref-ios-wheel-mask" aria-hidden="true" />
+                  <div className="ref-ios-wheel-scroll">
+                    {activity.subscriptions.length === 0 ? (
+                      <p className="sub ref-ios-empty">Пока нет записей.</p>
+                    ) : (
+                      activity.subscriptions.map((e, idx) => (
+                        <div key={`${e.created_at}-${idx}`} className="ref-ios-row">
+                          <span className="ref-ios-line">{e.line}</span>
+                          <span className="ref-ios-date">
+                            {e.created_at
+                              ? new Date(e.created_at).toLocaleString("ru-RU", { dateStyle: "short", timeStyle: "short" })
+                              : ""}
+                          </span>
+                        </div>
+                      ))
+                    )}
+                  </div>
                 </div>
-              ))}
+              </aside>
             </div>
           </section>
 
-          <section className="panel">
+          <section className="panel shop-section-gap">
             <h2 style={{ fontSize: "1rem", marginTop: 0 }}>Докупить ГБ (кнопки 1, 2, 3 в боте)</h2>
             <p className="sub" style={{ marginTop: 0 }}>
               Эти пакеты используются в действии бота «Докупить ГБ». После подтверждения оплаты ГБ прибавляются к текущему
               лимиту клиента.
             </p>
-            <div className="shop-plans-grid">
-              {shop.topup_plans.map((p) => (
-                <div key={p.id} className="user-modal-card shop-plan-card">
-                  <h3 className="user-modal-section-title">Докупка #{p.id}</h3>
-                  <div className="user-form-grid">
-                    <div className="form-field form-field-span-2">
-                      <label>Название</label>
-                      <input value={p.title} onChange={(e) => updateTopUpPlan(p.id, { title: e.target.value })} />
-                    </div>
-                    <div className="form-field">
-                      <label>Добавить ГБ</label>
-                      <input
-                        inputMode="numeric"
-                        value={p.add_gb}
-                        onChange={(e) => updateTopUpPlan(p.id, { add_gb: Math.max(1, Math.floor(Number(e.target.value) || 1)) })}
-                      />
-                    </div>
-                    <div className="form-field">
-                      <label>Цена, ₽</label>
-                      <input
-                        inputMode="numeric"
-                        value={p.price_rub}
-                        onChange={(e) => updateTopUpPlan(p.id, { price_rub: Math.max(0, Math.floor(Number(e.target.value) || 0)) })}
-                      />
+            <div className="shop-layout-with-feed">
+              <div className="shop-plans-grid">
+                {shop.topup_plans.map((p) => (
+                  <div key={p.id} className="user-modal-card shop-plan-card">
+                    <h3 className="user-modal-section-title">Докупка #{p.id}</h3>
+                    <div className="user-form-grid">
+                      <div className="form-field form-field-span-2">
+                        <label>Название</label>
+                        <input value={p.title} onChange={(e) => updateTopUpPlan(p.id, { title: e.target.value })} />
+                      </div>
+                      <div className="form-field">
+                        <label>Добавить ГБ</label>
+                        <input
+                          inputMode="numeric"
+                          value={p.add_gb}
+                          onChange={(e) => updateTopUpPlan(p.id, { add_gb: Math.max(1, Math.floor(Number(e.target.value) || 1)) })}
+                        />
+                      </div>
+                      <div className="form-field">
+                        <label>Цена, ₽</label>
+                        <input
+                          inputMode="numeric"
+                          value={p.price_rub}
+                          onChange={(e) => updateTopUpPlan(p.id, { price_rub: Math.max(0, Math.floor(Number(e.target.value) || 0)) })}
+                        />
+                      </div>
                     </div>
                   </div>
+                ))}
+              </div>
+              <aside className="shop-feed" aria-label="Кто и сколько ГБ докупил">
+                <label className="referral-feed-label">Докупки ГБ</label>
+                <p className="field-hint referral-feed-hint">Клиент и объём докупки.</p>
+                <div className="ref-ios-wheel" role="log">
+                  <div className="ref-ios-wheel-mask" aria-hidden="true" />
+                  <div className="ref-ios-wheel-scroll">
+                    {activity.topups.length === 0 ? (
+                      <p className="sub ref-ios-empty">Пока нет записей.</p>
+                    ) : (
+                      activity.topups.map((e, idx) => (
+                        <div key={`${e.created_at}-${idx}`} className="ref-ios-row">
+                          <span className="ref-ios-line">{e.line}</span>
+                          <span className="ref-ios-date">
+                            {e.created_at
+                              ? new Date(e.created_at).toLocaleString("ru-RU", { dateStyle: "short", timeStyle: "short" })
+                              : ""}
+                          </span>
+                        </div>
+                      ))
+                    )}
+                  </div>
                 </div>
-              ))}
+              </aside>
             </div>
           </section>
         </>

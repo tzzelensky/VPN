@@ -1107,6 +1107,35 @@ th {
   margin: 0;
 }
 
+.shop-section-gap {
+  margin-top: 1.1rem;
+}
+
+.shop-layout-with-feed {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(18rem, 22rem);
+  gap: 1rem 1.25rem;
+  align-items: stretch;
+}
+
+.shop-feed {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-self: stretch;
+}
+
+.shop-feed .ref-ios-wheel {
+  min-height: clamp(16rem, 36vh, 20rem);
+  max-height: min(58vh, 26rem);
+}
+
+@media (max-width: 1120px) {
+  .shop-layout-with-feed {
+    grid-template-columns: 1fr;
+  }
+}
+
 .users-dash-wrap {
   margin-top: 0.75rem;
 }

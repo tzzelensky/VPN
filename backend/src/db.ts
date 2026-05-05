@@ -117,6 +117,19 @@ export type PaymentSessionRow = {
   referral_discount_percent?: number;
 };
 
+export type ShopActivityRow = {
+  id: string;
+  kind: "subscription" | "topup";
+  user_id: number;
+  user_name: string;
+  plan_id: PaymentPlanId;
+  plan_title: string;
+  total_gb?: number;
+  days?: number;
+  add_gb?: number;
+  created_at: string;
+};
+
 export type SubscriptionShopPlanRow = {
   id: PaymentPlanId;
   title: string;
@@ -208,6 +221,7 @@ type FileStore = {
   servers: ServerRow[];
   users: UserRow[];
   payment_sessions: PaymentSessionRow[];
+  shop_activity_log: ShopActivityRow[];
   subscription_shop: SubscriptionShopConfig;
   referral_program: ReferralProgramConfig;
   referral_invites: ReferralInviteRow[];
@@ -249,6 +263,7 @@ function emptyStore(): FileStore {
     servers: [],
     users: [],
     payment_sessions: [],
+    shop_activity_log: [],
     subscription_shop: defaultSubscriptionShop(),
     referral_program: defaultReferralProgram(),
     referral_invites: [],
@@ -376,6 +391,29 @@ function normalizePaymentSession(raw: unknown): PaymentSessionRow | null {
   };
 }
 
+function normalizeShopActivity(raw: unknown): ShopActivityRow | null {
+  if (!raw || typeof raw !== "object") return null;
+  const o = raw as Record<string, unknown>;
+  const id = String(o.id ?? "").trim();
+  const userId = Number(o.user_id);
+  const planId = Number(o.plan_id);
+  const kind = o.kind === "topup" ? "topup" : o.kind === "subscription" ? "subscription" : "";
+  if (!id || !Number.isFinite(userId) || userId <= 0 || ![1, 2, 3].includes(planId) || !kind) return null;
+  const row: ShopActivityRow = {
+    id,
+    kind,
+    user_id: Math.floor(userId),
+    user_name: String(o.user_name ?? "").trim() || `#${Math.floor(userId)}`,
+    plan_id: planId as PaymentPlanId,
+    plan_title: String(o.plan_title ?? "").trim() || `План #${planId}`,
+    created_at: String(o.created_at ?? new Date().toISOString()),
+  };
+  if (Number.isFinite(Number(o.total_gb))) row.total_gb = Math.max(0, Math.floor(Number(o.total_gb)));
+  if (Number.isFinite(Number(o.days))) row.days = Math.max(0, Math.floor(Number(o.days)));
+  if (Number.isFinite(Number(o.add_gb))) row.add_gb = Math.max(0, Math.floor(Number(o.add_gb)));
+  return row;
+}
+
 function normalizeCountryCode(raw: unknown): string {
   const t = String(raw ?? "")
     .toUpperCase()
@@ -494,6 +532,12 @@ function readStore(): FileStore {
     const payment_sessions = sessionsRaw
       .map((x) => normalizePaymentSession(x))
       .filter((x): x is PaymentSessionRow => x != null);
+    const shopActivityRaw = Array.isArray((parsed as { shop_activity_log?: unknown }).shop_activity_log)
+      ? (parsed as { shop_activity_log: unknown[] }).shop_activity_log
+      : [];
+    const shop_activity_log = shopActivityRaw
+      .map((x) => normalizeShopActivity(x))
+      .filter((x): x is ShopActivityRow => x != null);
     const invitesRaw = Array.isArray((parsed as { referral_invites?: unknown }).referral_invites)
       ? (parsed as { referral_invites: unknown[] }).referral_invites
       : [];
@@ -547,6 +591,7 @@ function readStore(): FileStore {
       servers: parsed.servers.map((x) => normalizeServer(x as ServerRow)),
       users,
       payment_sessions,
+      shop_activity_log,
       subscription_shop: normalizeSubscriptionShop(
         (parsed as { subscription_shop?: unknown }).subscription_shop,
       ),
@@ -1147,6 +1192,39 @@ export function markPaymentSessionPendingAdmin(sessionId: string, proof_file_id:
 export function deletePaymentSession(sessionId: string): void {
   mutate((store) => {
     store.payment_sessions = (store.payment_sessions ?? []).filter((s) => s.id !== sessionId);
+  });
+}
+
+export function appendShopActivity(
+  input: Omit<ShopActivityRow, "id" | "created_at"> & { created_at?: string },
+): ShopActivityRow {
+  const row: ShopActivityRow = {
+    id: randomBytes(8).toString("hex"),
+    kind: input.kind === "topup" ? "topup" : "subscription",
+    user_id: Math.max(1, Math.floor(Number(input.user_id) || 1)),
+    user_name: String(input.user_name ?? "").trim() || `#${Math.max(1, Math.floor(Number(input.user_id) || 1))}`,
+    plan_id: Number(input.plan_id) === 2 ? 2 : Number(input.plan_id) === 3 ? 3 : 1,
+    plan_title: String(input.plan_title ?? "").trim() || "План",
+    ...(input.total_gb != null ? { total_gb: Math.max(0, Math.floor(Number(input.total_gb) || 0)) } : {}),
+    ...(input.days != null ? { days: Math.max(0, Math.floor(Number(input.days) || 0)) } : {}),
+    ...(input.add_gb != null ? { add_gb: Math.max(0, Math.floor(Number(input.add_gb) || 0)) } : {}),
+    created_at: String(input.created_at ?? new Date().toISOString()),
+  };
+  mutate((store) => {
+    const rows = store.shop_activity_log ?? [];
+    // Храним ограниченный хвост, чтобы JSON не разрастался бесконечно.
+    const next = [...rows, row];
+    store.shop_activity_log = next.slice(-2000);
+  });
+  return row;
+}
+
+export function listShopActivity(): ShopActivityRow[] {
+  const rows = readStore().shop_activity_log ?? [];
+  return [...rows].sort((a, b) => {
+    const ta = Date.parse(a.created_at);
+    const tb = Date.parse(b.created_at);
+    return (Number.isFinite(tb) ? tb : 0) - (Number.isFinite(ta) ? ta : 0);
   });
 }
 

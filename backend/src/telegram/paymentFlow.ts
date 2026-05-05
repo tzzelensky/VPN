@@ -3,6 +3,7 @@ import {
   consumeReferralInviteByTgUser,
   createReferralReward,
   createUser,
+  appendShopActivity,
   deletePaymentSession,
   findAwaitingProofSessionByChat,
   findPendingAdminSessionByChat,
@@ -567,6 +568,29 @@ export async function onAdminPaymentConfirm(
     }
   } else if (autoCreatedUser) {
     affected.push(autoCreatedUser);
+  }
+
+  for (const row of affected) {
+    if (isTopUp) {
+      appendShopActivity({
+        kind: "topup",
+        user_id: row.id,
+        user_name: row.name,
+        plan_id: sess.plan_id,
+        plan_title: topupMeta.title,
+        add_gb: topupMeta.add_gb,
+      });
+    } else {
+      appendShopActivity({
+        kind: "subscription",
+        user_id: row.id,
+        user_name: row.name,
+        plan_id: sess.plan_id,
+        plan_title: subMeta.title,
+        total_gb: subMeta.total_gb,
+        days: subMeta.days,
+      });
+    }
   }
 
   await answerCallbackQuery(callbackQueryId, {

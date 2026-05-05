@@ -1,6 +1,7 @@
 import type { UserRow } from "../db.js";
 import { sendTelegramHtml } from "./api.js";
 import { getTelegramBotToken } from "./env.js";
+import { escHtml } from "./format.js";
 import { payReminderInline } from "./keyboards.js";
 
 const DAY_MS = 86_400_000;
@@ -39,7 +40,7 @@ export async function sendExpiryRenewalReminder(u: UserRow): Promise<void> {
     throw new Error(g.error);
   }
   const body =
-    `<b>Подписка заканчивается</b> ${throughDaysHtml(g.daysShown)}.\n\n` +
+    `<b>Подписка «${escHtml(String(u.name ?? "Без названия"))}» заканчивается</b> ${throughDaysHtml(g.daysShown)}.\n\n` +
     `Для продолжения пользования подпиской <b>оплатите</b> её.`;
   await sendTelegramHtml(g.chatId, body, payReminderInline);
 }

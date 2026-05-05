@@ -376,8 +376,18 @@ export type SubscriptionShopDto = {
   topup_plans: TopUpShopPlanDto[];
 };
 
+export type SubscriptionShopActivityEntry = { line: string; created_at: string };
+
 export async function loadSubscriptionShop(): Promise<SubscriptionShopDto> {
   const res = await fetch("/api/subscription-shop", { credentials: "include" });
+  return handle(res);
+}
+
+export async function loadSubscriptionShopActivity(): Promise<{
+  subscriptions: SubscriptionShopActivityEntry[];
+  topups: SubscriptionShopActivityEntry[];
+}> {
+  const res = await fetch("/api/subscription-shop/activity", { credentials: "include" });
   return handle(res);
 }
 
