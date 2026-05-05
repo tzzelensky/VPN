@@ -2,6 +2,7 @@ import { Router } from "express";
 import {
   applyPromoCodeForUser,
   createPromoCode,
+  deletePromoCode,
   listPromoCodes,
   listPromoCodeUsages,
   validatePromoCodeForUser,
@@ -93,6 +94,20 @@ router.post("/validate", (req, res) => {
     }
     res.status(400).json({ error: msg });
   }
+});
+
+router.delete("/:id", (req, res) => {
+  const id = String(req.params.id ?? "").trim();
+  if (!id) {
+    res.status(400).json({ error: "promo_id_required" });
+    return;
+  }
+  const ok = deletePromoCode(id);
+  if (!ok) {
+    res.status(404).json({ error: "promo_not_found" });
+    return;
+  }
+  res.json({ ok: true });
 });
 
 export default router;

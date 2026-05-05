@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import DashboardLayout from "../components/DashboardLayout";
-import { createPromoCode, listPromoCodeUsages, listPromoCodes, type PromoCodeDto, type PromoCodeUsageDto } from "../api";
+import { createPromoCode, deletePromoCode, listPromoCodeUsages, listPromoCodes, type PromoCodeDto, type PromoCodeUsageDto } from "../api";
 
 export default function PromoCodesPage({ onLogout }: { onLogout: () => void }) {
   const [promos, setPromos] = useState<PromoCodeDto[]>([]);
@@ -12,6 +12,7 @@ export default function PromoCodesPage({ onLogout }: { onLogout: () => void }) {
   const [msg, setMsg] = useState<{ type: "ok" | "err"; text: string } | null>(null);
   const [openedPromo, setOpenedPromo] = useState<PromoCodeDto | null>(null);
   const [usages, setUsages] = useState<PromoCodeUsageDto[]>([]);
+  const [deleting, setDeleting] = useState(false);
 
   async function reload() {
     const data = await listPromoCodes();
@@ -28,7 +29,7 @@ export default function PromoCodesPage({ onLogout }: { onLogout: () => void }) {
     try {
       await createPromoCode({
         name: name.trim(),
-        code: code.trim().toUpperCase(),
+        code: code.trim().toLocaleUpperCase("ru-RU"),
         discount_percent: Math.max(1, Math.min(99, Math.floor(Number(discount) || 0))),
         one_time_per_user: oneTime,
       });
@@ -55,6 +56,23 @@ export default function PromoCodesPage({ onLogout }: { onLogout: () => void }) {
     }
   }
 
+  async function onDeletePromo() {
+    if (!openedPromo || deleting) return;
+    setDeleting(true);
+    setMsg(null);
+    try {
+      await deletePromoCode(openedPromo.id);
+      setOpenedPromo(null);
+      setUsages([]);
+      setMsg({ type: "ok", text: "Промокод удален." });
+      await reload();
+    } catch (e) {
+      setMsg({ type: "err", text: String(e) });
+    } finally {
+      setDeleting(false);
+    }
+  }
+
   return (
     <DashboardLayout onLogout={onLogout}>
       <section className="panel users-hero-panel">
@@ -74,8 +92,8 @@ export default function PromoCodesPage({ onLogout }: { onLogout: () => void }) {
               <label>Текст промокода</label>
               <input
                 value={code}
-                onChange={(e) => setCode(e.target.value.toUpperCase().replace(/\s+/g, ""))}
-                placeholder="SPRING25"
+                onChange={(e) => setCode(e.target.value.toLocaleUpperCase("ru-RU").replace(/\s+/g, ""))}
+                placeholder="МАЙСКИДКА25"
               />
             </div>
             <div className="form-field">
@@ -117,7 +135,7 @@ export default function PromoCodesPage({ onLogout }: { onLogout: () => void }) {
 
       {openedPromo ? (
         <div className="modal-backdrop" onClick={() => setOpenedPromo(null)}>
-          <div className="modal comms-picker-modal" onClick={(e) => e.stopPropagation()}>
+          <div className="modal promo-modal" onClick={(e) => e.stopPropagation()}>
             <div className="modal-head">
               <h2>{openedPromo.name}</h2>
               <button type="button" className="ghost modal-close" onClick={() => setOpenedPromo(null)}>
@@ -143,6 +161,9 @@ export default function PromoCodesPage({ onLogout }: { onLogout: () => void }) {
               </div>
             </div>
             <div className="modal-footer">
+              <button type="button" className="ghost" disabled={deleting} onClick={() => void onDeletePromo()}>
+                {deleting ? "Удаление..." : "Удалить промокод"}
+              </button>
               <button type="button" className="primary" onClick={() => setOpenedPromo(null)}>
                 Закрыть
               </button>

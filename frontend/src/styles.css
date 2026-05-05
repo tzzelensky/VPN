@@ -1729,6 +1729,40 @@ th {
   flex-direction: column;
 }
 
+.promo-modal {
+  width: min(760px, calc(100vw - 1.25rem));
+  margin: 0.75rem auto;
+}
+
+.promo-modal .modal-head {
+  gap: 0.6rem;
+}
+
+.promo-modal .modal-head h2 {
+  font-size: 0.98rem;
+  line-height: 1.3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.promo-modal .modal-body {
+  max-height: min(62vh, 32rem);
+  overflow-y: auto;
+  padding-bottom: 0.75rem;
+}
+
+.promo-modal .modal-footer {
+  margin: 0;
+  border-top: 1px solid var(--border);
+  padding: 0.75rem 1rem 1rem;
+  justify-content: space-between;
+}
+
+.promo-modal .modal-footer > button {
+  min-height: 2.6rem;
+}
+
 .comms-chat-meta {
   display: inline-flex;
   align-items: center;

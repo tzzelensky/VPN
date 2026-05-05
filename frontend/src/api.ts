@@ -618,6 +618,14 @@ export async function listPromoCodeUsages(promoId: string): Promise<{ usages: Pr
   return handle(res);
 }
 
+export async function deletePromoCode(promoId: string): Promise<{ ok: boolean }> {
+  const res = await fetch(`/api/promo-codes/${encodeURIComponent(promoId)}`, {
+    method: "DELETE",
+    credentials: "include",
+  });
+  return handle(res);
+}
+
 export async function previewMySubPromoCode(payload: {
   init_data: string;
   code: string;

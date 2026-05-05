@@ -300,9 +300,7 @@ function normalizePromoCode(raw: unknown): PromoCodeRow | null {
   if (!raw || typeof raw !== "object") return null;
   const o = raw as Record<string, unknown>;
   const id = String(o.id ?? "").trim();
-  const code = String(o.code ?? "")
-    .trim()
-    .toUpperCase();
+  const code = normalizePromoCodeText(String(o.code ?? ""));
   if (!id || !code) return null;
   return {
     id,
@@ -320,9 +318,7 @@ function normalizePromoCodeUsage(raw: unknown): PromoCodeUsageRow | null {
   const o = raw as Record<string, unknown>;
   const id = String(o.id ?? "").trim();
   const promo_id = String(o.promo_id ?? "").trim();
-  const promo_code = String(o.promo_code ?? "")
-    .trim()
-    .toUpperCase();
+  const promo_code = normalizePromoCodeText(String(o.promo_code ?? ""));
   const tg_user_id = Number(o.tg_user_id);
   if (!id || !promo_id || !promo_code || !Number.isFinite(tg_user_id) || tg_user_id <= 0) return null;
   return {
@@ -1435,10 +1431,15 @@ export function listPromoCodes(): PromoCodeRow[] {
   });
 }
 
-export function getPromoCodeByText(code: string): PromoCodeRow | undefined {
-  const key = String(code ?? "")
+function normalizePromoCodeText(input: string): string {
+  return String(input ?? "")
     .trim()
-    .toUpperCase();
+    .replace(/\s+/g, "")
+    .toLocaleUpperCase("ru-RU");
+}
+
+export function getPromoCodeByText(code: string): PromoCodeRow | undefined {
+  const key = normalizePromoCodeText(code);
   if (!key) return undefined;
   return listPromoCodes().find((p) => p.code === key);
 }
@@ -1450,12 +1451,10 @@ export function createPromoCode(input: {
   one_time_per_user: boolean;
 }): PromoCodeRow {
   const name = String(input.name ?? "").trim();
-  const code = String(input.code ?? "")
-    .trim()
-    .toUpperCase();
+  const code = normalizePromoCodeText(input.code);
   if (!name) throw new Error("promo_name_required");
   if (!code) throw new Error("promo_code_required");
-  if (!/^[A-Z0-9_-]{3,40}$/.test(code)) throw new Error("promo_code_invalid");
+  if (!/^[\p{L}\p{N}_-]{3,40}$/u.test(code)) throw new Error("promo_code_invalid");
   const discount = Math.min(99, Math.max(1, Math.floor(Number(input.discount_percent) || 0)));
   if (!Number.isFinite(discount) || discount <= 0) throw new Error("promo_discount_invalid");
   let out: PromoCodeRow | undefined;
@@ -1474,6 +1473,19 @@ export function createPromoCode(input: {
     store.promo_codes = [out!, ...rows];
   });
   return out!;
+}
+
+export function deletePromoCode(promoId: string): boolean {
+  const id = String(promoId ?? "").trim();
+  if (!id) return false;
+  let removed = false;
+  mutate((store) => {
+    const before = (store.promo_codes ?? []).length;
+    store.promo_codes = (store.promo_codes ?? []).filter((p) => p.id !== id);
+    store.promo_code_usages = (store.promo_code_usages ?? []).filter((u) => u.promo_id !== id);
+    removed = (store.promo_codes ?? []).length !== before;
+  });
+  return removed;
 }
 
 export function listPromoCodeUsages(promoId: string): PromoCodeUsageRow[] {
