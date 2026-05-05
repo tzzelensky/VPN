@@ -415,8 +415,10 @@ export default function CommunicationsPage({ onLogout }: { onLogout: () => void 
                         <span className="ref-ios-line">
                           #{u.id} {u.name}
                         </span>
-                        <span className="ref-ios-date">tg-id: {u.tg_id || "—"}</span>
-                        <span className={`comms-chat-pill ${hasChat ? "ok" : "no"}`}>{hasChat ? "чат есть" : "чата нет"}</span>
+                        <span className="ref-ios-date comms-chat-meta">
+                          <span className={`comms-chat-dot ${hasChat ? "ok" : "no"}`} aria-hidden />
+                          tg-id: {u.tg_id || "—"}
+                        </span>
                       </div>
                     );
                   })
