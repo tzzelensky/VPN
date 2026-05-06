@@ -3,6 +3,7 @@ import DashboardLayout from "../components/DashboardLayout";
 import {
   createCommunicationSegment,
   deleteCommunicationSegment,
+  listCommunicationSegmentUsers,
   listCommunicationSegments,
   listCommunicationTargets,
   patchCommunicationSegment,
@@ -129,6 +130,8 @@ export default function CommunicationsPage({ onLogout }: { onLogout: () => void 
   const [segmentPresetEnabled, setSegmentPresetEnabled] = useState(false);
   const [segmentPresetText, setSegmentPresetText] = useState("");
   const [messageButtons, setMessageButtons] = useState<Array<"pay" | "ref" | "sub" | "buygb">>([]);
+  const [segmentPreviewUsers, setSegmentPreviewUsers] = useState<Array<{ id: number; name: string; tg_id: string }>>([]);
+  const [segmentPreviewLoading, setSegmentPreviewLoading] = useState(false);
 
   useEffect(() => {
     void (async () => {
@@ -267,6 +270,29 @@ export default function CommunicationsPage({ onLogout }: { onLogout: () => void 
     if (typeof window === "undefined") return;
     window.localStorage.setItem(LS_KEY_MARK_TEXT, markText);
   }, [markText]);
+
+  useEffect(() => {
+    if (!segmentId) {
+      setSegmentPreviewUsers([]);
+      setSegmentPreviewLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setSegmentPreviewLoading(true);
+    void (async () => {
+      try {
+        const data = await listCommunicationSegmentUsers(segmentId);
+        if (!cancelled) setSegmentPreviewUsers(data.users);
+      } catch {
+        if (!cancelled) setSegmentPreviewUsers([]);
+      } finally {
+        if (!cancelled) setSegmentPreviewLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [segmentId]);
 
   function openPicker() {
     const chosen = selectedIds.filter((id) => reachableById.has(id));
@@ -503,6 +529,20 @@ export default function CommunicationsPage({ onLogout }: { onLogout: () => void 
                     </option>
                   ))}
                 </select>
+                {segmentPreviewLoading ? <div className="comms-segment-loading-line" aria-hidden /> : null}
+                {!segmentPreviewLoading && segmentId ? (
+                  <div className="comms-segment-preview-list">
+                    {segmentPreviewUsers.length === 0 ? (
+                      <p className="field-hint">В сегменте нет пользователей с чатом.</p>
+                    ) : (
+                      segmentPreviewUsers.map((u) => (
+                        <span key={u.id} className="comms-chip">
+                          #{u.id} {u.name}
+                        </span>
+                      ))
+                    )}
+                  </div>
+                ) : null}
               </div>
             ) : (
               <p className="sub" style={{ marginTop: "0.9rem", marginBottom: "0.6rem" }}>

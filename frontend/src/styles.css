@@ -1946,6 +1946,32 @@ th {
   gap: 0.5rem;
 }
 
+.comms-segment-preview-list {
+  margin-top: 0.55rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.42rem;
+}
+
+.comms-segment-loading-line {
+  margin-top: 0.55rem;
+  width: 100%;
+  height: 4px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, rgba(84, 146, 255, 0.2) 0%, rgba(84, 146, 255, 0.9) 45%, rgba(84, 146, 255, 0.2) 100%);
+  background-size: 180% 100%;
+  animation: comms-loading-line 1.05s linear infinite;
+}
+
+@keyframes comms-loading-line {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: -100% 0;
+  }
+}
+
 @media (max-width: 980px) {
   .comms-layout {
     grid-template-columns: 1fr;

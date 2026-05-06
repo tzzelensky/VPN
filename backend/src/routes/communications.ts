@@ -199,6 +199,51 @@ function matchesMetric(value: number | null, mode: "any" | "exact" | "range", ex
   return value >= lo && value <= hi;
 }
 
+async function buildSegmentRows(segmentId: string): Promise<TargetUserLite[]> {
+  const segment = listCommunicationSegments().find((s) => s.id === segmentId);
+  if (!segment) throw new Error("segment_not_found");
+  const all = listUsers();
+  const pre = segment.user_ids.length > 0 ? all.filter((u) => segment.user_ids.includes(u.id)) : all;
+  const filtered = pre.filter((u) => {
+    const d = daysLeft(u);
+    const g = remainingGb(u);
+    return (
+      matchesMetric(d, segment.days_mode, segment.days_exact, segment.days_from, segment.days_to) &&
+      matchesMetric(g, segment.gb_mode, segment.gb_exact, segment.gb_from, segment.gb_to)
+    );
+  });
+  const rows: TargetUserLite[] = [];
+  for (const u of filtered) {
+    const chatId = toChatId(u.tg_id);
+    if (!chatId) continue;
+    const hasChat = await telegramHasDialog(chatId);
+    if (!hasChat) continue;
+    rows.push({ id: u.id, name: u.name, tg_id: u.tg_id, enable: u.enable === 1 });
+  }
+  return rows;
+}
+
+router.get("/segments/:id/users", async (req, res) => {
+  const segmentId = String(req.params.id ?? "").trim();
+  if (!segmentId) {
+    res.status(400).json({ error: "segment_required" });
+    return;
+  }
+  try {
+    const rows = await buildSegmentRows(segmentId);
+    res.json({
+      users: rows.map((u) => ({ id: u.id, name: u.name, tg_id: u.tg_id })),
+    });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    if (msg === "segment_not_found") {
+      res.status(404).json({ error: msg });
+      return;
+    }
+    res.status(500).json({ error: msg });
+  }
+});
+
 router.post("/send", async (req, res) => {
   if (!getTelegramBotToken()) {
     res.status(503).json({ error: "telegram_not_configured" });
@@ -264,30 +309,18 @@ router.post("/send", async (req, res) => {
       res.status(400).json({ error: "segment_required" });
       return;
     }
-    const segment = listCommunicationSegments().find((s) => s.id === segmentId);
-    if (!segment) {
-      res.status(404).json({ error: "segment_not_found" });
+    try {
+      const rows = await buildSegmentRows(segmentId);
+      targets = uniqTargets(rows);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (msg === "segment_not_found") {
+        res.status(404).json({ error: msg });
+        return;
+      }
+      res.status(500).json({ error: msg });
       return;
     }
-    const all = listUsers();
-    const pre = segment.user_ids.length > 0 ? all.filter((u) => segment.user_ids.includes(u.id)) : all;
-    const filtered = pre.filter((u) => {
-      const d = daysLeft(u);
-      const g = remainingGb(u);
-      return (
-        matchesMetric(d, segment.days_mode, segment.days_exact, segment.days_from, segment.days_to) &&
-        matchesMetric(g, segment.gb_mode, segment.gb_exact, segment.gb_from, segment.gb_to)
-      );
-    });
-    const rows: TargetUserLite[] = [];
-    for (const u of filtered) {
-      const chatId = toChatId(u.tg_id);
-      if (!chatId) continue;
-      const hasChat = await telegramHasDialog(chatId);
-      if (!hasChat) continue;
-      rows.push({ id: u.id, name: u.name, tg_id: u.tg_id, enable: u.enable === 1 });
-    }
-    targets = uniqTargets(rows);
   } else {
     res.status(400).json({ error: "invalid_mode" });
     return;

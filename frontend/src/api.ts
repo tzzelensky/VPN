@@ -516,6 +516,11 @@ export async function deleteCommunicationSegment(id: string): Promise<{ ok: bool
   return handle(res);
 }
 
+export async function listCommunicationSegmentUsers(id: string): Promise<{ users: Array<{ id: number; name: string; tg_id: string }> }> {
+  const res = await fetch(`/api/communications/segments/${encodeURIComponent(id)}/users`, { credentials: "include" });
+  return handle(res);
+}
+
 export type ReferralProgramDto = {
   enabled: boolean;
   inviter_reward_gb: number;
