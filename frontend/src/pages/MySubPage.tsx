@@ -80,7 +80,7 @@ export default function MySubPage() {
   const [friendRewardId, setFriendRewardId] = useState("");
   const [friendRewardBusy, setFriendRewardBusy] = useState(false);
   const [promoCodeInput, setPromoCodeInput] = useState("");
-  const [promoApplied, setPromoApplied] = useState<{ code: string; discount_percent: number; final_price_rub: number } | null>(null);
+  const [promoApplied, setPromoApplied] = useState<{ code: string; discount_percent: number } | null>(null);
   const [promoFeedback, setPromoFeedback] = useState<{ type: "ok" | "err"; text: string } | null>(null);
 
   function getInitData(): string {
@@ -160,9 +160,20 @@ export default function MySubPage() {
   }, [data, payPlanId]);
 
   useEffect(() => {
-    setPromoApplied(null);
-    setPromoFeedback(null);
-  }, [payPlanId, payTargetId]);
+    // Если пользователь меняет введенный промокод после применения — снимаем скидку,
+    // чтобы цена не расходилась с тем, что отправится в платеж.
+    const normalizedInput = promoCodeInput.replace(/\s+/g, "").trim().toLocaleUpperCase("ru-RU");
+    if (!promoApplied) return;
+    if (!normalizedInput) {
+      setPromoApplied(null);
+      setPromoFeedback(null);
+      return;
+    }
+    if (normalizedInput !== promoApplied.code) {
+      setPromoApplied(null);
+      setPromoFeedback(null);
+    }
+  }, [promoCodeInput, promoApplied]);
 
   async function copySubscription(url: string) {
     setMsg("");
@@ -245,7 +256,7 @@ export default function MySubPage() {
       setPromoFeedback({ type: "err", text: "Сначала выберите тариф." });
       return;
     }
-    const code = promoCodeInput.trim().toUpperCase();
+    const code = promoCodeInput.replace(/\s+/g, "").trim().toLocaleUpperCase("ru-RU");
     if (!code) {
       setPromoFeedback({ type: "err", text: "Введите промокод." });
       return;
@@ -259,9 +270,8 @@ export default function MySubPage() {
       setPromoApplied({
         code: calc.promo.code,
         discount_percent: calc.discount_percent,
-        final_price_rub: calc.final_price_rub,
       });
-      setPromoFeedback({ type: "ok", text: `Скидка применилась! Стоимость тарифа ${calc.final_price_rub} руб` });
+      setPromoFeedback(null);
     } catch (e) {
       setPromoApplied(null);
       const m = e instanceof Error ? e.message : String(e);
@@ -270,6 +280,11 @@ export default function MySubPage() {
       else setPromoFeedback({ type: "err", text: "Не удалось применить промокод." });
     }
   }
+
+  const discountedPriceForPlan = (priceRub: number) => {
+    if (!promoApplied) return priceRub;
+    return Math.max(0, Math.floor(priceRub - (priceRub * promoApplied.discount_percent) / 100));
+  };
 
   function openPickForCopy() {
     if (!data) return;
@@ -495,13 +510,15 @@ export default function MySubPage() {
                             >
                               <span className="mysub-plan-card-title">{p.title.trim() || `Тариф ${p.id}`}</span>
                               <span className="mysub-plan-card-meta">{formatMySubPlanMeta(p)}</span>
-                              {promoApplied && payPlanId === p.id ? (
-                                <span className="mysub-plan-card-price">
-                                  <s>{p.price_rub} ₽</s> {promoApplied.final_price_rub} ₽
-                                </span>
-                              ) : (
-                                <span className="mysub-plan-card-price">{p.price_rub} ₽</span>
-                              )}
+                              <span className="mysub-plan-card-price">
+                                {promoApplied ? (
+                                  <>
+                                    <s>{p.price_rub} ₽</s> {discountedPriceForPlan(p.price_rub)} ₽
+                                  </>
+                                ) : (
+                                  `${p.price_rub} ₽`
+                                )}
+                              </span>
                             </button>
                           ))}
                         </div>
@@ -516,14 +533,18 @@ export default function MySubPage() {
                           <input
                             className="mysub-promo-input"
                             value={promoCodeInput}
-                            onChange={(e) => setPromoCodeInput(e.target.value.toUpperCase())}
+                            onChange={(e) => setPromoCodeInput(e.target.value.replace(/\s+/g, "").toLocaleUpperCase("ru-RU"))}
                             placeholder="Введите промокод"
                           />
                           <button type="button" className="ghost mysub-promo-apply-btn" onClick={() => void applyPromoCode()}>
                             Применить промокод
                           </button>
-                          {promoFeedback ? (
-                            <p className={`mysub-promo-feedback ${promoFeedback.type === "ok" ? "ok" : "err"}`}>{promoFeedback.text}</p>
+                          {promoApplied && selectedPlan ? (
+                            <p className="mysub-promo-feedback ok">
+                              Скидка применилась! Стоимость тарифа {discountedPriceForPlan(selectedPlan.price_rub)} руб
+                            </p>
+                          ) : promoFeedback ? (
+                            <p className="mysub-promo-feedback err">{promoFeedback.text}</p>
                           ) : null}
                         </div>
                         <a className="mysub-pay-link-btn" href={data.payment_url} target="_blank" rel="noreferrer">
