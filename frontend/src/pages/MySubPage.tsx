@@ -81,6 +81,7 @@ export default function MySubPage() {
   const [friendRewardBusy, setFriendRewardBusy] = useState(false);
   const [promoCodeInput, setPromoCodeInput] = useState("");
   const [promoApplied, setPromoApplied] = useState<{ code: string; discount_percent: number; final_price_rub: number } | null>(null);
+  const [promoFeedback, setPromoFeedback] = useState<{ type: "ok" | "err"; text: string } | null>(null);
 
   function getInitData(): string {
     const tgWebApp = (window as unknown as {
@@ -160,6 +161,7 @@ export default function MySubPage() {
 
   useEffect(() => {
     setPromoApplied(null);
+    setPromoFeedback(null);
   }, [payPlanId, payTargetId]);
 
   async function copySubscription(url: string) {
@@ -240,12 +242,12 @@ export default function MySubPage() {
 
   async function applyPromoCode() {
     if (!selectedPlan) {
-      setMsg("Сначала выберите тариф.");
+      setPromoFeedback({ type: "err", text: "Сначала выберите тариф." });
       return;
     }
     const code = promoCodeInput.trim().toUpperCase();
     if (!code) {
-      setMsg("Введите промокод.");
+      setPromoFeedback({ type: "err", text: "Введите промокод." });
       return;
     }
     try {
@@ -259,13 +261,13 @@ export default function MySubPage() {
         discount_percent: calc.discount_percent,
         final_price_rub: calc.final_price_rub,
       });
-      setMsg(`Скидка применилась! Стоимость тарифа ${calc.final_price_rub} руб`);
+      setPromoFeedback({ type: "ok", text: `Скидка применилась! Стоимость тарифа ${calc.final_price_rub} руб` });
     } catch (e) {
       setPromoApplied(null);
       const m = e instanceof Error ? e.message : String(e);
-      if (m.includes("promo_already_used")) setMsg("Этот промокод уже был использован вами.");
-      else if (m.includes("promo_not_found")) setMsg("Промокод не найден.");
-      else setMsg("Не удалось применить промокод.");
+      if (m.includes("promo_already_used")) setPromoFeedback({ type: "err", text: "Этот промокод уже был использован вами." });
+      else if (m.includes("promo_not_found")) setPromoFeedback({ type: "err", text: "Промокод не найден." });
+      else setPromoFeedback({ type: "err", text: "Не удалось применить промокод." });
     }
   }
 
@@ -510,15 +512,19 @@ export default function MySubPage() {
                       <div className="mysub-pay-step-body">
                         <p className="mysub-pay-step-title">Оплата</p>
                         <p className="sub">В комментарии к переводу укажите номер тарифа: <b>{payPlanId}</b>.</p>
-                        <div className="comms-file-row" style={{ marginBottom: "0.5rem" }}>
+                        <div className="mysub-promo-box">
                           <input
+                            className="mysub-promo-input"
                             value={promoCodeInput}
                             onChange={(e) => setPromoCodeInput(e.target.value.toUpperCase())}
                             placeholder="Введите промокод"
                           />
-                          <button type="button" className="ghost" onClick={() => void applyPromoCode()}>
+                          <button type="button" className="ghost mysub-promo-apply-btn" onClick={() => void applyPromoCode()}>
                             Применить промокод
                           </button>
+                          {promoFeedback ? (
+                            <p className={`mysub-promo-feedback ${promoFeedback.type === "ok" ? "ok" : "err"}`}>{promoFeedback.text}</p>
+                          ) : null}
                         </div>
                         <a className="mysub-pay-link-btn" href={data.payment_url} target="_blank" rel="noreferrer">
                           Перейти к оплате

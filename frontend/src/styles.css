@@ -2405,6 +2405,35 @@ th {
   margin-bottom: 0.45rem;
 }
 
+.mysub-promo-box {
+  display: grid;
+  gap: 0.45rem;
+  margin-bottom: 0.5rem;
+}
+
+.mysub-promo-input {
+  width: 100%;
+  min-height: 2.7rem;
+}
+
+.mysub-promo-apply-btn {
+  width: 100%;
+}
+
+.mysub-promo-feedback {
+  margin: 0;
+  font-size: 0.82rem;
+  line-height: 1.35;
+}
+
+.mysub-promo-feedback.ok {
+  color: #9ff0b5;
+}
+
+.mysub-promo-feedback.err {
+  color: #ffb4b4;
+}
+
 .mysub-plan-grid {
   display: grid;
   gap: 0.5rem;

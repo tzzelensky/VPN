@@ -30,7 +30,7 @@ export function mainMenuReply(isAdmin = false, referralEnabled = false) {
 
 /** Напоминание из админки: кнопка «Оплатить» — пока тот же callback, что и в меню (заглушка). */
 export const payReminderInline = {
-  inline_keyboard: [[{ text: "Оплатить", callback_data: "pay" }]],
+  inline_keyboard: [[{ text: "Оплата подписки", callback_data: "pay" }]],
 };
 
 export const buyGbReminderInline = {
