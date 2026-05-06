@@ -1727,6 +1727,31 @@ th {
   min-width: 0;
   display: flex;
   flex-direction: column;
+  align-self: start;
+  max-height: min(72vh, 40rem);
+  min-height: 0;
+}
+
+.promos-list-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  padding-right: 0.2rem;
+  margin-right: -0.2rem;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(148, 163, 184, 0.45) transparent;
+}
+
+.promos-list-scroll::-webkit-scrollbar {
+  width: 6px;
+}
+
+.promos-list-scroll::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.35);
+  border-radius: 999px;
 }
 
 .promo-modal {

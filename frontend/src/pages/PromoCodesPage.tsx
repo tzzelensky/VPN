@@ -189,18 +189,21 @@ export default function PromoCodesPage({ onLogout }: { onLogout: () => void }) {
             </button>
           </div>
 
-          <aside className="promos-list">
+          <aside className="promos-list" aria-label="Список промокодов">
             <label className="referral-feed-label">Созданные промокоды</label>
-            <div className="mysub-stat-list">
-              {promos.length === 0 ? (
-                <div>Промокодов пока нет.</div>
-              ) : (
-                promos.map((p) => (
-                  <button key={p.id} type="button" className="ghost" onClick={() => void openPromo(p)}>
-                    {p.name} ({p.code}) • {p.discount_percent}% • {p.active ? "активен" : "неактивен"} • применений: {p.usages_count}
-                  </button>
-                ))
-              )}
+            <div className="promos-list-scroll">
+              <div className="mysub-stat-list">
+                {promos.length === 0 ? (
+                  <div>Промокодов пока нет.</div>
+                ) : (
+                  promos.map((p) => (
+                    <button key={p.id} type="button" className="ghost" onClick={() => void openPromo(p)}>
+                      {p.name} ({p.code}) • {p.discount_percent}% • {p.active ? "активен" : "неактивен"} • применений:{" "}
+                      {p.usages_count}
+                    </button>
+                  ))
+                )}
+              </div>
             </div>
           </aside>
         </div>
