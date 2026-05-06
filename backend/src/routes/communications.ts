@@ -28,6 +28,7 @@ type SendBody = {
   photo_base64?: unknown;
   photo_mime?: unknown;
   photo_name?: unknown;
+  buttons?: unknown;
 };
 
 type SegmentBody = {
@@ -41,6 +42,8 @@ type SegmentBody = {
   gb_exact?: unknown;
   gb_from?: unknown;
   gb_to?: unknown;
+  preset_enabled?: unknown;
+  preset_text?: unknown;
 };
 
 function toChatId(raw: string): number | null {
@@ -112,7 +115,23 @@ function parseSegmentBody(body: SegmentBody): Omit<CommunicationSegmentRow, "id"
     gb_exact: Math.max(0, Math.floor(Number(body.gb_exact) || 0)),
     gb_from: Math.max(0, Math.floor(Number(body.gb_from) || 0)),
     gb_to: Math.max(0, Math.floor(Number(body.gb_to) || 0)),
+    preset_enabled:
+      body.preset_enabled === true || body.preset_enabled === 1 || body.preset_enabled === "1",
+    preset_text: String(body.preset_text ?? "").trim().slice(0, 4000),
   };
+}
+
+function parseButtons(raw: unknown): Array<{ text: string; callback_data: string }> {
+  const arr = Array.isArray(raw) ? raw : [];
+  const ids = [...new Set(arr.map((x) => String(x ?? "").trim()))];
+  const out: Array<{ text: string; callback_data: string }> = [];
+  for (const id of ids) {
+    if (id === "pay") out.push({ text: "Оплата подписки", callback_data: "pay" });
+    else if (id === "ref") out.push({ text: "Пригласи друга", callback_data: "ref_menu" });
+    else if (id === "sub") out.push({ text: "Подписка", callback_data: "sub" });
+    else if (id === "buygb") out.push({ text: "Докупить ГБ", callback_data: "buygb" });
+  }
+  return out;
 }
 
 router.get("/segments", (_req, res) => {
@@ -285,6 +304,8 @@ router.post("/send", async (req, res) => {
   const markText = String(body.mark_text ?? "").trim();
   const header = markEnabled ? `<b>${markText || "Сообщение от администратора"}</b>\n\n` : "";
   const caption = `${header}${text}`;
+  const buttons = parseButtons(body.buttons);
+  const replyMarkup = buttons.length > 0 ? { inline_keyboard: buttons.map((b) => [b]) } : undefined;
   for (const t of targets) {
     try {
       if (photo) {
@@ -293,9 +314,10 @@ router.post("/send", async (req, res) => {
           filename: photo.filename,
           mimeType: photo.mime,
           parse_mode: "HTML",
+          ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
         });
       } else {
-        await sendTelegramHtml(t.chatId, caption);
+        await sendTelegramHtml(t.chatId, caption, replyMarkup);
       }
       sent++;
     } catch (e) {

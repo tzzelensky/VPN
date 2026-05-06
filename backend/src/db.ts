@@ -215,6 +215,8 @@ export type CommunicationSegmentRow = {
   gb_exact?: number;
   gb_from?: number;
   gb_to?: number;
+  preset_enabled: boolean;
+  preset_text: string;
   created_at: string;
   updated_at: string;
 };
@@ -325,6 +327,8 @@ function defaultCommunicationSegments(): CommunicationSegmentRow[] {
       days_from: 0,
       days_to: 3,
       gb_mode: "any",
+      preset_enabled: false,
+      preset_text: "",
       created_at: now,
       updated_at: now,
     },
@@ -336,6 +340,8 @@ function defaultCommunicationSegments(): CommunicationSegmentRow[] {
       gb_mode: "range",
       gb_from: 0,
       gb_to: 10,
+      preset_enabled: false,
+      preset_text: "",
       created_at: now,
       updated_at: now,
     },
@@ -361,6 +367,8 @@ function normalizeCommunicationSegment(raw: unknown): CommunicationSegmentRow | 
   const gb_exact = Math.max(0, Math.floor(Number(o.gb_exact) || 0));
   const gb_from = Math.max(0, Math.floor(Number(o.gb_from) || 0));
   const gb_to = Math.max(0, Math.floor(Number(o.gb_to) || 0));
+  const preset_enabled = o.preset_enabled === true || o.preset_enabled === 1 || o.preset_enabled === "1";
+  const preset_text = String(o.preset_text ?? "").trim();
   return {
     id,
     name: name.slice(0, 120),
@@ -371,6 +379,8 @@ function normalizeCommunicationSegment(raw: unknown): CommunicationSegmentRow | 
     gb_mode,
     ...(gb_mode === "exact" ? { gb_exact } : {}),
     ...(gb_mode === "range" ? { gb_from: Math.min(gb_from, gb_to), gb_to: Math.max(gb_from, gb_to) } : {}),
+    preset_enabled,
+    preset_text: preset_enabled ? preset_text.slice(0, 4000) : "",
     created_at: String(o.created_at ?? new Date().toISOString()),
     updated_at: String(o.updated_at ?? o.created_at ?? new Date().toISOString()),
   };

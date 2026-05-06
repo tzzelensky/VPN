@@ -441,6 +441,7 @@ export type SendCommunicationPayload = {
   photo_base64?: string;
   photo_mime?: string;
   photo_name?: string;
+  buttons?: Array<"pay" | "ref" | "sub" | "buygb">;
 };
 
 export type SendCommunicationResult = {
@@ -473,6 +474,8 @@ export type CommunicationSegmentDto = {
   gb_exact?: number;
   gb_from?: number;
   gb_to?: number;
+  preset_enabled: boolean;
+  preset_text: string;
   created_at: string;
   updated_at: string;
 };

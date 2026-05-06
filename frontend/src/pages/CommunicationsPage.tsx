@@ -126,6 +126,9 @@ export default function CommunicationsPage({ onLogout }: { onLogout: () => void 
   const [gbTo, setGbTo] = useState(10);
   const [segmentBusy, setSegmentBusy] = useState(false);
   const [editingSegmentId, setEditingSegmentId] = useState("");
+  const [segmentPresetEnabled, setSegmentPresetEnabled] = useState(false);
+  const [segmentPresetText, setSegmentPresetText] = useState("");
+  const [messageButtons, setMessageButtons] = useState<Array<"pay" | "ref" | "sub" | "buygb">>([]);
 
   useEffect(() => {
     void (async () => {
@@ -177,6 +180,8 @@ export default function CommunicationsPage({ onLogout }: { onLogout: () => void 
     setGbExact(10);
     setGbFrom(0);
     setGbTo(10);
+    setSegmentPresetEnabled(false);
+    setSegmentPresetText("");
     setEditingSegmentId("");
   }
 
@@ -192,6 +197,8 @@ export default function CommunicationsPage({ onLogout }: { onLogout: () => void 
       gb_exact: gbExact,
       gb_from: gbFrom,
       gb_to: gbTo,
+      preset_enabled: segmentPresetEnabled,
+      preset_text: segmentPresetText.trim(),
     };
   }
 
@@ -232,6 +239,8 @@ export default function CommunicationsPage({ onLogout }: { onLogout: () => void 
     setGbExact(s.gb_exact ?? 0);
     setGbFrom(s.gb_from ?? 0);
     setGbTo(s.gb_to ?? 0);
+    setSegmentPresetEnabled(s.preset_enabled === true);
+    setSegmentPresetText(s.preset_text ?? "");
   }
 
   async function removeSegment(id: string) {
@@ -330,6 +339,7 @@ export default function CommunicationsPage({ onLogout }: { onLogout: () => void 
         ...(mode === "segment" ? { segment_id: segmentId } : {}),
         mark_enabled: markEnabled,
         mark_text: markText.trim(),
+        ...(messageButtons.length > 0 ? { buttons: messageButtons } : {}),
         ...(photoBase64
           ? {
               photo_base64: photoBase64,
@@ -474,7 +484,18 @@ export default function CommunicationsPage({ onLogout }: { onLogout: () => void 
             ) : mode === "segment" ? (
               <div className="form-field" style={{ marginTop: "0.9rem" }}>
                 <label>Сегмент для рассылки</label>
-                <select value={segmentId} disabled={busy} onChange={(e) => setSegmentId(e.target.value)}>
+                <select
+                  value={segmentId}
+                  disabled={busy}
+                  onChange={(e) => {
+                    const nextId = e.target.value;
+                    setSegmentId(nextId);
+                    const picked = segments.find((s) => s.id === nextId);
+                    if (picked?.preset_enabled && picked.preset_text.trim()) {
+                      setText(picked.preset_text);
+                    }
+                  }}
+                >
                   <option value="">Выберите сегмент</option>
                   {segments.map((s) => (
                     <option key={s.id} value={s.id}>
@@ -516,6 +537,34 @@ export default function CommunicationsPage({ onLogout }: { onLogout: () => void 
                 <span className="comms-file-name">{photo ? photo.name : "Не выбран ни один файл"}</span>
               </div>
               <p className="field-hint">{photo ? `Фото: ${photo.name}` : "Фото не выбрано."}</p>
+            </div>
+
+            <div className="form-field" style={{ marginTop: "0.5rem" }}>
+              <label>Кнопки под сообщением</label>
+              <div className="comms-buttons-grid">
+                {([
+                  ["pay", "Оплата подписки"],
+                  ["ref", "Пригласи друга"],
+                  ["sub", "Подписка"],
+                  ["buygb", "Докупить ГБ"],
+                ] as const).map(([id, label]) => {
+                  const active = messageButtons.includes(id);
+                  return (
+                    <button
+                      key={id}
+                      type="button"
+                      className={active ? "primary" : "ghost"}
+                      onClick={() =>
+                        setMessageButtons((prev) =>
+                          prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
+                        )
+                      }
+                    >
+                      {label}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
 
             <div className="row-actions">
@@ -579,8 +628,14 @@ export default function CommunicationsPage({ onLogout }: { onLogout: () => void 
                     ) : null}
                     {daysMode === "range" ? (
                       <div className="comms-range-row">
-                        <input inputMode="numeric" value={daysFrom} onChange={(e) => setDaysFrom(Math.max(0, Math.floor(Number(e.target.value) || 0)))} />
-                        <input inputMode="numeric" value={daysTo} onChange={(e) => setDaysTo(Math.max(0, Math.floor(Number(e.target.value) || 0)))} />
+                        <label className="comms-range-label">
+                          <span>От</span>
+                          <input inputMode="numeric" value={daysFrom} onChange={(e) => setDaysFrom(Math.max(0, Math.floor(Number(e.target.value) || 0)))} />
+                        </label>
+                        <label className="comms-range-label">
+                          <span>До</span>
+                          <input inputMode="numeric" value={daysTo} onChange={(e) => setDaysTo(Math.max(0, Math.floor(Number(e.target.value) || 0)))} />
+                        </label>
                       </div>
                     ) : null}
                   </div>
@@ -596,10 +651,37 @@ export default function CommunicationsPage({ onLogout }: { onLogout: () => void 
                     ) : null}
                     {gbMode === "range" ? (
                       <div className="comms-range-row">
-                        <input inputMode="numeric" value={gbFrom} onChange={(e) => setGbFrom(Math.max(0, Math.floor(Number(e.target.value) || 0)))} />
-                        <input inputMode="numeric" value={gbTo} onChange={(e) => setGbTo(Math.max(0, Math.floor(Number(e.target.value) || 0)))} />
+                        <label className="comms-range-label">
+                          <span>От</span>
+                          <input inputMode="numeric" value={gbFrom} onChange={(e) => setGbFrom(Math.max(0, Math.floor(Number(e.target.value) || 0)))} />
+                        </label>
+                        <label className="comms-range-label">
+                          <span>До</span>
+                          <input inputMode="numeric" value={gbTo} onChange={(e) => setGbTo(Math.max(0, Math.floor(Number(e.target.value) || 0)))} />
+                        </label>
                       </div>
                     ) : null}
+                  </div>
+                  <div className="form-field">
+                    <div className="shop-toggle-row">
+                      <div>
+                        <label>Готовый текст для рассылки</label>
+                        <p className="field-hint">По умолчанию выключено. Если включить, текст сегмента подставится в сообщение.</p>
+                      </div>
+                      <button
+                        type="button"
+                        className={`toggle ${segmentPresetEnabled ? "on" : ""}`}
+                        onClick={() => setSegmentPresetEnabled((v) => !v)}
+                      />
+                    </div>
+                    <textarea
+                      className="comms-textarea"
+                      style={{ minHeight: "90px" }}
+                      disabled={!segmentPresetEnabled}
+                      value={segmentPresetText}
+                      onChange={(e) => setSegmentPresetText(e.target.value)}
+                      placeholder="Текст для сегмента..."
+                    />
                   </div>
                   <div className="row-actions">
                     <button type="button" className="primary" disabled={segmentBusy} onClick={() => void saveSegment()}>
@@ -613,7 +695,7 @@ export default function CommunicationsPage({ onLogout }: { onLogout: () => void 
                   </div>
                 </div>
                 <aside className="comms-segment-list">
-                  <label className="referral-feed-label">Сегменты справа</label>
+                  <label className="referral-feed-label">Сегменты</label>
                   <div className="mysub-stat-list">
                     {segments.map((s) => (
                       <div key={s.id}>
