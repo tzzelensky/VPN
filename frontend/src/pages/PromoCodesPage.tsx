@@ -1,6 +1,32 @@
 import { useEffect, useState } from "react";
 import DashboardLayout from "../components/DashboardLayout";
-import { createPromoCode, deletePromoCode, listPromoCodeUsages, listPromoCodes, type PromoCodeDto, type PromoCodeUsageDto } from "../api";
+import {
+  createPromoCode,
+  deletePromoCode,
+  listPromoCodeUsages,
+  listPromoCodes,
+  patchPromoCode,
+  type PromoCodeDto,
+  type PromoCodeUsageDto,
+} from "../api";
+
+function toDateInputValue(raw: string): string {
+  if (!raw) return "";
+  const dt = new Date(raw);
+  if (!Number.isFinite(dt.getTime())) return "";
+  const y = dt.getFullYear();
+  const m = String(dt.getMonth() + 1).padStart(2, "0");
+  const d = String(dt.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
+function toIsoEndOfDay(raw: string): string {
+  const v = raw.trim();
+  if (!v) return "";
+  const dt = new Date(`${v}T23:59:59`);
+  if (!Number.isFinite(dt.getTime())) return "";
+  return dt.toISOString();
+}
 
 export default function PromoCodesPage({ onLogout }: { onLogout: () => void }) {
   const [promos, setPromos] = useState<PromoCodeDto[]>([]);
@@ -8,11 +34,20 @@ export default function PromoCodesPage({ onLogout }: { onLogout: () => void }) {
   const [code, setCode] = useState("");
   const [discount, setDiscount] = useState(10);
   const [oneTime, setOneTime] = useState(true);
+  const [active, setActive] = useState(true);
+  const [validUntil, setValidUntil] = useState("");
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ type: "ok" | "err"; text: string } | null>(null);
   const [openedPromo, setOpenedPromo] = useState<PromoCodeDto | null>(null);
   const [usages, setUsages] = useState<PromoCodeUsageDto[]>([]);
   const [deleting, setDeleting] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [editName, setEditName] = useState("");
+  const [editCode, setEditCode] = useState("");
+  const [editDiscount, setEditDiscount] = useState(10);
+  const [editOneTime, setEditOneTime] = useState(true);
+  const [editActive, setEditActive] = useState(true);
+  const [editValidUntil, setEditValidUntil] = useState("");
 
   async function reload() {
     const data = await listPromoCodes();
@@ -32,11 +67,15 @@ export default function PromoCodesPage({ onLogout }: { onLogout: () => void }) {
         code: code.trim().toLocaleUpperCase("ru-RU"),
         discount_percent: Math.max(1, Math.min(99, Math.floor(Number(discount) || 0))),
         one_time_per_user: oneTime,
+        active,
+        valid_until: toIsoEndOfDay(validUntil),
       });
       setName("");
       setCode("");
       setDiscount(10);
       setOneTime(true);
+      setActive(true);
+      setValidUntil("");
       setMsg({ type: "ok", text: "Промокод создан." });
       await reload();
     } catch (e) {
@@ -48,6 +87,13 @@ export default function PromoCodesPage({ onLogout }: { onLogout: () => void }) {
 
   async function openPromo(p: PromoCodeDto) {
     setOpenedPromo(p);
+    setEditing(false);
+    setEditName(p.name);
+    setEditCode(p.code);
+    setEditDiscount(p.discount_percent);
+    setEditOneTime(p.one_time_per_user);
+    setEditActive(p.active !== false);
+    setEditValidUntil(toDateInputValue(p.valid_until));
     try {
       const data = await listPromoCodeUsages(p.id);
       setUsages(data.usages);
@@ -70,6 +116,30 @@ export default function PromoCodesPage({ onLogout }: { onLogout: () => void }) {
       setMsg({ type: "err", text: String(e) });
     } finally {
       setDeleting(false);
+    }
+  }
+
+  async function onSavePromo() {
+    if (!openedPromo) return;
+    setBusy(true);
+    setMsg(null);
+    try {
+      const updated = await patchPromoCode(openedPromo.id, {
+        name: editName.trim(),
+        code: editCode.trim().toLocaleUpperCase("ru-RU"),
+        discount_percent: Math.max(1, Math.min(99, Math.floor(Number(editDiscount) || 0))),
+        one_time_per_user: editOneTime,
+        active: editActive,
+        valid_until: toIsoEndOfDay(editValidUntil),
+      });
+      setOpenedPromo(updated);
+      setEditing(false);
+      setMsg({ type: "ok", text: "Промокод обновлен." });
+      await reload();
+    } catch (e) {
+      setMsg({ type: "err", text: String(e) });
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -106,6 +176,18 @@ export default function PromoCodesPage({ onLogout }: { onLogout: () => void }) {
             </div>
             <div className="form-field shop-toggle-row">
               <div>
+                <label>Промокод активен</label>
+                <p className="field-hint">Неактивный промокод нельзя применить.</p>
+              </div>
+              <button type="button" className={`toggle ${active ? "on" : ""}`} onClick={() => setActive((v) => !v)} />
+            </div>
+            <div className="form-field">
+              <label>Действует до (дата)</label>
+              <input type="date" value={validUntil} onChange={(e) => setValidUntil(e.target.value)} />
+              <p className="field-hint">Пусто = без ограничения срока.</p>
+            </div>
+            <div className="form-field shop-toggle-row">
+              <div>
                 <label>Использовать 1 раз с 1 пользователем</label>
                 <p className="field-hint">Если включено, один и тот же пользователь не сможет применить код повторно.</p>
               </div>
@@ -124,7 +206,7 @@ export default function PromoCodesPage({ onLogout }: { onLogout: () => void }) {
               ) : (
                 promos.map((p) => (
                   <button key={p.id} type="button" className="ghost" onClick={() => void openPromo(p)}>
-                    {p.name} ({p.code}) • {p.discount_percent}% • применений: {p.usages_count}
+                    {p.name} ({p.code}) • {p.discount_percent}% • {p.active ? "активен" : "неактивен"} • применений: {p.usages_count}
                   </button>
                 ))
               )}
@@ -143,9 +225,48 @@ export default function PromoCodesPage({ onLogout }: { onLogout: () => void }) {
               </button>
             </div>
             <div className="modal-body">
-              <p className="sub">
-                Код: <b>{openedPromo.code}</b> • Скидка: <b>{openedPromo.discount_percent}%</b>
-              </p>
+              {editing ? (
+                <div className="promos-create">
+                  <div className="form-field">
+                    <label>Название промокода</label>
+                    <input value={editName} onChange={(e) => setEditName(e.target.value)} />
+                  </div>
+                  <div className="form-field">
+                    <label>Текст промокода</label>
+                    <input value={editCode} onChange={(e) => setEditCode(e.target.value.toLocaleUpperCase("ru-RU").replace(/\s+/g, ""))} />
+                  </div>
+                  <div className="form-field">
+                    <label>Процент скидки</label>
+                    <input
+                      inputMode="numeric"
+                      value={editDiscount}
+                      onChange={(e) => setEditDiscount(Math.max(1, Math.min(99, Math.floor(Number(e.target.value) || 0))))}
+                    />
+                  </div>
+                  <div className="form-field shop-toggle-row">
+                    <div>
+                      <label>Использовать 1 раз с 1 пользователем</label>
+                    </div>
+                    <button type="button" className={`toggle ${editOneTime ? "on" : ""}`} onClick={() => setEditOneTime((v) => !v)} />
+                  </div>
+                  <div className="form-field shop-toggle-row">
+                    <div>
+                      <label>Промокод активен</label>
+                    </div>
+                    <button type="button" className={`toggle ${editActive ? "on" : ""}`} onClick={() => setEditActive((v) => !v)} />
+                  </div>
+                  <div className="form-field">
+                    <label>Действует до (дата)</label>
+                    <input type="date" value={editValidUntil} onChange={(e) => setEditValidUntil(e.target.value)} />
+                  </div>
+                </div>
+              ) : (
+                <p className="sub">
+                  Код: <b>{openedPromo.code}</b> • Скидка: <b>{openedPromo.discount_percent}%</b> •{" "}
+                  <b>{openedPromo.active ? "активен" : "неактивен"}</b>
+                  {openedPromo.valid_until ? <> • До: <b>{new Date(openedPromo.valid_until).toLocaleDateString("ru-RU")}</b></> : null}
+                </p>
+              )}
               <p className="sub">Применений: {usages.length}</p>
               <div className="mysub-stat-list">
                 {usages.length === 0 ? (
@@ -161,6 +282,20 @@ export default function PromoCodesPage({ onLogout }: { onLogout: () => void }) {
               </div>
             </div>
             <div className="modal-footer">
+              {editing ? (
+                <>
+                  <button type="button" className="ghost" disabled={busy} onClick={() => setEditing(false)}>
+                    Отмена
+                  </button>
+                  <button type="button" className="primary" disabled={busy} onClick={() => void onSavePromo()}>
+                    {busy ? "Сохранение..." : "Сохранить"}
+                  </button>
+                </>
+              ) : (
+                <button type="button" className="ghost" onClick={() => setEditing(true)}>
+                  Редактировать
+                </button>
+              )}
               <button type="button" className="ghost" disabled={deleting} onClick={() => void onDeletePromo()}>
                 {deleting ? "Удаление..." : "Удалить промокод"}
               </button>

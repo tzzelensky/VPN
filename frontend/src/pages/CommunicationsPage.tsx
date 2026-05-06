@@ -6,9 +6,11 @@ import {
   listCommunicationSegmentUsers,
   listCommunicationSegments,
   listCommunicationTargets,
+  listPromoCodes,
   patchCommunicationSegment,
   sendCommunication,
   type CommunicationSegmentDto,
+  type PromoCodeDto,
   type CommunicationTargetDto,
   type SendCommunicationResult,
 } from "../api";
@@ -132,6 +134,10 @@ export default function CommunicationsPage({ onLogout }: { onLogout: () => void 
   const [messageButtons, setMessageButtons] = useState<Array<"pay" | "ref" | "sub" | "buygb">>([]);
   const [segmentPreviewUsers, setSegmentPreviewUsers] = useState<Array<{ id: number; name: string; tg_id: string }>>([]);
   const [segmentPreviewLoading, setSegmentPreviewLoading] = useState(false);
+  const [autoTextMenuOpen, setAutoTextMenuOpen] = useState(false);
+  const [promoPickerOpen, setPromoPickerOpen] = useState(false);
+  const [promoPickerBusy, setPromoPickerBusy] = useState(false);
+  const [promoPickerRows, setPromoPickerRows] = useState<PromoCodeDto[]>([]);
 
   useEffect(() => {
     void (async () => {
@@ -259,6 +265,30 @@ export default function CommunicationsPage({ onLogout }: { onLogout: () => void 
     } finally {
       setSegmentBusy(false);
     }
+  }
+
+  async function openPromoPickerForPreset() {
+    setAutoTextMenuOpen(false);
+    setPromoPickerBusy(true);
+    setPromoPickerOpen(true);
+    try {
+      const data = await listPromoCodes();
+      setPromoPickerRows(data.promos.filter((p) => p.active !== false));
+    } catch {
+      setPromoPickerRows([]);
+    } finally {
+      setPromoPickerBusy(false);
+    }
+  }
+
+  function applyPromoToPreset(promo: PromoCodeDto) {
+    setSegmentPresetEnabled(true);
+    setSegmentPresetText((prev) => {
+      const next = prev.trim();
+      if (!next) return promo.code;
+      return `${next} ${promo.code}`.trim();
+    });
+    setPromoPickerOpen(false);
   }
 
   useEffect(() => {
@@ -722,6 +752,23 @@ export default function CommunicationsPage({ onLogout }: { onLogout: () => void 
                       onChange={(e) => setSegmentPresetText(e.target.value)}
                       placeholder="Текст для сегмента..."
                     />
+                    <div className="comms-autotext-wrap">
+                      <button
+                        type="button"
+                        className="ghost"
+                        onClick={() => setAutoTextMenuOpen((v) => !v)}
+                        disabled={!segmentPresetEnabled}
+                      >
+                        Автотекст
+                      </button>
+                      {autoTextMenuOpen ? (
+                        <div className="comms-autotext-menu">
+                          <button type="button" className="ghost" onClick={() => void openPromoPickerForPreset()}>
+                            {"{promocode}"}
+                          </button>
+                        </div>
+                      ) : null}
+                    </div>
                   </div>
                   <div className="row-actions">
                     <button type="button" className="primary" disabled={segmentBusy} onClick={() => void saveSegment()}>
@@ -860,6 +907,39 @@ export default function CommunicationsPage({ onLogout }: { onLogout: () => void 
               </button>
               <button type="button" className="primary" onClick={savePicker}>
                 Ок
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {promoPickerOpen ? (
+        <div className="modal-backdrop" onClick={() => setPromoPickerOpen(false)}>
+          <div className="modal promo-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-head">
+              <h2>Выбор промокода для автотекста</h2>
+              <button type="button" className="ghost modal-close" onClick={() => setPromoPickerOpen(false)}>
+                ×
+              </button>
+            </div>
+            <div className="modal-body">
+              {promoPickerBusy ? (
+                <p className="sub">Загрузка промокодов...</p>
+              ) : promoPickerRows.length === 0 ? (
+                <p className="sub">Нет активных промокодов для выбора.</p>
+              ) : (
+                <div className="mysub-stat-list">
+                  {promoPickerRows.map((p) => (
+                    <button key={p.id} type="button" className="ghost" onClick={() => applyPromoToPreset(p)}>
+                      {p.name} ({p.code}) • {p.discount_percent}%
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div className="modal-footer">
+              <button type="button" className="primary" onClick={() => setPromoPickerOpen(false)}>
+                Закрыть
               </button>
             </div>
           </div>

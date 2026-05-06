@@ -5,6 +5,7 @@ import {
   deletePromoCode,
   listPromoCodes,
   listPromoCodeUsages,
+  updatePromoCode,
   validatePromoCodeForUser,
 } from "../db.js";
 import { requireAuth } from "../middleware/requireAuth.js";
@@ -29,14 +30,53 @@ router.post("/", (req, res) => {
       code?: unknown;
       discount_percent?: unknown;
       one_time_per_user?: unknown;
+      active?: unknown;
+      valid_until?: unknown;
     };
     const created = createPromoCode({
       name: String(body.name ?? "").trim(),
       code: String(body.code ?? "").trim(),
       discount_percent: Math.floor(Number(body.discount_percent) || 0),
       one_time_per_user: body.one_time_per_user === true || body.one_time_per_user === 1 || body.one_time_per_user === "1",
+      active: !(body.active === false || body.active === 0 || body.active === "0"),
+      valid_until: String(body.valid_until ?? "").trim(),
     });
     res.status(201).json(created);
+  } catch (e) {
+    res.status(400).json({ error: e instanceof Error ? e.message : String(e) });
+  }
+});
+
+router.patch("/:id", (req, res) => {
+  const id = String(req.params.id ?? "").trim();
+  if (!id) {
+    res.status(400).json({ error: "promo_id_required" });
+    return;
+  }
+  try {
+    const body = (req.body ?? {}) as {
+      name?: unknown;
+      code?: unknown;
+      discount_percent?: unknown;
+      one_time_per_user?: unknown;
+      active?: unknown;
+      valid_until?: unknown;
+    };
+    const updated = updatePromoCode(id, {
+      ...(body.name !== undefined ? { name: String(body.name ?? "").trim() } : {}),
+      ...(body.code !== undefined ? { code: String(body.code ?? "").trim() } : {}),
+      ...(body.discount_percent !== undefined ? { discount_percent: Math.floor(Number(body.discount_percent) || 0) } : {}),
+      ...(body.one_time_per_user !== undefined
+        ? { one_time_per_user: body.one_time_per_user === true || body.one_time_per_user === 1 || body.one_time_per_user === "1" }
+        : {}),
+      ...(body.active !== undefined ? { active: body.active === true || body.active === 1 || body.active === "1" } : {}),
+      ...(body.valid_until !== undefined ? { valid_until: String(body.valid_until ?? "").trim() } : {}),
+    });
+    if (!updated) {
+      res.status(404).json({ error: "promo_not_found" });
+      return;
+    }
+    res.json(updated);
   } catch (e) {
     res.status(400).json({ error: e instanceof Error ? e.message : String(e) });
   }
@@ -71,6 +111,10 @@ router.post("/preview", (req, res) => {
       res.status(409).json({ error: msg });
       return;
     }
+    if (msg === "promo_inactive" || msg === "promo_expired") {
+      res.status(409).json({ error: msg });
+      return;
+    }
     res.status(400).json({ error: msg });
   }
 });
@@ -89,6 +133,10 @@ router.post("/validate", (req, res) => {
       return;
     }
     if (msg === "promo_already_used") {
+      res.status(409).json({ error: msg });
+      return;
+    }
+    if (msg === "promo_inactive" || msg === "promo_expired") {
       res.status(409).json({ error: msg });
       return;
     }

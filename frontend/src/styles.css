@@ -1963,6 +1963,31 @@ th {
   animation: comms-loading-line 1.05s linear infinite;
 }
 
+.comms-autotext-wrap {
+  margin-top: 0.55rem;
+  position: relative;
+  display: inline-flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.comms-autotext-menu {
+  position: absolute;
+  top: calc(100% + 0.25rem);
+  left: 0;
+  z-index: 6;
+  min-width: 160px;
+  padding: 0.35rem;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #0e1522;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.32);
+}
+
+.comms-autotext-menu button {
+  width: 100%;
+}
+
 @keyframes comms-loading-line {
   from {
     background-position: 100% 0;

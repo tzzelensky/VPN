@@ -188,6 +188,8 @@ export type PromoCodeRow = {
   code: string;
   discount_percent: number;
   one_time_per_user: boolean;
+  active: boolean;
+  valid_until: string;
   created_at: string;
   updated_at: string;
 };
@@ -398,6 +400,8 @@ function normalizePromoCode(raw: unknown): PromoCodeRow | null {
     code,
     discount_percent: Math.min(99, Math.max(1, Math.floor(Number(o.discount_percent) || 0))),
     one_time_per_user: o.one_time_per_user === true || o.one_time_per_user === 1 || o.one_time_per_user === "1",
+    active: !(o.active === false || o.active === 0 || o.active === "0"),
+    valid_until: String(o.valid_until ?? "").trim(),
     created_at: String(o.created_at ?? new Date().toISOString()),
     updated_at: String(o.updated_at ?? o.created_at ?? new Date().toISOString()),
   };
@@ -1546,6 +1550,8 @@ export function createPromoCode(input: {
   code: string;
   discount_percent: number;
   one_time_per_user: boolean;
+  active?: boolean;
+  valid_until?: string;
 }): PromoCodeRow {
   const name = String(input.name ?? "").trim();
   const code = normalizePromoCodeText(input.code);
@@ -1564,12 +1570,62 @@ export function createPromoCode(input: {
       code,
       discount_percent: discount,
       one_time_per_user: input.one_time_per_user === true,
+      active: input.active !== false,
+      valid_until: String(input.valid_until ?? "").trim(),
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     };
     store.promo_codes = [out!, ...rows];
   });
   return out!;
+}
+
+export function updatePromoCode(
+  promoId: string,
+  patch: Partial<{
+    name: string;
+    code: string;
+    discount_percent: number;
+    one_time_per_user: boolean;
+    active: boolean;
+    valid_until: string;
+  }>,
+): PromoCodeRow | undefined {
+  const id = String(promoId ?? "").trim();
+  if (!id) return undefined;
+  let out: PromoCodeRow | undefined;
+  mutate((store) => {
+    const rows = store.promo_codes ?? [];
+    const idx = rows.findIndex((p) => p.id === id);
+    if (idx === -1) return;
+    const cur = rows[idx]!;
+    const nextName = patch.name !== undefined ? String(patch.name).trim() : cur.name;
+    const nextCode = patch.code !== undefined ? normalizePromoCodeText(patch.code) : cur.code;
+    if (!nextName) throw new Error("promo_name_required");
+    if (!nextCode) throw new Error("promo_code_required");
+    if (!/^[\p{L}\p{N}_-]{3,40}$/u.test(nextCode)) throw new Error("promo_code_invalid");
+    if (rows.some((r, i) => i !== idx && r.code === nextCode)) throw new Error("promo_code_exists");
+    const nextDiscount =
+      patch.discount_percent !== undefined
+        ? Math.min(99, Math.max(1, Math.floor(Number(patch.discount_percent) || 0)))
+        : cur.discount_percent;
+    if (!Number.isFinite(nextDiscount) || nextDiscount <= 0) throw new Error("promo_discount_invalid");
+    const nextValidUntil =
+      patch.valid_until !== undefined ? String(patch.valid_until ?? "").trim() : String(cur.valid_until ?? "").trim();
+    out = {
+      ...cur,
+      name: nextName,
+      code: nextCode,
+      discount_percent: nextDiscount,
+      one_time_per_user: patch.one_time_per_user !== undefined ? patch.one_time_per_user === true : cur.one_time_per_user,
+      active: patch.active !== undefined ? patch.active === true : cur.active,
+      valid_until: nextValidUntil,
+      updated_at: new Date().toISOString(),
+    };
+    rows[idx] = out!;
+    store.promo_codes = rows;
+  });
+  return out;
 }
 
 export function deletePromoCode(promoId: string): boolean {
@@ -1605,6 +1661,11 @@ export function hasPromoCodeUsageByUser(promoId: string, tgUserId: number): bool
 export function validatePromoCodeForUser(code: string, tgUserId: number): PromoCodeRow {
   const promo = getPromoCodeByText(code);
   if (!promo) throw new Error("promo_not_found");
+  if (promo.active === false) throw new Error("promo_inactive");
+  if (promo.valid_until) {
+    const expiryMs = Date.parse(promo.valid_until);
+    if (Number.isFinite(expiryMs) && Date.now() > expiryMs) throw new Error("promo_expired");
+  }
   const uid = Math.floor(Number(tgUserId));
   if (!Number.isFinite(uid) || uid <= 0) throw new Error("promo_bad_user");
   if (promo.one_time_per_user && hasPromoCodeUsageByUser(promo.id, uid)) {

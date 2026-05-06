@@ -638,6 +638,8 @@ export type PromoCodeDto = {
   code: string;
   discount_percent: number;
   one_time_per_user: boolean;
+  active: boolean;
+  valid_until: string;
   created_at: string;
   updated_at: string;
   usages_count: number;
@@ -664,9 +666,31 @@ export async function createPromoCode(payload: {
   code: string;
   discount_percent: number;
   one_time_per_user: boolean;
+  active?: boolean;
+  valid_until?: string;
 }): Promise<PromoCodeDto> {
   const res = await fetch("/api/promo-codes", {
     method: "POST",
+    credentials: "include",
+    headers: jsonHeaders,
+    body: JSON.stringify(payload),
+  });
+  return handle(res);
+}
+
+export async function patchPromoCode(
+  promoId: string,
+  payload: Partial<{
+    name: string;
+    code: string;
+    discount_percent: number;
+    one_time_per_user: boolean;
+    active: boolean;
+    valid_until: string;
+  }>,
+): Promise<PromoCodeDto> {
+  const res = await fetch(`/api/promo-codes/${encodeURIComponent(promoId)}`, {
+    method: "PATCH",
     credentials: "include",
     headers: jsonHeaders,
     body: JSON.stringify(payload),
