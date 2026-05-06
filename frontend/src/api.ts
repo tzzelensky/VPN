@@ -431,10 +431,11 @@ export async function listCommunicationTargets(): Promise<{ users: Communication
 }
 
 export type SendCommunicationPayload = {
-  mode: "global" | "single" | "selected";
+  mode: "global" | "single" | "selected" | "segment";
   text: string;
   user_id?: number;
   user_ids?: number[];
+  segment_id?: string;
   mark_enabled?: boolean;
   mark_text?: string;
   photo_base64?: string;
@@ -456,6 +457,58 @@ export async function sendCommunication(payload: SendCommunicationPayload): Prom
     credentials: "include",
     headers: jsonHeaders,
     body: JSON.stringify(payload),
+  });
+  return handle(res);
+}
+
+export type CommunicationSegmentDto = {
+  id: string;
+  name: string;
+  user_ids: number[];
+  days_mode: "any" | "exact" | "range";
+  days_exact?: number;
+  days_from?: number;
+  days_to?: number;
+  gb_mode: "any" | "exact" | "range";
+  gb_exact?: number;
+  gb_from?: number;
+  gb_to?: number;
+  created_at: string;
+  updated_at: string;
+};
+
+export async function listCommunicationSegments(): Promise<{ segments: CommunicationSegmentDto[] }> {
+  const res = await fetch("/api/communications/segments", { credentials: "include" });
+  return handle(res);
+}
+
+export async function createCommunicationSegment(payload: Omit<CommunicationSegmentDto, "id" | "created_at" | "updated_at">): Promise<CommunicationSegmentDto> {
+  const res = await fetch("/api/communications/segments", {
+    method: "POST",
+    credentials: "include",
+    headers: jsonHeaders,
+    body: JSON.stringify(payload),
+  });
+  return handle(res);
+}
+
+export async function patchCommunicationSegment(
+  id: string,
+  payload: Omit<CommunicationSegmentDto, "id" | "created_at" | "updated_at">,
+): Promise<CommunicationSegmentDto> {
+  const res = await fetch(`/api/communications/segments/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    credentials: "include",
+    headers: jsonHeaders,
+    body: JSON.stringify(payload),
+  });
+  return handle(res);
+}
+
+export async function deleteCommunicationSegment(id: string): Promise<{ ok: boolean }> {
+  const res = await fetch(`/api/communications/segments/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+    credentials: "include",
   });
   return handle(res);
 }

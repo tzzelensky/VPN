@@ -1,13 +1,18 @@
 import { useEffect, useMemo, useState } from "react";
 import DashboardLayout from "../components/DashboardLayout";
 import {
+  createCommunicationSegment,
+  deleteCommunicationSegment,
+  listCommunicationSegments,
   listCommunicationTargets,
+  patchCommunicationSegment,
   sendCommunication,
+  type CommunicationSegmentDto,
   type CommunicationTargetDto,
   type SendCommunicationResult,
 } from "../api";
 
-type Mode = "global" | "single" | "selected";
+type Mode = "global" | "single" | "selected" | "segment";
 const MAX_REQUEST_IMAGE_BYTES = 750_000;
 const LS_KEY_MARK_ENABLED = "comms_mark_enabled";
 const LS_KEY_MARK_TEXT = "comms_mark_text";
@@ -85,6 +90,7 @@ async function prepareCompressedPhoto(file: File): Promise<{ base64: string; mim
 
 export default function CommunicationsPage({ onLogout }: { onLogout: () => void }) {
   const [targets, setTargets] = useState<CommunicationTargetDto[]>([]);
+  const [segments, setSegments] = useState<CommunicationSegmentDto[]>([]);
   const [mode, setMode] = useState<Mode>("global");
   const [userId, setUserId] = useState<number>(0);
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
@@ -107,12 +113,27 @@ export default function CommunicationsPage({ onLogout }: { onLogout: () => void 
     if (typeof window === "undefined") return "Сообщение от администратора";
     return window.localStorage.getItem(LS_KEY_MARK_TEXT) || "Сообщение от администратора";
   });
+  const [segmentId, setSegmentId] = useState("");
+  const [segmentName, setSegmentName] = useState("");
+  const [segmentUserIds, setSegmentUserIds] = useState<number[]>([]);
+  const [daysMode, setDaysMode] = useState<"any" | "exact" | "range">("any");
+  const [daysExact, setDaysExact] = useState(3);
+  const [daysFrom, setDaysFrom] = useState(0);
+  const [daysTo, setDaysTo] = useState(3);
+  const [gbMode, setGbMode] = useState<"any" | "exact" | "range">("any");
+  const [gbExact, setGbExact] = useState(10);
+  const [gbFrom, setGbFrom] = useState(0);
+  const [gbTo, setGbTo] = useState(10);
+  const [segmentBusy, setSegmentBusy] = useState(false);
+  const [editingSegmentId, setEditingSegmentId] = useState("");
 
   useEffect(() => {
     void (async () => {
       try {
-        const data = await listCommunicationTargets();
+        const [data, segs] = await Promise.all([listCommunicationTargets(), listCommunicationSegments()]);
         setTargets(data.users);
+        setSegments(segs.segments);
+        if (segs.segments[0]) setSegmentId(segs.segments[0].id);
       } catch (e) {
         setMsg({ type: "err", text: String(e) });
       }
@@ -122,6 +143,9 @@ export default function CommunicationsPage({ onLogout }: { onLogout: () => void 
   const reachable = useMemo(() => {
     return targets.filter((u) => Number.isFinite(Number(u.tg_id)) && Number(u.tg_id) > 0);
   }, [targets]);
+  const chatReachable = useMemo(() => {
+    return reachable.filter((u) => u.has_chat === true);
+  }, [reachable]);
   const reachableById = useMemo(() => new Map(reachable.map((u) => [u.id, u])), [reachable]);
   const selectedUsers = useMemo(
     () => selectedIds.map((id) => reachableById.get(id)).filter((x): x is CommunicationTargetDto => Boolean(x)),
@@ -141,6 +165,89 @@ export default function CommunicationsPage({ onLogout }: { onLogout: () => void 
     if (!q) return targets;
     return targets.filter((u) => `${u.id} ${u.name} ${u.tg_id}`.toLowerCase().includes(q));
   }, [targets, usersQuery]);
+
+  function resetSegmentForm() {
+    setSegmentName("");
+    setSegmentUserIds([]);
+    setDaysMode("any");
+    setDaysExact(3);
+    setDaysFrom(0);
+    setDaysTo(3);
+    setGbMode("any");
+    setGbExact(10);
+    setGbFrom(0);
+    setGbTo(10);
+    setEditingSegmentId("");
+  }
+
+  function segmentPayload() {
+    return {
+      name: segmentName.trim(),
+      user_ids: segmentUserIds,
+      days_mode: daysMode,
+      days_exact: daysExact,
+      days_from: daysFrom,
+      days_to: daysTo,
+      gb_mode: gbMode,
+      gb_exact: gbExact,
+      gb_from: gbFrom,
+      gb_to: gbTo,
+    };
+  }
+
+  async function reloadSegments() {
+    const segs = await listCommunicationSegments();
+    setSegments(segs.segments);
+    if (!segmentId && segs.segments[0]) setSegmentId(segs.segments[0].id);
+  }
+
+  async function saveSegment() {
+    if (!segmentName.trim()) {
+      setMsg({ type: "err", text: "Введите название сегмента." });
+      return;
+    }
+    setSegmentBusy(true);
+    try {
+      if (editingSegmentId) await patchCommunicationSegment(editingSegmentId, segmentPayload());
+      else await createCommunicationSegment(segmentPayload());
+      await reloadSegments();
+      resetSegmentForm();
+      setMsg({ type: "ok", text: "Сегмент сохранен." });
+    } catch (e) {
+      setMsg({ type: "err", text: String(e) });
+    } finally {
+      setSegmentBusy(false);
+    }
+  }
+
+  function editSegment(s: CommunicationSegmentDto) {
+    setEditingSegmentId(s.id);
+    setSegmentName(s.name);
+    setSegmentUserIds(s.user_ids ?? []);
+    setDaysMode(s.days_mode);
+    setDaysExact(s.days_exact ?? 0);
+    setDaysFrom(s.days_from ?? 0);
+    setDaysTo(s.days_to ?? 0);
+    setGbMode(s.gb_mode);
+    setGbExact(s.gb_exact ?? 0);
+    setGbFrom(s.gb_from ?? 0);
+    setGbTo(s.gb_to ?? 0);
+  }
+
+  async function removeSegment(id: string) {
+    setSegmentBusy(true);
+    try {
+      await deleteCommunicationSegment(id);
+      await reloadSegments();
+      if (segmentId === id) setSegmentId("");
+      if (editingSegmentId === id) resetSegmentForm();
+      setMsg({ type: "ok", text: "Сегмент удален." });
+    } catch (e) {
+      setMsg({ type: "err", text: String(e) });
+    } finally {
+      setSegmentBusy(false);
+    }
+  }
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -198,6 +305,10 @@ export default function CommunicationsPage({ onLogout }: { onLogout: () => void 
       setMsg({ type: "err", text: "Выберите клиентов через кнопку «Выбор клиентов»." });
       return;
     }
+    if (mode === "segment" && !segmentId) {
+      setMsg({ type: "err", text: "Выберите сегмент для рассылки." });
+      return;
+    }
 
     setBusy(true);
     try {
@@ -216,6 +327,7 @@ export default function CommunicationsPage({ onLogout }: { onLogout: () => void 
         text: cleanText,
         ...(mode === "single" ? { user_id: userId } : {}),
         ...(mode === "selected" ? { user_ids: selectedUsers.map((u) => u.id) } : {}),
+        ...(mode === "segment" ? { segment_id: segmentId } : {}),
         mark_enabled: markEnabled,
         mark_text: markText.trim(),
         ...(photoBase64
@@ -287,6 +399,14 @@ export default function CommunicationsPage({ onLogout }: { onLogout: () => void 
               >
                 Выбор клиентов
               </button>
+              <button
+                type="button"
+                className={mode === "segment" ? "primary" : "ghost"}
+                disabled={busy}
+                onClick={() => setMode("segment")}
+              >
+                Выбор сегмента
+              </button>
             </div>
 
             <div className="form-field" style={{ marginTop: "0.75rem" }}>
@@ -351,6 +471,18 @@ export default function CommunicationsPage({ onLogout }: { onLogout: () => void 
                   </div>
                 ) : null}
               </div>
+            ) : mode === "segment" ? (
+              <div className="form-field" style={{ marginTop: "0.9rem" }}>
+                <label>Сегмент для рассылки</label>
+                <select value={segmentId} disabled={busy} onChange={(e) => setSegmentId(e.target.value)}>
+                  <option value="">Выберите сегмент</option>
+                  {segments.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
             ) : (
               <p className="sub" style={{ marginTop: "0.9rem", marginBottom: "0.6rem" }}>
                 Будет отправлено по {reachable.length} Telegram chat id.
@@ -404,6 +536,103 @@ export default function CommunicationsPage({ onLogout }: { onLogout: () => void 
                 </ul>
               </div>
             ) : null}
+
+            <div className="comms-segments-bottom">
+              <h3 className="user-modal-section-title">Сегменты</h3>
+              <div className="comms-segments-grid">
+                <div className="comms-segment-builder">
+                  <div className="form-field">
+                    <label>Название сегмента</label>
+                    <input
+                      value={segmentName}
+                      onChange={(e) => setSegmentName(e.target.value)}
+                      placeholder="Например: Заканчиваются через 5 дней"
+                    />
+                  </div>
+                  <div className="form-field">
+                    <label>Выбор пользователей (если пусто — все)</label>
+                    <select
+                      multiple
+                      size={7}
+                      value={segmentUserIds.map(String)}
+                      onChange={(e) => {
+                        const ids = Array.from(e.currentTarget.selectedOptions).map((o) => Number(o.value));
+                        setSegmentUserIds(ids.filter((n) => Number.isFinite(n) && n > 0));
+                      }}
+                    >
+                      {chatReachable.map((u) => (
+                        <option key={u.id} value={u.id}>
+                          #{u.id} {u.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="form-field">
+                    <label>Дней до конца подписки</label>
+                    <select value={daysMode} onChange={(e) => setDaysMode(e.target.value as "any" | "exact" | "range")}>
+                      <option value="any">Не имеет значения</option>
+                      <option value="exact">Ровно столько дней</option>
+                      <option value="range">Интервал дней</option>
+                    </select>
+                    {daysMode === "exact" ? (
+                      <input inputMode="numeric" value={daysExact} onChange={(e) => setDaysExact(Math.max(0, Math.floor(Number(e.target.value) || 0)))} />
+                    ) : null}
+                    {daysMode === "range" ? (
+                      <div className="comms-range-row">
+                        <input inputMode="numeric" value={daysFrom} onChange={(e) => setDaysFrom(Math.max(0, Math.floor(Number(e.target.value) || 0)))} />
+                        <input inputMode="numeric" value={daysTo} onChange={(e) => setDaysTo(Math.max(0, Math.floor(Number(e.target.value) || 0)))} />
+                      </div>
+                    ) : null}
+                  </div>
+                  <div className="form-field">
+                    <label>ГБ осталось</label>
+                    <select value={gbMode} onChange={(e) => setGbMode(e.target.value as "any" | "exact" | "range")}>
+                      <option value="any">Не имеет значения</option>
+                      <option value="exact">Ровно столько ГБ</option>
+                      <option value="range">Интервал ГБ</option>
+                    </select>
+                    {gbMode === "exact" ? (
+                      <input inputMode="numeric" value={gbExact} onChange={(e) => setGbExact(Math.max(0, Math.floor(Number(e.target.value) || 0)))} />
+                    ) : null}
+                    {gbMode === "range" ? (
+                      <div className="comms-range-row">
+                        <input inputMode="numeric" value={gbFrom} onChange={(e) => setGbFrom(Math.max(0, Math.floor(Number(e.target.value) || 0)))} />
+                        <input inputMode="numeric" value={gbTo} onChange={(e) => setGbTo(Math.max(0, Math.floor(Number(e.target.value) || 0)))} />
+                      </div>
+                    ) : null}
+                  </div>
+                  <div className="row-actions">
+                    <button type="button" className="primary" disabled={segmentBusy} onClick={() => void saveSegment()}>
+                      {segmentBusy ? "Сохранение..." : editingSegmentId ? "Сохранить изменения" : "Создать сегмент"}
+                    </button>
+                    {editingSegmentId ? (
+                      <button type="button" className="ghost" disabled={segmentBusy} onClick={resetSegmentForm}>
+                        Отменить редактирование
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
+                <aside className="comms-segment-list">
+                  <label className="referral-feed-label">Сегменты справа</label>
+                  <div className="mysub-stat-list">
+                    {segments.map((s) => (
+                      <div key={s.id}>
+                        <b>{s.name}</b>
+                        <div className="field-hint">Пользователи: {s.user_ids.length > 0 ? s.user_ids.length : "все с чатом"}</div>
+                        <div className="row-actions" style={{ marginTop: "0.4rem" }}>
+                          <button type="button" className="ghost" onClick={() => editSegment(s)}>
+                            Редактировать
+                          </button>
+                          <button type="button" className="ghost" disabled={segmentBusy} onClick={() => void removeSegment(s.id)}>
+                            Удалить
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </aside>
+              </div>
+            </div>
           </div>
           <aside className="comms-right" aria-label="Список клиентов и статус чата">
             <label className="referral-feed-label">Все пользователи</label>

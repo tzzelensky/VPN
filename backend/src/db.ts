@@ -203,6 +203,22 @@ export type PromoCodeUsageRow = {
   session_id?: string;
 };
 
+export type CommunicationSegmentRow = {
+  id: string;
+  name: string;
+  user_ids: number[];
+  days_mode: "any" | "exact" | "range";
+  days_exact?: number;
+  days_from?: number;
+  days_to?: number;
+  gb_mode: "any" | "exact" | "range";
+  gb_exact?: number;
+  gb_from?: number;
+  gb_to?: number;
+  created_at: string;
+  updated_at: string;
+};
+
 export type ServerRow = {
   id: number;
   name: string;
@@ -249,6 +265,7 @@ type FileStore = {
   referral_rewards: ReferralRewardRow[];
   promo_codes: PromoCodeRow[];
   promo_code_usages: PromoCodeUsageRow[];
+  communication_segments: CommunicationSegmentRow[];
 };
 
 function defaultSubscriptionShop(): SubscriptionShopConfig {
@@ -293,6 +310,69 @@ function emptyStore(): FileStore {
     referral_rewards: [],
     promo_codes: [],
     promo_code_usages: [],
+    communication_segments: [],
+  };
+}
+
+function defaultCommunicationSegments(): CommunicationSegmentRow[] {
+  const now = new Date().toISOString();
+  return [
+    {
+      id: randomBytes(8).toString("hex"),
+      name: "Подписка заканчивается через 3 дня",
+      user_ids: [],
+      days_mode: "range",
+      days_from: 0,
+      days_to: 3,
+      gb_mode: "any",
+      created_at: now,
+      updated_at: now,
+    },
+    {
+      id: randomBytes(8).toString("hex"),
+      name: "Осталось 10 ГБ и меньше",
+      user_ids: [],
+      days_mode: "any",
+      gb_mode: "range",
+      gb_from: 0,
+      gb_to: 10,
+      created_at: now,
+      updated_at: now,
+    },
+  ];
+}
+
+function normalizeCommunicationSegment(raw: unknown): CommunicationSegmentRow | null {
+  if (!raw || typeof raw !== "object") return null;
+  const o = raw as Record<string, unknown>;
+  const id = String(o.id ?? "").trim();
+  const name = String(o.name ?? "").trim();
+  if (!id || !name) return null;
+  const user_ids = Array.isArray(o.user_ids)
+    ? [...new Set(o.user_ids.map((x) => Math.floor(Number(x))).filter((n) => Number.isFinite(n) && n > 0))]
+    : [];
+  const days_mode_raw = String(o.days_mode ?? "any").trim().toLowerCase();
+  const gb_mode_raw = String(o.gb_mode ?? "any").trim().toLowerCase();
+  const days_mode = days_mode_raw === "exact" || days_mode_raw === "range" ? (days_mode_raw as "exact" | "range") : "any";
+  const gb_mode = gb_mode_raw === "exact" || gb_mode_raw === "range" ? (gb_mode_raw as "exact" | "range") : "any";
+  const days_exact = Math.max(0, Math.floor(Number(o.days_exact) || 0));
+  const days_from = Math.max(0, Math.floor(Number(o.days_from) || 0));
+  const days_to = Math.max(0, Math.floor(Number(o.days_to) || 0));
+  const gb_exact = Math.max(0, Math.floor(Number(o.gb_exact) || 0));
+  const gb_from = Math.max(0, Math.floor(Number(o.gb_from) || 0));
+  const gb_to = Math.max(0, Math.floor(Number(o.gb_to) || 0));
+  return {
+    id,
+    name: name.slice(0, 120),
+    user_ids,
+    days_mode,
+    ...(days_mode === "exact" ? { days_exact } : {}),
+    ...(days_mode === "range" ? { days_from: Math.min(days_from, days_to), days_to: Math.max(days_from, days_to) } : {}),
+    gb_mode,
+    ...(gb_mode === "exact" ? { gb_exact } : {}),
+    ...(gb_mode === "range" ? { gb_from: Math.min(gb_from, gb_to), gb_to: Math.max(gb_from, gb_to) } : {}),
+    created_at: String(o.created_at ?? new Date().toISOString()),
+    updated_at: String(o.updated_at ?? o.created_at ?? new Date().toISOString()),
   };
 }
 
@@ -656,6 +736,12 @@ function readStore(): FileStore {
     const promo_code_usages = promoUsagesRaw
       .map((x) => normalizePromoCodeUsage(x))
       .filter((x): x is PromoCodeUsageRow => x != null);
+    const commSegmentsRaw = Array.isArray((parsed as { communication_segments?: unknown }).communication_segments)
+      ? (parsed as { communication_segments: unknown[] }).communication_segments
+      : [];
+    const communication_segments = commSegmentsRaw
+      .map((x) => normalizeCommunicationSegment(x))
+      .filter((x): x is CommunicationSegmentRow => x != null);
     return {
       subscription_token: parsed.subscription_token ?? null,
       next_server_id: Number(parsed.next_server_id) > 0 ? Number(parsed.next_server_id) : 1,
@@ -672,6 +758,7 @@ function readStore(): FileStore {
       referral_rewards,
       promo_codes,
       promo_code_usages,
+      communication_segments: communication_segments.length > 0 ? communication_segments : defaultCommunicationSegments(),
     };
   } catch {
     return emptyStore();
@@ -1565,4 +1652,73 @@ export function applyPromoCodeForUser(input: {
     discount_rub: Math.max(0, original - final),
     discount_percent: promo.discount_percent,
   };
+}
+
+export function listCommunicationSegments(): CommunicationSegmentRow[] {
+  const rows = readStore().communication_segments ?? [];
+  if (rows.length === 0) return defaultCommunicationSegments();
+  return [...rows].sort((a, b) => {
+    const ta = Date.parse(a.created_at);
+    const tb = Date.parse(b.created_at);
+    return (Number.isFinite(tb) ? tb : 0) - (Number.isFinite(ta) ? ta : 0);
+  });
+}
+
+export function createCommunicationSegment(input: Omit<CommunicationSegmentRow, "id" | "created_at" | "updated_at">): CommunicationSegmentRow {
+  const now = new Date().toISOString();
+  const normalized = normalizeCommunicationSegment({
+    ...input,
+    id: randomBytes(8).toString("hex"),
+    created_at: now,
+    updated_at: now,
+  });
+  if (!normalized) throw new Error("segment_invalid");
+  let out: CommunicationSegmentRow | undefined;
+  mutate((store) => {
+    const rows = store.communication_segments ?? [];
+    out = normalized;
+    store.communication_segments = [out!, ...rows];
+  });
+  return out!;
+}
+
+export function updateCommunicationSegment(
+  id: string,
+  patch: Partial<Omit<CommunicationSegmentRow, "id" | "created_at" | "updated_at">>,
+): CommunicationSegmentRow | undefined {
+  const key = String(id ?? "").trim();
+  if (!key) return undefined;
+  let out: CommunicationSegmentRow | undefined;
+  mutate((store) => {
+    const rows = store.communication_segments ?? [];
+    const idx = rows.findIndex((r) => r.id === key);
+    if (idx === -1) return;
+    const merged = normalizeCommunicationSegment({
+      ...rows[idx],
+      ...patch,
+      id: key,
+      created_at: rows[idx]!.created_at,
+      updated_at: new Date().toISOString(),
+    });
+    if (!merged) return;
+    rows[idx] = merged;
+    store.communication_segments = rows;
+    out = merged;
+  });
+  return out;
+}
+
+export function deleteCommunicationSegment(id: string): boolean {
+  const key = String(id ?? "").trim();
+  if (!key) return false;
+  let removed = false;
+  mutate((store) => {
+    const before = (store.communication_segments ?? []).length;
+    store.communication_segments = (store.communication_segments ?? []).filter((r) => r.id !== key);
+    removed = (store.communication_segments ?? []).length !== before;
+    if ((store.communication_segments ?? []).length === 0) {
+      store.communication_segments = defaultCommunicationSegments();
+    }
+  });
+  return removed;
 }

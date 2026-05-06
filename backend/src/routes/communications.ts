@@ -1,5 +1,13 @@
 import { Router } from "express";
-import { getUser, listUsers } from "../db.js";
+import {
+  createCommunicationSegment,
+  deleteCommunicationSegment,
+  getUser,
+  listCommunicationSegments,
+  listUsers,
+  updateCommunicationSegment,
+  type CommunicationSegmentRow,
+} from "../db.js";
 import { requireAuth } from "../middleware/requireAuth.js";
 import { sendTelegramHtml, sendTelegramPhotoBinary, telegramHasDialog } from "../telegram/api.js";
 import { getTelegramBotToken } from "../telegram/env.js";
@@ -14,11 +22,25 @@ type SendBody = {
   text?: unknown;
   user_id?: unknown;
   user_ids?: unknown;
+  segment_id?: unknown;
   mark_enabled?: unknown;
   mark_text?: unknown;
   photo_base64?: unknown;
   photo_mime?: unknown;
   photo_name?: unknown;
+};
+
+type SegmentBody = {
+  name?: unknown;
+  user_ids?: unknown;
+  days_mode?: unknown;
+  days_exact?: unknown;
+  days_from?: unknown;
+  days_to?: unknown;
+  gb_mode?: unknown;
+  gb_exact?: unknown;
+  gb_from?: unknown;
+  gb_to?: unknown;
 };
 
 function toChatId(raw: string): number | null {
@@ -69,6 +91,94 @@ router.get("/targets", async (_req, res) => {
   );
   res.json({ users });
 });
+
+function parseSegmentBody(body: SegmentBody): Omit<CommunicationSegmentRow, "id" | "created_at" | "updated_at"> {
+  return {
+    name: String(body.name ?? "").trim().slice(0, 120),
+    user_ids: Array.isArray(body.user_ids)
+      ? [...new Set(body.user_ids.map((x) => Math.floor(Number(x))).filter((n) => Number.isFinite(n) && n > 0))]
+      : [],
+    days_mode:
+      String(body.days_mode ?? "any").trim() === "exact" || String(body.days_mode ?? "any").trim() === "range"
+        ? (String(body.days_mode ?? "any").trim() as "exact" | "range")
+        : "any",
+    days_exact: Math.max(0, Math.floor(Number(body.days_exact) || 0)),
+    days_from: Math.max(0, Math.floor(Number(body.days_from) || 0)),
+    days_to: Math.max(0, Math.floor(Number(body.days_to) || 0)),
+    gb_mode:
+      String(body.gb_mode ?? "any").trim() === "exact" || String(body.gb_mode ?? "any").trim() === "range"
+        ? (String(body.gb_mode ?? "any").trim() as "exact" | "range")
+        : "any",
+    gb_exact: Math.max(0, Math.floor(Number(body.gb_exact) || 0)),
+    gb_from: Math.max(0, Math.floor(Number(body.gb_from) || 0)),
+    gb_to: Math.max(0, Math.floor(Number(body.gb_to) || 0)),
+  };
+}
+
+router.get("/segments", (_req, res) => {
+  res.json({ segments: listCommunicationSegments() });
+});
+
+router.post("/segments", (req, res) => {
+  try {
+    const segment = createCommunicationSegment(parseSegmentBody((req.body ?? {}) as SegmentBody));
+    res.status(201).json(segment);
+  } catch (e) {
+    res.status(400).json({ error: e instanceof Error ? e.message : String(e) });
+  }
+});
+
+router.patch("/segments/:id", (req, res) => {
+  const id = String(req.params.id ?? "").trim();
+  if (!id) {
+    res.status(400).json({ error: "segment_id_required" });
+    return;
+  }
+  const updated = updateCommunicationSegment(id, parseSegmentBody((req.body ?? {}) as SegmentBody));
+  if (!updated) {
+    res.status(404).json({ error: "segment_not_found" });
+    return;
+  }
+  res.json(updated);
+});
+
+router.delete("/segments/:id", (req, res) => {
+  const id = String(req.params.id ?? "").trim();
+  if (!id) {
+    res.status(400).json({ error: "segment_id_required" });
+    return;
+  }
+  const ok = deleteCommunicationSegment(id);
+  if (!ok) {
+    res.status(404).json({ error: "segment_not_found" });
+    return;
+  }
+  res.json({ ok: true });
+});
+
+function daysLeft(u: { expiry_time: number }): number | null {
+  if (!u.expiry_time || u.expiry_time <= 0) return null;
+  const ms = u.expiry_time - Date.now();
+  if (ms <= 0) return 0;
+  return Math.max(0, Math.ceil(ms / 86400000));
+}
+
+function remainingGb(u: { total_gb: number; traffic_up: number; traffic_down: number }): number | null {
+  if (u.total_gb <= 0) return null;
+  const used = (u.traffic_up + u.traffic_down) / (1024 * 1024 * 1024);
+  return Math.max(0, Number((u.total_gb - used).toFixed(2)));
+}
+
+function matchesMetric(value: number | null, mode: "any" | "exact" | "range", exact?: number, from?: number, to?: number): boolean {
+  if (mode === "any") return true;
+  if (value == null) return false;
+  if (mode === "exact") return Math.floor(value) === Math.max(0, Math.floor(Number(exact) || 0));
+  const a = Math.max(0, Math.floor(Number(from) || 0));
+  const b = Math.max(0, Math.floor(Number(to) || 0));
+  const lo = Math.min(a, b);
+  const hi = Math.max(a, b);
+  return value >= lo && value <= hi;
+}
 
 router.post("/send", async (req, res) => {
   if (!getTelegramBotToken()) {
@@ -126,6 +236,36 @@ router.post("/send", async (req, res) => {
     for (const id of ids) {
       const u = getUser(id);
       if (!u) continue;
+      rows.push({ id: u.id, name: u.name, tg_id: u.tg_id, enable: u.enable === 1 });
+    }
+    targets = uniqTargets(rows);
+  } else if (mode === "segment") {
+    const segmentId = String(body.segment_id ?? "").trim();
+    if (!segmentId) {
+      res.status(400).json({ error: "segment_required" });
+      return;
+    }
+    const segment = listCommunicationSegments().find((s) => s.id === segmentId);
+    if (!segment) {
+      res.status(404).json({ error: "segment_not_found" });
+      return;
+    }
+    const all = listUsers();
+    const pre = segment.user_ids.length > 0 ? all.filter((u) => segment.user_ids.includes(u.id)) : all;
+    const filtered = pre.filter((u) => {
+      const d = daysLeft(u);
+      const g = remainingGb(u);
+      return (
+        matchesMetric(d, segment.days_mode, segment.days_exact, segment.days_from, segment.days_to) &&
+        matchesMetric(g, segment.gb_mode, segment.gb_exact, segment.gb_from, segment.gb_to)
+      );
+    });
+    const rows: TargetUserLite[] = [];
+    for (const u of filtered) {
+      const chatId = toChatId(u.tg_id);
+      if (!chatId) continue;
+      const hasChat = await telegramHasDialog(chatId);
+      if (!hasChat) continue;
       rows.push({ id: u.id, name: u.name, tg_id: u.tg_id, enable: u.enable === 1 });
     }
     targets = uniqTargets(rows);
