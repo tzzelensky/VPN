@@ -314,7 +314,7 @@ export async function handleTelegramUpdate(body: unknown): Promise<void> {
       await sendTelegramHtml(
         chatId,
         "Скидка применилась! Стоимость тарифа пересчитана.",
-        vpnPlansKeyboardPromo(promoCode, ctx?.target_user_id),
+        vpnPlansKeyboardPromo(promoCode, from.id, ctx?.target_user_id),
       );
       return;
     } catch (e) {
@@ -325,6 +325,16 @@ export async function handleTelegramUpdate(body: unknown): Promise<void> {
       }
       if (msg === "promo_already_used") {
         await sendTelegramHtml(chatId, "Этот промокод вы уже использовали.", backHomeRow);
+        promoAwaitByChat.delete(chatId);
+        return;
+      }
+      if (msg === "promo_inactive") {
+        await sendTelegramHtml(chatId, "Этот промокод сейчас неактивен.", backHomeRow);
+        promoAwaitByChat.delete(chatId);
+        return;
+      }
+      if (msg === "promo_expired") {
+        await sendTelegramHtml(chatId, "Срок действия этого промокода истек.", backHomeRow);
         promoAwaitByChat.delete(chatId);
         return;
       }

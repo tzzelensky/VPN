@@ -1707,13 +1707,7 @@ export function applyPromoCodeForUser(input: {
   tg_user_id: number;
   original_price_rub: number;
 }): { promo: PromoCodeRow; final_price_rub: number; original_price_rub: number; discount_rub: number; discount_percent: number } {
-  const promo = getPromoCodeByText(input.code);
-  if (!promo) throw new Error("promo_not_found");
-  const uid = Math.floor(Number(input.tg_user_id));
-  if (!Number.isFinite(uid) || uid <= 0) throw new Error("promo_bad_user");
-  if (promo.one_time_per_user && hasPromoCodeUsageByUser(promo.id, uid)) {
-    throw new Error("promo_already_used");
-  }
+  const promo = validatePromoCodeForUser(input.code, input.tg_user_id);
   const original = Math.max(0, Math.floor(Number(input.original_price_rub) || 0));
   const final = Math.max(0, Math.floor(original - (original * promo.discount_percent) / 100));
   return {

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import DashboardLayout from "../components/DashboardLayout";
+import ExpiryDateTimePicker from "../components/ExpiryDateTimePicker";
 import {
   createPromoCode,
   deletePromoCode,
@@ -10,20 +11,10 @@ import {
   type PromoCodeUsageDto,
 } from "../api";
 
-function toDateInputValue(raw: string): string {
-  if (!raw) return "";
-  const dt = new Date(raw);
-  if (!Number.isFinite(dt.getTime())) return "";
-  const y = dt.getFullYear();
-  const m = String(dt.getMonth() + 1).padStart(2, "0");
-  const d = String(dt.getDate()).padStart(2, "0");
-  return `${y}-${m}-${d}`;
-}
-
-function toIsoEndOfDay(raw: string): string {
-  const v = raw.trim();
-  if (!v) return "";
-  const dt = new Date(`${v}T23:59:59`);
+function toExpiryIsoFromMs(ms: number): string {
+  if (!Number.isFinite(ms) || ms <= 0) return "";
+  const base = new Date(ms);
+  const dt = new Date(base.getFullYear(), base.getMonth(), base.getDate(), 23, 59, 59, 999);
   if (!Number.isFinite(dt.getTime())) return "";
   return dt.toISOString();
 }
@@ -35,7 +26,7 @@ export default function PromoCodesPage({ onLogout }: { onLogout: () => void }) {
   const [discount, setDiscount] = useState(10);
   const [oneTime, setOneTime] = useState(true);
   const [active, setActive] = useState(true);
-  const [validUntil, setValidUntil] = useState("");
+  const [validUntilMs, setValidUntilMs] = useState(0);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ type: "ok" | "err"; text: string } | null>(null);
   const [openedPromo, setOpenedPromo] = useState<PromoCodeDto | null>(null);
@@ -47,7 +38,7 @@ export default function PromoCodesPage({ onLogout }: { onLogout: () => void }) {
   const [editDiscount, setEditDiscount] = useState(10);
   const [editOneTime, setEditOneTime] = useState(true);
   const [editActive, setEditActive] = useState(true);
-  const [editValidUntil, setEditValidUntil] = useState("");
+  const [editValidUntilMs, setEditValidUntilMs] = useState(0);
 
   async function reload() {
     const data = await listPromoCodes();
@@ -68,14 +59,14 @@ export default function PromoCodesPage({ onLogout }: { onLogout: () => void }) {
         discount_percent: Math.max(1, Math.min(99, Math.floor(Number(discount) || 0))),
         one_time_per_user: oneTime,
         active,
-        valid_until: toIsoEndOfDay(validUntil),
+        valid_until: toExpiryIsoFromMs(validUntilMs),
       });
       setName("");
       setCode("");
       setDiscount(10);
       setOneTime(true);
       setActive(true);
-      setValidUntil("");
+      setValidUntilMs(0);
       setMsg({ type: "ok", text: "Промокод создан." });
       await reload();
     } catch (e) {
@@ -93,7 +84,7 @@ export default function PromoCodesPage({ onLogout }: { onLogout: () => void }) {
     setEditDiscount(p.discount_percent);
     setEditOneTime(p.one_time_per_user);
     setEditActive(p.active !== false);
-    setEditValidUntil(toDateInputValue(p.valid_until));
+    setEditValidUntilMs(Number.isFinite(Date.parse(p.valid_until)) ? Date.parse(p.valid_until) : 0);
     try {
       const data = await listPromoCodeUsages(p.id);
       setUsages(data.usages);
@@ -130,7 +121,7 @@ export default function PromoCodesPage({ onLogout }: { onLogout: () => void }) {
         discount_percent: Math.max(1, Math.min(99, Math.floor(Number(editDiscount) || 0))),
         one_time_per_user: editOneTime,
         active: editActive,
-        valid_until: toIsoEndOfDay(editValidUntil),
+        valid_until: toExpiryIsoFromMs(editValidUntilMs),
       });
       setOpenedPromo(updated);
       setEditing(false);
@@ -183,7 +174,7 @@ export default function PromoCodesPage({ onLogout }: { onLogout: () => void }) {
             </div>
             <div className="form-field">
               <label>Действует до (дата)</label>
-              <input type="date" value={validUntil} onChange={(e) => setValidUntil(e.target.value)} />
+              <ExpiryDateTimePicker valueMs={validUntilMs} onChangeMs={setValidUntilMs} disabled={busy} />
               <p className="field-hint">Пусто = без ограничения срока.</p>
             </div>
             <div className="form-field shop-toggle-row">
@@ -257,7 +248,7 @@ export default function PromoCodesPage({ onLogout }: { onLogout: () => void }) {
                   </div>
                   <div className="form-field">
                     <label>Действует до (дата)</label>
-                    <input type="date" value={editValidUntil} onChange={(e) => setEditValidUntil(e.target.value)} />
+                    <ExpiryDateTimePicker valueMs={editValidUntilMs} onChangeMs={setEditValidUntilMs} disabled={busy} />
                   </div>
                 </div>
               ) : (

@@ -1747,8 +1747,8 @@ th {
 }
 
 .promo-modal .modal-body {
-  max-height: min(62vh, 32rem);
-  overflow-y: auto;
+  max-height: none;
+  overflow: visible;
   padding-bottom: 0.75rem;
 }
 

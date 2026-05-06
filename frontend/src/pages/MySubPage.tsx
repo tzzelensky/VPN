@@ -277,6 +277,8 @@ export default function MySubPage() {
       const m = e instanceof Error ? e.message : String(e);
       if (m.includes("promo_already_used")) setPromoFeedback({ type: "err", text: "Этот промокод уже был использован вами." });
       else if (m.includes("promo_not_found")) setPromoFeedback({ type: "err", text: "Промокод не найден." });
+      else if (m.includes("promo_inactive")) setPromoFeedback({ type: "err", text: "Этот промокод сейчас неактивен." });
+      else if (m.includes("promo_expired")) setPromoFeedback({ type: "err", text: "Срок действия этого промокода истек." });
       else setPromoFeedback({ type: "err", text: "Не удалось применить промокод." });
     }
   }

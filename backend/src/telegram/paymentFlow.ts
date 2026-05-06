@@ -13,7 +13,6 @@ import {
   getReferralProgram,
   getReferralReward,
   getUser,
-  getPromoCodeByText,
   getPaymentSession,
   getSubscriptionShop,
   registerPromoCodeUsage,
@@ -173,10 +172,14 @@ export function vpnPlansKeyboardForNew() {
   return { inline_keyboard: rows };
 }
 
-export function vpnPlansKeyboardPromo(code: string, targetUserId?: number) {
+export function vpnPlansKeyboardPromo(code: string, tgUserId: number, targetUserId?: number) {
   const promo = String(code ?? "").trim().toUpperCase();
-  const promoRow = getPromoCodeByText(promo);
-  if (!promoRow) return vpnPlansKeyboard(targetUserId);
+  let promoRow;
+  try {
+    promoRow = applyPromoCodeForUser({ code: promo, tg_user_id: tgUserId, original_price_rub: 100 }).promo;
+  } catch {
+    return vpnPlansKeyboard(targetUserId);
+  }
   const shop = getSubscriptionShop();
   const rows = shop.plans.map((p) => {
     const finalPrice = Math.max(0, Math.floor(p.price_rub - (p.price_rub * promoRow.discount_percent) / 100));
@@ -343,10 +346,14 @@ export async function onVpnPlanChosen(
   const discountPercent =
     !target && !newName && linked.length === 0 && invite && refCfg.enabled ? refCfg.invited_discount_percent : 0;
   const cleanPromo = String(promoCode ?? "").trim().toUpperCase();
-  const promoCalc =
-    cleanPromo && getPromoCodeByText(cleanPromo)
-      ? applyPromoCodeForUser({ code: cleanPromo, tg_user_id: tgUserId, original_price_rub: meta.priceRub })
-      : null;
+  let promoCalc: ReturnType<typeof applyPromoCodeForUser> | null = null;
+  if (cleanPromo) {
+    try {
+      promoCalc = applyPromoCodeForUser({ code: cleanPromo, tg_user_id: tgUserId, original_price_rub: meta.priceRub });
+    } catch {
+      promoCalc = null;
+    }
+  }
   const finalPrice = promoCalc
     ? promoCalc.final_price_rub
     : Math.max(0, Math.floor(meta.priceRub - (meta.priceRub * discountPercent) / 100));
