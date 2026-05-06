@@ -165,21 +165,23 @@ export default function SubscriptionShopPage({ onLogout }: { onLogout: () => voi
                         <label>Название</label>
                         <input value={p.title} onChange={(e) => updatePlan(p.id, { title: e.target.value })} />
                       </div>
-                      <div className="form-field">
-                        <label>ГБ / мес (0 = безлимит)</label>
-                        <input
-                          inputMode="numeric"
-                          value={p.total_gb}
-                          onChange={(e) => updatePlan(p.id, { total_gb: Math.max(0, Math.floor(Number(e.target.value) || 0)) })}
-                        />
-                      </div>
-                      <div className="form-field">
-                        <label>Дней</label>
-                        <input
-                          inputMode="numeric"
-                          value={p.days}
-                          onChange={(e) => updatePlan(p.id, { days: Math.max(1, Math.floor(Number(e.target.value) || 1)) })}
-                        />
+                      <div className="shop-plan-metrics-row">
+                        <div className="form-field">
+                          <label>ГБ / мес (0 = безлимит)</label>
+                          <input
+                            inputMode="numeric"
+                            value={p.total_gb}
+                            onChange={(e) => updatePlan(p.id, { total_gb: Math.max(0, Math.floor(Number(e.target.value) || 0)) })}
+                          />
+                        </div>
+                        <div className="form-field">
+                          <label>Дней</label>
+                          <input
+                            inputMode="numeric"
+                            value={p.days}
+                            onChange={(e) => updatePlan(p.id, { days: Math.max(1, Math.floor(Number(e.target.value) || 1)) })}
+                          />
+                        </div>
                       </div>
                       <div className="form-field form-field-span-2">
                         <label>Цена, ₽</label>

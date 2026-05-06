@@ -1754,6 +1754,141 @@ th {
   border-radius: 999px;
 }
 
+.promo-list-empty {
+  margin: 0.35rem 0 0;
+}
+
+.promo-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.promo-card {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: rgba(6, 9, 18, 0.55);
+  overflow: hidden;
+  text-align: left;
+}
+
+.promo-card--open {
+  border-color: rgba(61, 158, 255, 0.4);
+  box-shadow: 0 0 0 1px rgba(61, 158, 255, 0.12);
+}
+
+.promo-card-main {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.65rem;
+  padding: 0.55rem 0.65rem;
+}
+
+.promo-card-text {
+  min-width: 0;
+  flex: 1;
+}
+
+.promo-card-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.35rem 0.5rem;
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.promo-card-name {
+  word-break: break-word;
+}
+
+.promo-card-code {
+  font-weight: 500;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.promo-card-meta {
+  margin-top: 0.28rem;
+  font-size: 0.78rem;
+  color: var(--muted);
+  line-height: 1.35;
+}
+
+.promo-card-actions {
+  display: flex;
+  flex-shrink: 0;
+  gap: 0.25rem;
+  align-items: center;
+}
+
+.promo-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.35rem;
+  height: 2.35rem;
+  padding: 0;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: rgba(15, 20, 32, 0.85);
+  color: var(--muted);
+}
+
+.promo-icon-btn:hover:not(:disabled) {
+  color: var(--text);
+  border-color: rgba(61, 158, 255, 0.35);
+  background: rgba(61, 158, 255, 0.1);
+}
+
+.promo-icon-btn.active {
+  color: #93c5fd;
+  border-color: rgba(96, 165, 250, 0.45);
+  background: rgba(61, 158, 255, 0.14);
+}
+
+.promo-icon-btn.danger:hover:not(:disabled) {
+  color: #fecaca;
+  border-color: rgba(248, 113, 113, 0.45);
+  background: rgba(248, 113, 113, 0.1);
+}
+
+.promo-card-stats {
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  padding: 0.5rem 0.65rem 0.65rem;
+  background: rgba(0, 0, 0, 0.12);
+}
+
+.promo-stats-list {
+  margin: 0;
+  padding-left: 1.1rem;
+  font-size: 0.78rem;
+  color: #c8d4e6;
+  line-height: 1.45;
+}
+
+.promo-stats-list li + li {
+  margin-top: 0.25rem;
+}
+
+.shop-plan-metrics-row {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.85rem 1.25rem;
+  align-items: end;
+}
+
+.shop-plan-metrics-row .form-field {
+  min-width: 0;
+}
+
+.shop-plan-metrics-row label {
+  margin-bottom: 0.4rem;
+}
+
 .promo-modal {
   width: min(760px, calc(100vw - 1.25rem));
   margin: 0.75rem auto;
@@ -1946,7 +2081,37 @@ th {
   gap: 0.9rem;
 }
 
-.comms-segment-builder,
+.comms-segment-builder {
+  display: flex;
+  flex-direction: column;
+  gap: 1.15rem;
+  min-width: 0;
+}
+
+.comms-segment-builder .form-field {
+  gap: 0.45rem;
+}
+
+.comms-segment-builder .form-field > label:first-child {
+  margin-bottom: 0.05rem;
+}
+
+.comms-segment-builder .shop-toggle-row {
+  margin-top: 0.15rem;
+}
+
+.comms-segment-builder .comms-textarea {
+  margin-top: 0.35rem;
+}
+
+.comms-segment-builder .comms-autotext-wrap {
+  margin-top: 0.65rem;
+}
+
+.comms-segment-builder .row-actions {
+  margin-top: 0.35rem;
+}
+
 .comms-segment-list {
   min-width: 0;
 }
