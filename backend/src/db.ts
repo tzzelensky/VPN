@@ -181,13 +181,12 @@ export type DropperGameConfig = {
   /** Билетов за одну подтверждённую покупку (бот / WebApp). */
   tickets_per_purchase: number;
   /**
-   * Целевая длительность полёта от старта до финиша (сек).
-   * Клиент подстраивает базовую скорость; умножается на flight_speed_mult.
+   * Длительность раунда: время от старта до финиша по вертикали (сек). Клиент: скорость падения = путь / это значение.
    */
   flight_duration_sec: number;
   /**
-   * Множитель скорости падения (1 = по длительности; 2 — в 2 раза быстрее; 0.5 — в 2 раза медленнее).
-   * Фактическое время до финиша ≈ flight_duration_sec / flight_speed_mult.
+   * Множитель «резкости» бокового управления на клиенте (1 = как раньше). Меньше — плавнее/медленнее реакция влево-вправо;
+   * на длительность падения до финиша не влияет.
    */
   flight_speed_mult: number;
 };
@@ -1949,8 +1948,7 @@ export function finishDropperPlay(input: {
       return;
     }
 
-    const effSec = cfg.flight_duration_sec / Math.max(0.25, cfg.flight_speed_mult);
-    const tw = dropperWinTimingMsFromEffectiveFlightSec(effSec);
+    const tw = dropperWinTimingMsFromEffectiveFlightSec(cfg.flight_duration_sec);
     const timingOk =
       flight >= tw.flightMin && flight <= tw.flightMax && elapsed >= tw.elapsedMin && elapsed <= tw.elapsedMax;
     if (!timingOk) {

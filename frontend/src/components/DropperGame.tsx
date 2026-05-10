@@ -168,15 +168,16 @@ export default function DropperGame({
     0.25,
     Math.min(4, Math.round((Number(profile.dropper.flight_speed_mult) || 1) * 100) / 100),
   );
-  const fallSpeed = (DROP_TRAVEL_PX / flightDurationSec) * flightSpeedMult;
-  const effectiveFlightSec = flightDurationSec / flightSpeedMult;
-  const targetFlightMsFallback = effectiveFlightSec * 1000;
+  /** Падение: только flight_duration_sec. Множитель — скорость подруливания влево-вправо, не длина раунда. */
+  const fallSpeed = DROP_TRAVEL_PX / flightDurationSec;
+  const steerResponse = 10 * flightSpeedMult;
+  const targetFlightMsFallback = flightDurationSec * 1000;
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [phase, setPhase] = useState<"playing" | "won" | "lost">("playing");
   const [flightMs, setFlightMs] = useState(0);
   /** Целые секунды до финиша (по пройденному пути). */
-  const [countdownSec, setCountdownSec] = useState(() => Math.ceil(flightDurationSec / flightSpeedMult));
+  const [countdownSec, setCountdownSec] = useState(() => Math.ceil(flightDurationSec));
   const [busyGift, setBusyGift] = useState(false);
   const [giftErr, setGiftErr] = useState("");
   const [rewardPickUserId, setRewardPickUserId] = useState(targetUserId);
@@ -247,7 +248,7 @@ export default function DropperGame({
     setPhase("playing");
     setFlightMs(0);
     setGiftErr("");
-    const cd0 = Math.max(1, Math.ceil(effectiveFlightSec));
+    const cd0 = Math.max(1, Math.ceil(flightDurationSec));
     countdownSecRef.current = cd0;
     setCountdownSec(cd0);
 
@@ -325,7 +326,7 @@ export default function DropperGame({
       if (ph === "playing") {
         const tx = touchRef.current ?? p.x + PLAYER_W / 2;
         p.targetX = tx - PLAYER_W / 2;
-        p.x += (p.targetX - p.x) * Math.min(1, dt * 10);
+        p.x += (p.targetX - p.x) * Math.min(1, dt * steerResponse);
         p.y += fallSpeed * dt;
 
         camYRef.current = Math.max(0, Math.min(p.y - viewHWorld * 0.28, WORLD_H - viewHWorld));
@@ -424,7 +425,7 @@ export default function DropperGame({
       window.removeEventListener("resize", onVvResize);
       window.visualViewport?.removeEventListener("resize", onVvResize);
     };
-  }, [sessionId, seed, submitFinish, fullscreen, practiceMode, fallSpeed, flightDurationSec, effectiveFlightSec]);
+  }, [sessionId, seed, submitFinish, fullscreen, practiceMode, fallSpeed, flightDurationSec, steerResponse]);
 
   const rewardSub = profile.subscriptions.find((s) => s.id === rewardPickUserId);
   const subHasGbCap = (rewardSub?.total_gb ?? 0) > 0;

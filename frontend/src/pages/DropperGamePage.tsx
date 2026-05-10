@@ -251,13 +251,14 @@ export default function DropperGamePage({ onLogout }: { onLogout: () => void }) 
               style={{ marginTop: "0.5rem", maxWidth: "120px" }}
             />
             <p className="field-hint">
-              Ползунок или ввод числа (при вводе ограничение 15–180 применяется при уходе с поля или по «Сохранить»).
-              Базовая скорость; итоговое время до финиша зависит ещё от множителя ниже.
+              Ползунок или ввод числа (15–180 при уходе с поля или по «Сохранить»). Это{" "}
+              <strong>реальное время раунда</strong> до финиша по вертикали — не зависит от множителя ниже.
             </p>
           </div>
           <div className="form-field form-field-span-2">
             <label>
-              Скорость полёта (×{cfg.flight_speed_mult.toFixed(2).replace(/\.?0+$/, "")}) — 1 обычная, выше быстрее
+              Резкость управления влево-вправо (×{cfg.flight_speed_mult.toFixed(2).replace(/\.?0+$/, "")}) — 1 как
+              обычно; ниже мягче, выше резче
             </label>
             <input
               type="range"
@@ -285,9 +286,8 @@ export default function DropperGamePage({ onLogout }: { onLogout: () => void }) 
               style={{ marginTop: "0.5rem", maxWidth: "120px" }}
             />
             <p className="field-hint">
-              Ориентир: до финиша ≈{" "}
-              <strong>{(cfg.flight_duration_sec / Math.max(0.25, cfg.flight_speed_mult)).toFixed(1)}</strong> с при
-              текущих настройках. Сервер принимает победу по этому времени.
+              На скорость падения и таймер в игре <strong>не влияет</strong> — только на то, как быстро герой
+              подстраивается под палец. Длительность раунда задаётся полем «Длительность полёта» выше; античит по нему же.
             </p>
           </div>
           <div className="form-field">
