@@ -1,5 +1,6 @@
 import { sendTelegramHtml } from "./api.js";
-import { getTelegramWebAppUrl } from "./env.js";
+import { getTelegramBotToken, getTelegramWebAppUrl } from "./env.js";
+import { escHtml } from "./format.js";
 import { getDropperGameConfig } from "../db.js";
 
 /** Уведомление после покупки: начислены билеты на «Дроппер» + кнопка WebApp. */
@@ -23,5 +24,25 @@ export async function notifyDropperTicketsAfterPurchase(chatId: number, ticketsA
     `<b>+${ticketsAdded} ${word} на игру «Дроппер»!</b>\n\n` +
       `Управляйте полётом пальцем, избегайте препятствий и приземлитесь на финиш — затем выберите подарок.`,
     reply_markup,
+  );
+}
+
+/** Сообщение в чат после выбора приза в WebApp: на какую подписку начислено. */
+export async function notifyDropperPrizeApplied(
+  chatId: number,
+  payload: { kind: "gb" | "days"; amount: number; userId: number; userName: string },
+): Promise<void> {
+  if (!getTelegramBotToken()) return;
+  const name = String(payload.userName ?? "").trim();
+  const subLine = name
+    ? `подписку <b>#${payload.userId}</b> «${escHtml(name)}»`
+    : `подписку <b>#${payload.userId}</b>`;
+  const gift =
+    payload.kind === "gb"
+      ? `+<b>${payload.amount}</b> ГБ трафика`
+      : `+<b>${payload.amount}</b> дн. к сроку`;
+  await sendTelegramHtml(
+    chatId,
+    `🎮 <b>Приз «Дроппер» начислен</b>\n\n` + `${gift} на ${subLine}.`,
   );
 }

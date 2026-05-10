@@ -1756,12 +1756,21 @@ export function finishDropperPlay(input: {
   choice?: "gb" | "days";
   /** Какому привязанному пользователю начислить награду (если не задан — из сессии). */
   rewardUserId?: number;
-}): { ok: true; practice?: boolean } | { ok: false; error: string } {
+}):
+  | {
+      ok: true;
+      practice?: boolean;
+      prizeApplied?: { kind: "gb" | "days"; amount: number; userId: number; userName: string };
+    }
+  | { ok: false; error: string } {
   const cfg = getDropperGameConfig();
   if (!cfg.enabled) return { ok: false, error: "game_disabled" };
 
   let err: string | null = null;
-  const out: { practice: boolean } = { practice: false };
+  const out: {
+    practice: boolean;
+    prizeApplied?: { kind: "gb" | "days"; amount: number; userId: number; userName: string };
+  } = { practice: false };
   mutate((store) => {
     const sessions = store.dropper_sessions ?? [];
     const idx = sessions.findIndex((s) => s.id === input.sessionId);
@@ -1888,10 +1897,18 @@ export function finishDropperPlay(input: {
     if (!store.dropper_play_log) store.dropper_play_log = [];
     store.dropper_play_log.push(winRow);
     store.dropper_play_log = store.dropper_play_log.slice(-15_000);
+    out.prizeApplied = {
+      kind: choice,
+      amount: choice === "gb" ? cfg.reward_gb : cfg.reward_days,
+      userId: rewardUid,
+      userName: rewardUserName,
+    };
   });
 
   if (err) return { ok: false, error: err };
-  return out.practice ? { ok: true, practice: true } : { ok: true };
+  if (out.practice) return { ok: true, practice: true };
+  if (out.prizeApplied) return { ok: true, prizeApplied: out.prizeApplied };
+  return { ok: true };
 }
 
 export function getDropperStatsForTgUser(tgUserId: number): {

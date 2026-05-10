@@ -21,6 +21,7 @@ import {
   userAllowedOnServers,
 } from "../db.js";
 import { formatStatsHtml, fmtBytes } from "../telegram/format.js";
+import { notifyDropperPrizeApplied } from "../telegram/dropperTickets.js";
 import { getTelegramBotToken, getTelegramPaymentNotifyChatIds, getTelegramPaymentUrl } from "../telegram/env.js";
 import { sendTelegramPhotoBinary } from "../telegram/api.js";
 import { pushClientListToAllDeployedServers } from "../userSync.js";
@@ -660,6 +661,13 @@ router.post("/webapp/dropper/finish", async (req, res) => {
     }
     res.status(400).json({ error: result.error });
     return;
+  }
+  if (result.prizeApplied) {
+    try {
+      await notifyDropperPrizeApplied(tgId, result.prizeApplied);
+    } catch (e) {
+      console.error("[mysub] dropper prize telegram:", e);
+    }
   }
   if (!result.practice) {
     try {

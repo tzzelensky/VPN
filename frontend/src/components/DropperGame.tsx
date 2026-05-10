@@ -167,6 +167,8 @@ export default function DropperGame({
   const [busyGift, setBusyGift] = useState(false);
   const [giftErr, setGiftErr] = useState("");
   const [rewardPickUserId, setRewardPickUserId] = useState(targetUserId);
+  const rewardPickUserIdRef = useRef(rewardPickUserId);
+  rewardPickUserIdRef.current = rewardPickUserId;
 
   useEffect(() => {
     setRewardPickUserId(targetUserId);
@@ -193,13 +195,14 @@ export default function DropperGame({
       setBusyGift(true);
       setGiftErr("");
       try {
+        const rid = rewardPickUserIdRef.current;
         await finishDropperSession({
           init_data: initData,
           session_id: sessionId,
           won,
           flight_ms: Math.round(ms),
           choice,
-          ...(won && rewardPickUserId > 0 ? { reward_user_id: rewardPickUserId } : {}),
+          ...(won && rid > 0 ? { reward_user_id: rid } : {}),
         });
         reportedRef.current = true;
         if (won) onDone();
@@ -214,7 +217,7 @@ export default function DropperGame({
         setBusyGift(false);
       }
     },
-    [initData, sessionId, onDone, rewardPickUserId],
+    [initData, sessionId, onDone],
   );
 
   useEffect(() => {
