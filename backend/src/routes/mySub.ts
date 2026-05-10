@@ -229,6 +229,7 @@ router.post("/webapp/profile", async (req, res) => {
       reward_gb: dg.reward_gb,
       reward_days: dg.reward_days,
       flight_duration_sec: dg.flight_duration_sec,
+      flight_speed_mult: dg.flight_speed_mult,
       plays: dgStats.plays,
       wins: dgStats.wins,
       won_gb: dgStats.won_gb,

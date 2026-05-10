@@ -164,14 +164,19 @@ export default function DropperGame({
     15,
     Math.min(180, Math.floor(Number(profile.dropper.flight_duration_sec) || 40)),
   );
-  const fallSpeed = DROP_TRAVEL_PX / flightDurationSec;
-  const targetFlightMsFallback = flightDurationSec * 1000;
+  const flightSpeedMult = Math.max(
+    0.25,
+    Math.min(4, Math.round((Number(profile.dropper.flight_speed_mult) || 1) * 100) / 100),
+  );
+  const fallSpeed = (DROP_TRAVEL_PX / flightDurationSec) * flightSpeedMult;
+  const effectiveFlightSec = flightDurationSec / flightSpeedMult;
+  const targetFlightMsFallback = effectiveFlightSec * 1000;
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [phase, setPhase] = useState<"playing" | "won" | "lost">("playing");
   const [flightMs, setFlightMs] = useState(0);
   /** Целые секунды до финиша (по пройденному пути). */
-  const [countdownSec, setCountdownSec] = useState(() => Math.ceil(flightDurationSec));
+  const [countdownSec, setCountdownSec] = useState(() => Math.ceil(flightDurationSec / flightSpeedMult));
   const [busyGift, setBusyGift] = useState(false);
   const [giftErr, setGiftErr] = useState("");
   const [rewardPickUserId, setRewardPickUserId] = useState(targetUserId);
@@ -242,7 +247,7 @@ export default function DropperGame({
     setPhase("playing");
     setFlightMs(0);
     setGiftErr("");
-    const cd0 = Math.ceil(flightDurationSec);
+    const cd0 = Math.max(1, Math.ceil(effectiveFlightSec));
     countdownSecRef.current = cd0;
     setCountdownSec(cd0);
 
@@ -419,7 +424,7 @@ export default function DropperGame({
       window.removeEventListener("resize", onVvResize);
       window.visualViewport?.removeEventListener("resize", onVvResize);
     };
-  }, [sessionId, seed, submitFinish, fullscreen, practiceMode, fallSpeed, flightDurationSec]);
+  }, [sessionId, seed, submitFinish, fullscreen, practiceMode, fallSpeed, flightDurationSec, effectiveFlightSec]);
 
   const rewardSub = profile.subscriptions.find((s) => s.id === rewardPickUserId);
   const subHasGbCap = (rewardSub?.total_gb ?? 0) > 0;

@@ -581,6 +581,8 @@ export type MySubProfileDto = {
     reward_days: number;
     /** Целевая длительность полёта (сек), из настроек игры. */
     flight_duration_sec: number;
+    /** Множитель скорости (1 = по умолчанию). */
+    flight_speed_mult: number;
     plays: number;
     wins: number;
     won_gb: number;
@@ -655,6 +657,8 @@ export type DropperGameConfigDto = {
   tickets_per_purchase: number;
   /** Длительность полёта до финиша (сек), 15–180. */
   flight_duration_sec: number;
+  /** Множитель скорости падения, 0.25–4 (1 = база). */
+  flight_speed_mult: number;
 };
 
 export type DropperAdminReportDto = {

@@ -66,14 +66,19 @@ export default function DropperGamePage({ onLogout }: { onLogout: () => void }) 
     return Math.max(15, Math.min(180, n));
   }
 
+  function clampSpeedMult(n: number): number {
+    return Math.max(0.25, Math.min(4, Math.round(n * 100) / 100));
+  }
+
   async function onSave() {
     if (!cfg) return;
     setSaving(true);
     setMsg(null);
     try {
       const flightSec = clampFlightSec(flightDurDraft, cfg.flight_duration_sec);
+      const speedMult = clampSpeedMult(Number(cfg.flight_speed_mult) || 1);
       setFlightDurDraft(String(flightSec));
-      const next = await saveDropperGameConfig({ ...cfg, flight_duration_sec: flightSec });
+      const next = await saveDropperGameConfig({ ...cfg, flight_duration_sec: flightSec, flight_speed_mult: speedMult });
       setCfg(next);
       setMsg({ type: "ok", text: "Настройки игры сохранены." });
     } catch (e) {
@@ -247,7 +252,42 @@ export default function DropperGamePage({ onLogout }: { onLogout: () => void }) 
             />
             <p className="field-hint">
               Ползунок или ввод числа (при вводе ограничение 15–180 применяется при уходе с поля или по «Сохранить»).
-              На клиенте пересчитывается скорость; сервер проверяет время победы пропорционально этой настройке.
+              Базовая скорость; итоговое время до финиша зависит ещё от множителя ниже.
+            </p>
+          </div>
+          <div className="form-field form-field-span-2">
+            <label>
+              Скорость полёта (×{cfg.flight_speed_mult.toFixed(2).replace(/\.?0+$/, "")}) — 1 обычная, выше быстрее
+            </label>
+            <input
+              type="range"
+              min={0.25}
+              max={4}
+              step={0.05}
+              value={cfg.flight_speed_mult}
+              onChange={(e) =>
+                setCfg({ ...cfg, flight_speed_mult: clampSpeedMult(Number(e.target.value)) })
+              }
+              style={{ width: "100%", maxWidth: "420px", display: "block", marginTop: "0.35rem" }}
+            />
+            <input
+              type="number"
+              inputMode="decimal"
+              min={0.25}
+              max={4}
+              step={0.05}
+              value={cfg.flight_speed_mult}
+              onChange={(e) => {
+                const x = Number(e.target.value);
+                if (!Number.isFinite(x)) return;
+                setCfg({ ...cfg, flight_speed_mult: clampSpeedMult(x) });
+              }}
+              style={{ marginTop: "0.5rem", maxWidth: "120px" }}
+            />
+            <p className="field-hint">
+              Ориентир: до финиша ≈{" "}
+              <strong>{(cfg.flight_duration_sec / Math.max(0.25, cfg.flight_speed_mult)).toFixed(1)}</strong> с при
+              текущих настройках. Сервер принимает победу по этому времени.
             </p>
           </div>
           <div className="form-field">
