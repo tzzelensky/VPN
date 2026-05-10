@@ -34,8 +34,8 @@ function rowStepForIndex(i: number): number {
 }
 const PLAYER_W = 26;
 const PLAYER_H = 34;
-/** На 20% медленнее прежнего (275 × 0.8). */
-const FALL_SPEED = 220;
+/** Ещё на 5% медленнее после 220 (220 × 0.95). */
+const FALL_SPEED = 209;
 const FINISH_ZONE = 110;
 /** Высота ряда блоков земли (хитбокс совпадает). */
 const EARTH_ROW_H = 22;
@@ -94,12 +94,12 @@ type Props = {
   fullscreen?: boolean;
 };
 
-function drawPixelForest(ctx: CanvasRenderingContext2D, camY: number, viewTop: number, viewBottom: number) {
+function drawPixelForest(ctx: CanvasRenderingContext2D, viewTop: number, viewBottom: number) {
   const treeSpacing = 44;
   const endCol = Math.ceil(WORLD_W / treeSpacing) + 2;
   for (let col = -1; col < endCol; col++) {
     const baseX = col * treeSpacing + ((col * 17) % 11);
-    for (let ty = Math.floor((camY + viewTop) / 90) * 90 - 180; ty < camY + viewBottom + 180; ty += 90) {
+    for (let ty = Math.floor(viewTop / 90) * 90 - 180; ty < viewBottom + 200; ty += 90) {
       const jitter = ((col * 31 + Math.floor(ty / 90) * 13) % 17) - 8;
       const x = baseX + jitter;
       const y = ty + ((col + ty) % 7);
@@ -327,7 +327,7 @@ export default function DropperGame({ initData, sessionId, seed, targetUserId, p
       const viewBottom = camY + viewHWorld;
       ctx.fillStyle = "#152018";
       ctx.fillRect(0, 0, WORLD_W, WORLD_H);
-      drawPixelForest(ctx, camY, viewTop, viewBottom);
+      drawPixelForest(ctx, viewTop, viewBottom);
 
       for (const row of obstaclesRef.current) {
         if (row.y < camY - 80 || row.y > camY + viewHWorld + 80) continue;
@@ -364,7 +364,9 @@ export default function DropperGame({ initData, sessionId, seed, targetUserId, p
     };
   }, [sessionId, seed, submitFinish, fullscreen]);
 
-  const canGb = profile.dropper.reward_gb > 0;
+  const targetSub = profile.subscriptions.find((s) => s.id === targetUserId);
+  const subHasGbCap = (targetSub?.total_gb ?? 0) > 0;
+  const canGb = profile.dropper.reward_gb > 0 && subHasGbCap;
   const canDays = profile.dropper.reward_days > 0;
 
   return (

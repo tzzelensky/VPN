@@ -859,8 +859,6 @@ export default function MySubPage() {
 
                   <div className={`mysub-dropper-lobby ${dropperSession ? "mysub-dropper-lobby--hidden" : ""}`}>
                     <div className="mysub-dropper-cliff" aria-hidden>
-                      <div className="mysub-dropper-sky" />
-                      <div className="mysub-dropper-edge" />
                       <DropperLobbyHero />
                     </div>
 
