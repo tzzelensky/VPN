@@ -39,15 +39,17 @@ const FINISH_ZONE = 110;
 const EARTH_ROW_H = 22;
 /** Пикселей от старта (y≈48) до условия победы (py &gt; WORLD_H−40), при скорости WORLD/travelSec ≈ целевое время полёта. */
 const DROP_TRAVEL_PX = WORLD_H - 48 - 40;
-/** Первые секунды после старта — без столкновений с препятствиями (успеть сориентироваться). */
-const DROP_START_GRACE_MS = 4000;
+/** Сколько секунд пути без рядов препятствий (только свободное падение). */
+const DROP_FREE_FALL_SEC = 4;
 
 type ObstacleRow = { y: number; gapLeft: number; gapRight: number };
 
-function buildObstacles(seed: number): ObstacleRow[] {
+/** firstRowY — минимальный Y первого ряда блоков (ниже старта на free-fall участок). */
+function buildObstacles(seed: number, firstRowY: number): ObstacleRow[] {
   const rnd = mulberry32(seed);
   const rows: ObstacleRow[] = [];
-  let y = 200;
+  const capY = WORLD_H - FINISH_ZONE - 40;
+  let y = Math.max(200, Math.min(Math.floor(firstRowY), capY - 300));
   let i = 0;
   while (y < WORLD_H - FINISH_ZONE - 40) {
     let gapW: number;
@@ -192,7 +194,7 @@ export default function DropperGame({
   const phaseRef = useRef(phase);
   phaseRef.current = phase;
 
-  const obstaclesRef = useRef(buildObstacles(seed));
+  const obstaclesRef = useRef(buildObstacles(seed, 200));
   const playerRef = useRef({ x: WORLD_W / 2 - PLAYER_W / 2, y: 48, targetX: WORLD_W / 2 - PLAYER_W / 2 });
   const camYRef = useRef(0);
   const startTRef = useRef(performance.now());
@@ -240,7 +242,10 @@ export default function DropperGame({
     const stopMusic = startDropperAmbient();
 
     reportedRef.current = false;
-    obstaclesRef.current = buildObstacles(seed);
+    const capY = WORLD_H - FINISH_ZONE - 40;
+    const rawFirstRowY = 48 + fallSpeed * DROP_FREE_FALL_SEC + PLAYER_H + 24;
+    const firstObstacleRowY = Math.max(200, Math.min(Math.ceil(rawFirstRowY), capY - 300));
+    obstaclesRef.current = buildObstacles(seed, firstObstacleRowY);
     playerRef.current = { x: WORLD_W / 2 - PLAYER_W / 2, y: 48, targetX: WORLD_W / 2 - PLAYER_W / 2 };
     camYRef.current = 0;
     startTRef.current = performance.now();
@@ -249,7 +254,7 @@ export default function DropperGame({
     setPhase("playing");
     setFlightMs(0);
     setGiftErr("");
-    const cd0 = Math.max(1, Math.ceil(flightDurationSec));
+    const cd0 = Math.max(1, Math.ceil(effectiveFlightSec));
     countdownSecRef.current = cd0;
     setCountdownSec(cd0);
 
@@ -336,25 +341,23 @@ export default function DropperGame({
         const py = p.y;
 
         const elapsedMs = now - startTRef.current;
-        if (elapsedMs >= DROP_START_GRACE_MS) {
-          for (const row of obstaclesRef.current) {
-            if (Math.abs(row.y - py) > 260) continue;
-            if (row.gapLeft > 4 && aabbHit(px, py, PLAYER_W, PLAYER_H, 0, row.y, row.gapLeft, EARTH_ROW_H)) {
-              const ms = elapsedMs;
-              setFlightMs(ms);
-              phaseRef.current = "lost";
-              setPhase("lost");
-              void submitFinish(false, ms);
-              break;
-            }
-            if (row.gapRight < WORLD_W - 4 && aabbHit(px, py, PLAYER_W, PLAYER_H, row.gapRight, row.y, WORLD_W - row.gapRight, EARTH_ROW_H)) {
-              const ms = elapsedMs;
-              setFlightMs(ms);
-              phaseRef.current = "lost";
-              setPhase("lost");
-              void submitFinish(false, ms);
-              break;
-            }
+        for (const row of obstaclesRef.current) {
+          if (Math.abs(row.y - py) > 260) continue;
+          if (row.gapLeft > 4 && aabbHit(px, py, PLAYER_W, PLAYER_H, 0, row.y, row.gapLeft, EARTH_ROW_H)) {
+            const ms = elapsedMs;
+            setFlightMs(ms);
+            phaseRef.current = "lost";
+            setPhase("lost");
+            void submitFinish(false, ms);
+            break;
+          }
+          if (row.gapRight < WORLD_W - 4 && aabbHit(px, py, PLAYER_W, PLAYER_H, row.gapRight, row.y, WORLD_W - row.gapRight, EARTH_ROW_H)) {
+            const ms = elapsedMs;
+            setFlightMs(ms);
+            phaseRef.current = "lost";
+            setPhase("lost");
+            void submitFinish(false, ms);
+            break;
           }
         }
 
