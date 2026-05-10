@@ -33,6 +33,7 @@ export default function DropperGamePage({ onLogout }: { onLogout: () => void }) 
   const [ticketsEditDraft, setTicketsEditDraft] = useState("");
   const [ticketsSaving, setTicketsSaving] = useState(false);
   const [resettingTickets, setResettingTickets] = useState(false);
+  const [ticketsListSearch, setTicketsListSearch] = useState("");
   const [msg, setMsg] = useState<{ type: "ok" | "err"; text: string } | null>(null);
 
   const refresh = useCallback(async () => {
@@ -100,6 +101,12 @@ export default function DropperGamePage({ onLogout }: { onLogout: () => void }) 
   }
 
   const userOptions = useMemo(() => [...users].sort((a, b) => a.id - b.id), [users]);
+
+  const filteredTicketRows = useMemo(() => {
+    const q = ticketsListSearch.trim().toLowerCase();
+    if (!q) return userOptions;
+    return userOptions.filter((u) => (u.name || "").toLowerCase().includes(q));
+  }, [userOptions, ticketsListSearch]);
 
   async function saveEditedTickets(anchorUserId: number) {
     const n = Math.max(0, Math.floor(Number(ticketsEditDraft) || 0));
@@ -229,8 +236,20 @@ export default function DropperGamePage({ onLogout }: { onLogout: () => void }) 
           Для одного Telegram несколько подписок — один общий счётчик (сумма по записям). Редактирование задаёт этот
           общий пул для всех таких подписок.
         </p>
-        <div style={{ overflowX: "auto" }}>
-          <table className="dropper-tickets-admin-table">
+        <div className="form-field" style={{ marginBottom: "0.65rem" }}>
+          <label htmlFor="dropper-tickets-search">Поиск по имени клиента</label>
+          <input
+            id="dropper-tickets-search"
+            type="search"
+            autoComplete="off"
+            placeholder="Начните вводить имя…"
+            value={ticketsListSearch}
+            onChange={(e) => setTicketsListSearch(e.target.value)}
+          />
+        </div>
+        <div className="dropper-tickets-admin-scroll-wrap">
+          <div className="dropper-tickets-admin-scroll">
+            <table className="dropper-tickets-admin-table">
             <thead>
               <tr>
                 <th>ID</th>
@@ -241,7 +260,14 @@ export default function DropperGamePage({ onLogout }: { onLogout: () => void }) 
               </tr>
             </thead>
             <tbody>
-              {userOptions.map((u) => {
+              {filteredTicketRows.length === 0 ? (
+                <tr>
+                  <td colSpan={5} className="dropper-tickets-admin-empty">
+                    {ticketsListSearch.trim() ? "Никого не найдено." : "Нет клиентов."}
+                  </td>
+                </tr>
+              ) : null}
+              {filteredTicketRows.map((u) => {
                 const pool = dropperPoolForRow(u, users);
                 const editing = ticketsEditUserId === u.id;
                 return (
@@ -312,6 +338,7 @@ export default function DropperGamePage({ onLogout }: { onLogout: () => void }) 
               })}
             </tbody>
           </table>
+          </div>
         </div>
       </section>
 

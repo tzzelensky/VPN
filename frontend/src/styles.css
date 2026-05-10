@@ -3464,6 +3464,33 @@ th {
   cursor: not-allowed;
 }
 
+.dropper-tickets-admin-scroll-wrap {
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.1));
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.12);
+}
+
+.dropper-tickets-admin-scroll {
+  max-height: min(55vh, 28rem);
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.dropper-tickets-admin-scroll .dropper-tickets-admin-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--panel);
+  box-shadow: 0 1px 0 var(--border, rgba(255, 255, 255, 0.1));
+}
+
+.dropper-tickets-admin-empty {
+  text-align: center;
+  color: var(--muted);
+  padding: 1.25rem 0.75rem;
+  font-size: 0.9rem;
+}
+
 .dropper-tickets-admin-table {
   width: 100%;
   border-collapse: collapse;
