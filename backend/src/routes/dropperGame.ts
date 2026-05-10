@@ -4,6 +4,7 @@ import {
   getDropperGameConfig,
   grantDropperTicketsToUserIds,
   normalizeDropperGame,
+  resetAllDropperTickets,
   setDropperGameConfig,
   setDropperTicketsPoolForClientRow,
   type DropperGameConfig,
@@ -40,8 +41,18 @@ router.post("/grant-tickets", (req, res) => {
     res.status(400).json({ error: "tickets_required" });
     return;
   }
-  grantDropperTicketsToUserIds(ids, tickets);
-  res.json({ ok: true, granted_users: ids.length, tickets_each: tickets });
+  const { uniquePools } = grantDropperTicketsToUserIds(ids, tickets);
+  res.json({
+    ok: true,
+    selected_rows: ids.length,
+    unique_pools: uniquePools,
+    tickets_each: tickets,
+  });
+});
+
+router.post("/reset-all-tickets", (_req, res) => {
+  resetAllDropperTickets();
+  res.json({ ok: true });
 });
 
 /** Установить пул билетов для строки клиента (общий для всех подписок с тем же tg_id). */

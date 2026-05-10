@@ -1654,15 +1654,49 @@ export function sumDropperTicketsForTgUser(tgUserId: number): number {
     .reduce((s, u) => s + u.dropper_tickets, 0);
 }
 
-export function grantDropperTicketsToUserIds(userIds: number[], tickets: number): void {
+function dropperPoolKey(u: { id: number; tg_id?: string }): string {
+  const t = String(u.tg_id ?? "").trim();
+  return t || `__solo:${u.id}`;
+}
+
+/** Начислить билеты выбранным строкам: один раз на каждый уникальный Telegram (или на каждую строку без tg_id). */
+export function grantDropperTicketsToUserIds(userIds: number[], tickets: number): { uniquePools: number } {
   const n = Math.max(0, Math.floor(Number(tickets) || 0));
-  if (n <= 0 || userIds.length === 0) return;
+  if (n <= 0 || userIds.length === 0) return { uniquePools: 0 };
   const idSet = new Set(userIds.map((x) => Math.floor(Number(x))).filter((x) => Number.isFinite(x) && x > 0));
+  let uniquePools = 0;
+  mutate((store) => {
+    const keys = new Set<string>();
+    for (const uid of idSet) {
+      const row = store.users.find((u) => u.id === uid);
+      if (row) keys.add(dropperPoolKey(row));
+    }
+    uniquePools = keys.size;
+    for (const key of keys) {
+      const members = store.users.filter((u) => dropperPoolKey(u) === key).sort((a, b) => a.id - b.id);
+      if (members.length === 0) continue;
+      const sum = members.reduce((s, u) => s + u.dropper_tickets, 0);
+      const newTotal = sum + n;
+      const firstId = members[0]!.id;
+      for (const m of members) {
+        const idx = store.users.findIndex((x) => x.id === m.id);
+        if (idx === -1) continue;
+        store.users[idx] = normalizeUser({
+          ...store.users[idx]!,
+          dropper_tickets: m.id === firstId ? newTotal : 0,
+        });
+      }
+    }
+  });
+  return { uniquePools };
+}
+
+/** Обнулить билеты «Дроппер» у всех клиентов. */
+export function resetAllDropperTickets(): void {
   mutate((store) => {
     for (let i = 0; i < store.users.length; i++) {
       const u = store.users[i]!;
-      if (!idSet.has(u.id)) continue;
-      store.users[i] = normalizeUser({ ...u, dropper_tickets: u.dropper_tickets + n });
+      store.users[i] = normalizeUser({ ...u, dropper_tickets: 0 });
     }
   });
 }
@@ -1715,21 +1749,32 @@ export function setDropperTicketsPoolForClientRow(
   return { ok: true };
 }
 
-/** Начисление билетов всем клиентам с указанным Telegram chat id (после покупки). */
+/**
+ * Начисление билетов всем строкам с данным Telegram (после покупки).
+ * Пул один на chat id: +n к суммарному пулу, не умножая на число подписок.
+ */
 export function grantDropperTicketsForPurchaseChat(tgChatId: number, tickets: number): number {
   const key = String(tgChatId).trim();
   const n = Math.max(0, Math.floor(Number(tickets) || 0));
   if (!key || n <= 0) return 0;
-  let granted = 0;
+  let matched = 0;
   mutate((store) => {
-    for (let i = 0; i < store.users.length; i++) {
-      const u = store.users[i]!;
-      if (String(u.tg_id).trim() !== key) continue;
-      store.users[i] = normalizeUser({ ...u, dropper_tickets: u.dropper_tickets + n });
-      granted++;
+    const members = store.users.filter((u) => String(u.tg_id ?? "").trim() === key).sort((a, b) => a.id - b.id);
+    if (members.length === 0) return;
+    matched = 1;
+    const sum = members.reduce((s, u) => s + u.dropper_tickets, 0);
+    const newTotal = sum + n;
+    const firstId = members[0]!.id;
+    for (const m of members) {
+      const idx = store.users.findIndex((x) => x.id === m.id);
+      if (idx === -1) continue;
+      store.users[idx] = normalizeUser({
+        ...store.users[idx]!,
+        dropper_tickets: m.id === firstId ? newTotal : 0,
+      });
     }
   });
-  return granted;
+  return matched;
 }
 
 export function startDropperPlaySession(

@@ -6,6 +6,7 @@ import {
   listUsers,
   loadDropperGameConfig,
   loadDropperGameReport,
+  resetAllDropperGameTickets,
   saveDropperGameConfig,
   setDropperUserTicketsPool,
   type DropperAdminReportDto,
@@ -31,6 +32,7 @@ export default function DropperGamePage({ onLogout }: { onLogout: () => void }) 
   const [ticketsEditUserId, setTicketsEditUserId] = useState<number | null>(null);
   const [ticketsEditDraft, setTicketsEditDraft] = useState("");
   const [ticketsSaving, setTicketsSaving] = useState(false);
+  const [resettingTickets, setResettingTickets] = useState(false);
   const [msg, setMsg] = useState<{ type: "ok" | "err"; text: string } | null>(null);
 
   const refresh = useCallback(async () => {
@@ -81,10 +83,15 @@ export default function DropperGamePage({ onLogout }: { onLogout: () => void }) 
     setGranting(true);
     setMsg(null);
     try {
-      await grantDropperGameTickets({ user_ids: ids, tickets: t });
+      const gr = await grantDropperGameTickets({ user_ids: ids, tickets: t });
+      const u = await listUsers();
+      setUsers(u);
       const r = await loadDropperGameReport();
       setReport(r);
-      setMsg({ type: "ok", text: `Выдано по ${t} билет(ов) для ${ids.length} пользователей.` });
+      setMsg({
+        type: "ok",
+        text: `Начислено по ${gr.tickets_each} билет(ов) каждому из ${gr.unique_pools} получателей (отмечено строк: ${gr.selected_rows}). Один Telegram — одно начисление на общий пул.`,
+      });
     } catch (e) {
       setMsg({ type: "err", text: String(e) });
     } finally {
@@ -109,6 +116,28 @@ export default function DropperGamePage({ onLogout }: { onLogout: () => void }) 
       setMsg({ type: "err", text: String(e) });
     } finally {
       setTicketsSaving(false);
+    }
+  }
+
+  async function onResetAllTickets() {
+    if (
+      !window.confirm(
+        "Обнулить билеты «Дроппер» у всех клиентов? Это действие нельзя отменить.",
+      )
+    ) {
+      return;
+    }
+    setResettingTickets(true);
+    setMsg(null);
+    try {
+      await resetAllDropperGameTickets();
+      const u = await listUsers();
+      setUsers(u);
+      setMsg({ type: "ok", text: "Билеты у всех пользователей обнулены." });
+    } catch (e) {
+      setMsg({ type: "err", text: String(e) });
+    } finally {
+      setResettingTickets(false);
     }
   }
 
@@ -288,6 +317,10 @@ export default function DropperGamePage({ onLogout }: { onLogout: () => void }) 
 
       <section className="panel">
         <h2 className="user-modal-section-title">Выдача билетов</h2>
+        <p className="field-hint" style={{ marginTop: 0, marginBottom: "0.65rem" }}>
+          Если в списке отмечены несколько подписок с одним и тем же Telegram, билеты начисляются один раз на общий пул,
+          а не по разу на каждую строку.
+        </p>
         <div className="form-field">
           <label>Пользователи (удерживайте Ctrl/Cmd для нескольких)</label>
           <select
@@ -314,9 +347,19 @@ export default function DropperGamePage({ onLogout }: { onLogout: () => void }) 
             onChange={(e) => setGrantTickets(Math.max(0, Math.floor(Number(e.target.value) || 0)))}
           />
         </div>
-        <button type="button" className="primary" disabled={granting} onClick={() => void onGrant()}>
-          {granting ? "Выдача…" : "Выдать билеты на игру"}
-        </button>
+        <div className="users-hero-actions" style={{ marginTop: "0.5rem", flexWrap: "wrap" }}>
+          <button type="button" className="primary" disabled={granting || resettingTickets} onClick={() => void onGrant()}>
+            {granting ? "Выдача…" : "Выдать билеты на игру"}
+          </button>
+          <button
+            type="button"
+            className="danger"
+            disabled={granting || resettingTickets}
+            onClick={() => void onResetAllTickets()}
+          >
+            {resettingTickets ? "Сброс…" : "Обнулить билеты"}
+          </button>
+        </div>
       </section>
 
       <section className="panel">

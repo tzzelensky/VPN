@@ -681,12 +681,21 @@ export async function saveDropperGameConfig(body: DropperGameConfigDto): Promise
 export async function grantDropperGameTickets(body: {
   user_ids: number[];
   tickets: number;
-}): Promise<{ ok: boolean; granted_users: number; tickets_each: number }> {
+}): Promise<{ ok: boolean; selected_rows: number; unique_pools: number; tickets_each: number }> {
   const res = await fetch("/api/dropper-game/grant-tickets", {
     method: "POST",
     credentials: "include",
     headers: jsonHeaders,
     body: JSON.stringify(body),
+  });
+  return handle(res);
+}
+
+export async function resetAllDropperGameTickets(): Promise<{ ok: boolean }> {
+  const res = await fetch("/api/dropper-game/reset-all-tickets", {
+    method: "POST",
+    credentials: "include",
+    headers: jsonHeaders,
   });
   return handle(res);
 }

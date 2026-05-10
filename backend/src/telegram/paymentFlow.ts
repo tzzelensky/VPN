@@ -742,10 +742,10 @@ export async function onAdminPaymentConfirm(
   const dropCfg = getDropperGameConfig();
   const perPurchase = Math.max(0, Math.floor(dropCfg.tickets_per_purchase || 0));
   if (dropCfg.enabled && perPurchase > 0) {
-    const grantedUsers = grantDropperTicketsForPurchaseChat(sess.tg_chat_id, perPurchase);
-    if (grantedUsers > 0) {
+    const grantedPool = grantDropperTicketsForPurchaseChat(sess.tg_chat_id, perPurchase);
+    if (grantedPool > 0) {
       try {
-        await notifyDropperTicketsAfterPurchase(sess.tg_chat_id, grantedUsers * perPurchase);
+        await notifyDropperTicketsAfterPurchase(sess.tg_chat_id, perPurchase);
       } catch (e) {
         console.error("[telegram] dropper tickets notify:", e);
       }
