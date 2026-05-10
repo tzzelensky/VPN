@@ -34,8 +34,11 @@ function rowStepForIndex(i: number): number {
 }
 const PLAYER_W = 26;
 const PLAYER_H = 34;
-const FALL_SPEED = 275;
+/** На 20% медленнее прежнего (275 × 0.8). */
+const FALL_SPEED = 220;
 const FINISH_ZONE = 110;
+/** Высота ряда блоков земли (хитбокс совпадает). */
+const EARTH_ROW_H = 22;
 const TARGET_FLIGHT_MS = 30_000;
 
 type ObstacleRow = { y: number; gapLeft: number; gapRight: number };
@@ -112,8 +115,38 @@ function drawPixelForest(ctx: CanvasRenderingContext2D, camY: number, viewTop: n
       ctx.fillRect(x + 4, y + 10, 20, 8);
     }
   }
-  ctx.fillStyle = "rgba(12, 18, 14, 0.35)";
-  ctx.fillRect(0, Math.max(0, camY + viewTop), WORLD_W, viewBottom - viewTop + 10);
+}
+
+/** Полоса блоков земли с травой сверху (как в референсе). */
+function drawEarthBlocksRow(ctx: CanvasRenderingContext2D, worldX: number, worldY: number, totalW: number) {
+  if (totalW < 2) return;
+  const bw = 13;
+  const grassH = 5;
+  let cx = worldX;
+  const end = worldX + totalW;
+  while (cx < end - 0.5) {
+    const pieceW = Math.min(bw, end - cx);
+    const seed = Math.floor(cx * 0.7 + worldY * 0.03);
+    ctx.fillStyle = "#34c67a";
+    ctx.fillRect(cx, worldY, pieceW, grassH - 1);
+    ctx.fillStyle = "#2a9d5c";
+    ctx.fillRect(cx, worldY + grassH - 2, pieceW, 2);
+    ctx.fillStyle = "#1e6b40";
+    ctx.fillRect(cx, worldY + grassH - 1, pieceW, 1);
+    for (let dy = grassH; dy < EARTH_ROW_H; dy++) {
+      const n = (seed + dy * 7) % 5;
+      const colors = ["#6b5344", "#5c4636", "#4d3b2c", "#5a4330", "#624a38"];
+      ctx.fillStyle = colors[n] ?? "#5c4636";
+      ctx.fillRect(cx, worldY + dy, pieceW, 1);
+    }
+    ctx.fillStyle = "rgba(0,0,0,0.35)";
+    ctx.fillRect(cx, worldY, 1, EARTH_ROW_H);
+    ctx.fillStyle = "rgba(255,255,255,0.06)";
+    ctx.fillRect(cx + pieceW - 1, worldY + grassH, 1, EARTH_ROW_H - grassH);
+    ctx.fillStyle = "#2a1f16";
+    ctx.fillRect(cx, worldY + EARTH_ROW_H - 1, pieceW, 1);
+    cx += pieceW;
+  }
 }
 
 export default function DropperGame({ initData, sessionId, seed, targetUserId, profile, onDone, fullscreen }: Props) {
@@ -256,9 +289,8 @@ export default function DropperGame({ initData, sessionId, seed, targetUserId, p
         const py = p.y;
 
         for (const row of obstaclesRef.current) {
-          if (Math.abs(row.y - py) > 220) continue;
-          const wallH = 18;
-          if (row.gapLeft > 4 && aabbHit(px, py, PLAYER_W, PLAYER_H, 0, row.y, row.gapLeft, wallH)) {
+          if (Math.abs(row.y - py) > 260) continue;
+          if (row.gapLeft > 4 && aabbHit(px, py, PLAYER_W, PLAYER_H, 0, row.y, row.gapLeft, EARTH_ROW_H)) {
             const ms = now - startTRef.current;
             setFlightMs(ms);
             phaseRef.current = "lost";
@@ -266,7 +298,7 @@ export default function DropperGame({ initData, sessionId, seed, targetUserId, p
             void submitFinish(false, ms);
             break;
           }
-          if (row.gapRight < WORLD_W - 4 && aabbHit(px, py, PLAYER_W, PLAYER_H, row.gapRight, row.y, WORLD_W - row.gapRight, wallH)) {
+          if (row.gapRight < WORLD_W - 4 && aabbHit(px, py, PLAYER_W, PLAYER_H, row.gapRight, row.y, WORLD_W - row.gapRight, EARTH_ROW_H)) {
             const ms = now - startTRef.current;
             setFlightMs(ms);
             phaseRef.current = "lost";
@@ -276,7 +308,7 @@ export default function DropperGame({ initData, sessionId, seed, targetUserId, p
           }
         }
 
-        if (phaseRef.current === "playing" && py > WORLD_H - 75) {
+        if (phaseRef.current === "playing" && py > WORLD_H - 40) {
           const ms = now - startTRef.current;
           setFlightMs(ms);
           phaseRef.current = "won";
@@ -298,18 +330,18 @@ export default function DropperGame({ initData, sessionId, seed, targetUserId, p
       drawPixelForest(ctx, camY, viewTop, viewBottom);
 
       for (const row of obstaclesRef.current) {
-        if (row.y < camY - 50 || row.y > camY + viewHWorld + 50) continue;
-        ctx.fillStyle = "#eaeaea";
-        ctx.fillRect(0, row.y, row.gapLeft, 18);
-        ctx.fillRect(row.gapRight, row.y, WORLD_W - row.gapRight, 18);
+        if (row.y < camY - 80 || row.y > camY + viewHWorld + 80) continue;
+        if (row.gapLeft > 2) drawEarthBlocksRow(ctx, 0, row.y, row.gapLeft);
+        if (WORLD_W - row.gapRight > 2) drawEarthBlocksRow(ctx, row.gapRight, row.y, WORLD_W - row.gapRight);
       }
 
-      const finishY = WORLD_H - 55;
-      ctx.fillStyle = "#c9a227";
-      ctx.fillRect(0, finishY, WORLD_W, 12);
-      ctx.fillStyle = "#1a1a1e";
-      for (let i = 0; i < 40; i++) {
-        if (i % 2 === 0) ctx.fillRect(i * 10, finishY, 5, 12);
+      const finishY = WORLD_H - 50;
+      drawEarthBlocksRow(ctx, 0, finishY, WORLD_W);
+      ctx.fillStyle = "#d4a826";
+      ctx.fillRect(0, finishY + EARTH_ROW_H, WORLD_W, 4);
+      ctx.fillStyle = "#8a6a18";
+      for (let i = 0; i < WORLD_W; i += 10) {
+        if (i % 20 === 0) ctx.fillRect(i, finishY + EARTH_ROW_H, 5, 4);
       }
 
       ctx.imageSmoothingEnabled = false;

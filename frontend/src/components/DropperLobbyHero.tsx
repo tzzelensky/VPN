@@ -1,17 +1,15 @@
-import { useEffect, useRef } from "react";
-import { drawHeroFront } from "../lib/dropperHero";
-
+/** Превью до «Играть»: сцена из ассета + лес вокруг задаётся в CSS (.mysub-dropper-cliff). */
 export default function DropperLobbyHero() {
-  const ref = useRef<HTMLCanvasElement>(null);
-  useEffect(() => {
-    const c = ref.current;
-    if (!c) return;
-    const ctx = c.getContext("2d");
-    if (!ctx) return;
-    const w = c.width;
-    const h = c.height;
-    ctx.clearRect(0, 0, w, h);
-    drawHeroFront(ctx, 0, 0, w, h);
-  }, []);
-  return <canvas ref={ref} className="mysub-dropper-lobby-hero" width={56} height={72} aria-hidden />;
+  return (
+    <div className="mysub-dropper-lobby-scene">
+      <img
+        src="/dropper-lobby-scene.png"
+        alt=""
+        className="mysub-dropper-lobby-scene-img"
+        width={280}
+        height={200}
+        decoding="async"
+      />
+    </div>
+  );
 }

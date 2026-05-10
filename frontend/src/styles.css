@@ -3099,40 +3099,53 @@ th {
 
 .mysub-dropper-cliff {
   position: relative;
-  height: 140px;
+  min-height: 168px;
   border-radius: 14px;
   overflow: hidden;
-  border: 2px solid #111;
-  box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.06);
+  border: 2px solid rgba(0, 0, 0, 0.45);
+  box-shadow:
+    inset 0 0 0 2px rgba(255, 255, 255, 0.06),
+    0 8px 24px rgba(0, 0, 0, 0.35);
+  background:
+    radial-gradient(ellipse 80% 120% at 50% 100%, rgba(20, 40, 28, 0.95) 0%, transparent 55%),
+    radial-gradient(circle at 15% 70%, rgba(40, 72, 48, 0.5) 0%, transparent 25%),
+    radial-gradient(circle at 85% 65%, rgba(36, 64, 44, 0.45) 0%, transparent 22%),
+    linear-gradient(180deg, #1a3224 0%, #0f1e15 55%, #0a1510 100%);
 }
 
 .mysub-dropper-sky {
   position: absolute;
   inset: 0;
-  background: linear-gradient(180deg, #1b2e22 0%, #243c2e 45%, #2f4a38 100%);
+  pointer-events: none;
+  opacity: 0.35;
+  background: repeating-linear-gradient(
+    88deg,
+    transparent 0 36px,
+    rgba(18, 42, 28, 0.4) 36px 38px,
+    transparent 38px 76px
+  );
 }
 
 .mysub-dropper-edge {
-  position: absolute;
-  right: 12%;
-  top: 38%;
-  width: 44%;
-  height: 18px;
-  background: linear-gradient(180deg, #6a6a70, #3a3a40);
-  border-radius: 4px 4px 0 0;
-  box-shadow: 0 -3px 0 #222;
-  transform: rotate(-4deg);
+  display: none;
 }
 
-.mysub-dropper-lobby-hero {
-  position: absolute;
-  right: 14%;
-  top: 16%;
-  width: 56px;
-  height: 72px;
+.mysub-dropper-lobby-scene {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.35rem 0.25rem 0.5rem;
+  min-height: 160px;
+}
+
+.mysub-dropper-lobby-scene-img {
+  max-width: 100%;
+  width: min(320px, 100%);
+  height: auto;
   image-rendering: pixelated;
   image-rendering: crisp-edges;
-  filter: drop-shadow(3px 4px 0 rgba(0, 0, 0, 0.65));
+  filter: drop-shadow(0 6px 12px rgba(0, 0, 0, 0.55));
 }
 
 .mysub-dropper-field {
@@ -3275,7 +3288,15 @@ th {
   justify-content: center;
   padding: max(8px, env(safe-area-inset-top, 0px)) max(8px, env(safe-area-inset-right, 0px))
     max(10px, env(safe-area-inset-bottom, 0px)) max(8px, env(safe-area-inset-left, 0px));
-  background: #0a100d;
+  background-color: #0f1812;
+  background-image:
+    repeating-linear-gradient(
+      95deg,
+      transparent 0 52px,
+      rgba(22, 48, 30, 0.35) 52px 54px,
+      transparent 54px 104px
+    ),
+    linear-gradient(180deg, #152a1c 0%, #0a120e 100%);
   box-sizing: border-box;
 }
 
