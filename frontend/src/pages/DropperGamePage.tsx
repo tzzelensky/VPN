@@ -219,7 +219,7 @@ export default function DropperGamePage({ onLogout }: { onLogout: () => void }) 
             />
           </div>
           <div className="form-field form-field-span-2">
-            <label>Длительность полёта до финиша, сек (15–180)</label>
+            <label>Базовая длительность полёта, сек (15–180), при множителе скорости 1</label>
             <input
               type="range"
               min={15}
@@ -286,8 +286,11 @@ export default function DropperGamePage({ onLogout }: { onLogout: () => void }) 
               style={{ marginTop: "0.5rem", maxWidth: "120px" }}
             />
             <p className="field-hint">
-              На скорость падения и таймер в игре <strong>не влияет</strong> — только на то, как быстро герой
-              подстраивается под палец. Длительность раунда задаётся полем «Длительность полёта» выше; античит по нему же.
+              Ориентир: до финиша ≈{" "}
+              <strong>
+                {(cfg.flight_duration_sec / Math.max(0.25, cfg.flight_speed_mult)).toFixed(1)}
+              </strong>{" "}
+              с. Античит на сервере по этому времени.
             </p>
           </div>
           <div className="form-field">
