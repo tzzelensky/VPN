@@ -100,8 +100,12 @@ export default function MySubPage() {
   const [promoCodeInput, setPromoCodeInput] = useState("");
   const [promoApplied, setPromoApplied] = useState<{ code: string; discount_percent: number } | null>(null);
   const [promoFeedback, setPromoFeedback] = useState<{ type: "ok" | "err"; text: string } | null>(null);
-  const [dropperSession, setDropperSession] = useState<{ sessionId: string; seed: number } | null>(null);
+  const [dropperSession, setDropperSession] = useState<{ sessionId: string; seed: number; practice?: boolean } | null>(
+    null,
+  );
   const [dropperInstructionOpen, setDropperInstructionOpen] = useState(false);
+  const [dropperPracticeModalOpen, setDropperPracticeModalOpen] = useState(false);
+  const [dropperPracticeSkipNextHint, setDropperPracticeSkipNextHint] = useState(false);
   const [dropperNoTickets, setDropperNoTickets] = useState(false);
   const [dropperStartBusy, setDropperStartBusy] = useState(false);
 
@@ -357,6 +361,10 @@ export default function MySubPage() {
 
   function openPickForCopy() {
     if (!data) return;
+    if (data.subscriptions.length === 0) {
+      setTab("subscription");
+      return;
+    }
     if (pickedSubId <= 0 && data.subscriptions[0]) setPickedSubId(data.subscriptions[0].id);
     if (data.subscriptions.length <= 1) {
       setPickedSubId(data.subscriptions[0]?.id ?? 0);
@@ -444,12 +452,60 @@ export default function MySubPage() {
     try {
       const r = await startDropperSession({ init_data: initData, user_id: uid });
       (window as unknown as { Telegram?: { WebApp?: { expand?: () => void } } }).Telegram?.WebApp?.expand?.();
-      setDropperSession({ sessionId: r.session_id, seed: r.seed });
+      setDropperSession({ sessionId: r.session_id, seed: r.seed, practice: false });
     } catch (e) {
       const m = e instanceof Error ? e.message : String(e);
       if (m.includes("no_tickets")) setDropperNoTickets(true);
       else if (m.includes("game_disabled")) setMsg("Игра временно отключена.");
       else if (m.includes("forbidden")) setMsg("Нет доступа к этой подписке.");
+      else setMsg(m.slice(0, 200));
+    } finally {
+      setDropperStartBusy(false);
+    }
+  }
+
+  const DROPPER_SKIP_PRACTICE_INTRO_KEY = "mysub_dropper_skip_practice_intro";
+
+  function openDropperPracticeIntro() {
+    if (!data?.dropper.enabled) return;
+    try {
+      if (typeof localStorage !== "undefined" && localStorage.getItem(DROPPER_SKIP_PRACTICE_INTRO_KEY) === "1") {
+        void startDropperPracticePlay();
+        return;
+      }
+    } catch {
+      // ignore
+    }
+    setDropperPracticeSkipNextHint(false);
+    setDropperPracticeModalOpen(true);
+  }
+
+  function confirmDropperPracticePlay() {
+    if (dropperPracticeSkipNextHint) {
+      try {
+        localStorage.setItem(DROPPER_SKIP_PRACTICE_INTRO_KEY, "1");
+      } catch {
+        // ignore
+      }
+    }
+    setDropperPracticeModalOpen(false);
+    void startDropperPracticePlay();
+  }
+
+  async function startDropperPracticePlay() {
+    if (!data?.dropper.enabled) return;
+    setDropperNoTickets(false);
+    setDropperStartBusy(true);
+    setMsg("");
+    try {
+      const uid = dropperTargetUserId > 0 ? dropperTargetUserId : 0;
+      const r = await startDropperSession({ init_data: initData, user_id: uid, practice: true });
+      (window as unknown as { Telegram?: { WebApp?: { expand?: () => void } } }).Telegram?.WebApp?.expand?.();
+      setDropperSession({ sessionId: r.session_id, seed: r.seed, practice: true });
+    } catch (e) {
+      const m = e instanceof Error ? e.message : String(e);
+      if (m.includes("game_disabled")) setMsg("Игра временно отключена.");
+      else if (m.includes("forbidden")) setMsg("Аккаунт не привязан к клиенту. Обратитесь к администратору.");
       else setMsg(m.slice(0, 200));
     } finally {
       setDropperStartBusy(false);
@@ -493,53 +549,68 @@ export default function MySubPage() {
                 <h3 className="mysub-title">Подключитесь за минуту</h3>
                 <p className="sub">Быстрый и надежный VPN для стабильного подключения.</p>
                 <div className="mysub-sub-box">
-                  {data.subscriptions.length > 1 ? (
-                    <div className="form-field">
-                      <label>Выберите подписку</label>
-                      <select
-                        value={homeSub?.id ? String(homeSub.id) : ""}
-                        onChange={(e) => {
-                          const id = Number(e.target.value) || 0;
-                          setHomeSubId(id);
-                          setPickedSubId(id);
-                        }}
-                      >
-                        {data.subscriptions.map((s) => (
-                          <option key={s.id} value={s.id}>
-                            #{s.id} {s.name}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  ) : null}
-                  <p className="sub" style={{ marginBottom: "0.4rem" }}>
-                    {homeSub ? `Конфиг: #${homeSub.id} ${homeSub.name}` : "Выберите подписку"}
-                  </p>
-                  <div className="mysub-url">{homeSub?.subscription_url || "Нажмите кнопку «Скопировать конфиг»"}</div>
-                  <div className="row-actions">
-                    <button
-                      type="button"
-                      className="primary"
-                      disabled={!homeSub}
-                      onClick={() => {
-                        if (!homeSub || (data.subscriptions.length > 1 && !showPickModal)) {
-                          openPickForCopy();
-                          return;
-                        }
-                        void copySubscription(homeSub.subscription_url);
-                      }}
-                    >
-                      ⚡ Скопировать конфиг
-                    </button>
-                    {data.subscriptions.length === 1 ? (
-                      <button type="button" className="ghost" onClick={() => setTab("subscription")}>
-                        ✨ Купить еще подписку
-                      </button>
-                    ) : null}
-                    <button type="button" className="ghost" onClick={() => setShowInstruction(true)}>
-                      📘 Инструкция
-                    </button>
-                  </div>
+                  {data.subscriptions.length === 0 ? (
+                    <>
+                      <p className="mysub-no-sub-text">
+                        У вас еще нет подписки! Купите её в разделе «Оплата».
+                      </p>
+                      <div className="row-actions" style={{ marginTop: "0.65rem" }}>
+                        <button type="button" className="primary" onClick={() => setTab("subscription")}>
+                          Купить подписку
+                        </button>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      {data.subscriptions.length > 1 ? (
+                        <div className="form-field">
+                          <label>Выберите подписку</label>
+                          <select
+                            value={homeSub?.id ? String(homeSub.id) : ""}
+                            onChange={(e) => {
+                              const id = Number(e.target.value) || 0;
+                              setHomeSubId(id);
+                              setPickedSubId(id);
+                            }}
+                          >
+                            {data.subscriptions.map((s) => (
+                              <option key={s.id} value={s.id}>
+                                #{s.id} {s.name}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      ) : null}
+                      <p className="sub" style={{ marginBottom: "0.4rem" }}>
+                        {homeSub ? `Конфиг: #${homeSub.id} ${homeSub.name}` : "Выберите подписку"}
+                      </p>
+                      <div className="mysub-url">{homeSub?.subscription_url || "Нажмите кнопку «Скопировать конфиг»"}</div>
+                      <div className="row-actions">
+                        <button
+                          type="button"
+                          className="primary"
+                          disabled={!homeSub}
+                          onClick={() => {
+                            if (!homeSub || (data.subscriptions.length > 1 && !showPickModal)) {
+                              openPickForCopy();
+                              return;
+                            }
+                            void copySubscription(homeSub.subscription_url);
+                          }}
+                        >
+                          ⚡ Скопировать конфиг
+                        </button>
+                        {data.subscriptions.length === 1 ? (
+                          <button type="button" className="ghost" onClick={() => setTab("subscription")}>
+                            ✨ Купить еще подписку
+                          </button>
+                        ) : null}
+                        <button type="button" className="ghost" onClick={() => setShowInstruction(true)}>
+                          📘 Инструкция
+                        </button>
+                      </div>
+                    </>
+                  )}
                 </div>
                 <div className="mysub-highlight-box">
                   <b>Почему выбирают нас?</b>
@@ -887,6 +958,16 @@ export default function MySubPage() {
                       {dropperStartBusy ? "Запуск…" : "Играть"}
                     </button>
 
+                    <button
+                      type="button"
+                      className="mysub-dropper-btn-pixel mysub-dropper-btn-pixel--ghost"
+                      style={{ marginTop: "0.5rem" }}
+                      disabled={dropperStartBusy}
+                      onClick={() => openDropperPracticeIntro()}
+                    >
+                      Тренировка
+                    </button>
+
                     {dropperNoTickets ? (
                       <p className="mysub-dropper-pixel-hint">
                         Нет билетов. Чтобы получить билеты, совершите любую покупку в разделе «Оплата».
@@ -991,9 +1072,10 @@ export default function MySubPage() {
                 initData={initData}
                 sessionId={dropperSession.sessionId}
                 seed={dropperSession.seed}
-                targetUserId={dropperTargetUserId}
+                targetUserId={dropperTargetUserId > 0 ? dropperTargetUserId : data.subscriptions[0]?.id ?? 0}
                 profile={data}
                 fullscreen
+                practiceMode={dropperSession.practice === true}
                 onDone={() => void finishDropperAndRefresh()}
               />
             </div>,
@@ -1032,6 +1114,41 @@ export default function MySubPage() {
           </div>
         </div>
       ) : null}
+      {dropperPracticeModalOpen ? (
+        <div className="modal-backdrop" onClick={() => setDropperPracticeModalOpen(false)}>
+          <div className="modal mysub-modal mysub-dropper-practice-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-head mysub-dropper-practice-modal-head">
+              <h2 className="mysub-dropper-modal-title">Тренировка</h2>
+              <button type="button" className="ghost modal-close" onClick={() => setDropperPracticeModalOpen(false)}>
+                ×
+              </button>
+            </div>
+            <div className="modal-body">
+              <p className="mysub-dropper-pixel-hint mysub-dropper-practice-modal-text">
+                Это бесплатный режим, чтобы потренироваться: управление как в обычной игре, но билет не тратится,
+                попытки не идут в статистику, наград в конце нет. Когда будете готовы — играйте с билетом и
+                выбирайте подарок.
+              </p>
+              <label className="mysub-dropper-practice-check">
+                <input
+                  type="checkbox"
+                  checked={dropperPracticeSkipNextHint}
+                  onChange={(e) => setDropperPracticeSkipNextHint(e.target.checked)}
+                />
+                <span>Не показывать это окно</span>
+              </label>
+            </div>
+            <div className="modal-footer mysub-dropper-practice-modal-footer">
+              <button type="button" className="mysub-dropper-btn-pixel mysub-dropper-btn-pixel--ghost" onClick={() => setDropperPracticeModalOpen(false)}>
+                Отмена
+              </button>
+              <button type="button" className="mysub-dropper-btn-pixel mysub-dropper-btn-pixel--primary" onClick={() => confirmDropperPracticePlay()}>
+                Играть
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
       {dropperInstructionOpen ? (
         <div className="modal-backdrop" onClick={() => setDropperInstructionOpen(false)}>
           <div className="modal mysub-modal comms-picker-modal" onClick={(e) => e.stopPropagation()}>
@@ -1055,7 +1172,7 @@ export default function MySubPage() {
           </div>
         </div>
       ) : null}
-      {showPickModal && data ? (
+      {showPickModal && data && data.subscriptions.length > 0 ? (
         <div className="modal-backdrop" onClick={() => setShowPickModal(false)}>
           <div className="modal mysub-modal" onClick={(e) => e.stopPropagation()}>
             <div className="modal-head">

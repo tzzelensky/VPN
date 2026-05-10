@@ -153,7 +153,7 @@ export default function DropperGamePage({ onLogout }: { onLogout: () => void }) 
             />
           </div>
           <div className="form-field form-field-span-2">
-            <label>Билетов за подтверждённую покупку</label>
+            <label>Сколько билетов на игру выдавать за одну подтверждённую покупку</label>
             <input
               inputMode="numeric"
               value={cfg.tickets_per_purchase}
@@ -161,7 +161,7 @@ export default function DropperGamePage({ onLogout }: { onLogout: () => void }) 
                 setCfg({ ...cfg, tickets_per_purchase: Math.max(0, Math.floor(Number(e.target.value) || 0)) })
               }
             />
-            <p className="field-hint">Начисляется при подтверждении оплаты в боте.</p>
+            <p className="field-hint">Это значение используется ботом при подтверждении оплаты (WebApp / чек).</p>
           </div>
         </div>
       </section>

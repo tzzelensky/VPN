@@ -571,7 +571,7 @@ router.post("/webapp/payment-proof", async (req, res) => {
 });
 
 router.post("/webapp/dropper/start", (req, res) => {
-  const body = (req.body ?? {}) as { init_data?: unknown; user_id?: unknown };
+  const body = (req.body ?? {}) as { init_data?: unknown; user_id?: unknown; practice?: unknown };
   const initData = String(body.init_data ?? "").trim();
   const ver = verifyTelegramWebAppInitData(initData);
   if (!ver.ok) {
@@ -579,12 +579,17 @@ router.post("/webapp/dropper/start", (req, res) => {
     return;
   }
   const tgId = parseTgId(String(ver.user.id ?? ""));
+  const practice = body.practice === true || body.practice === 1 || body.practice === "1";
   const uid = Math.floor(Number(body.user_id));
-  if (!tgId || !Number.isFinite(uid) || uid <= 0) {
+  if (!tgId) {
     res.status(400).json({ error: "bad_payload" });
     return;
   }
-  const started = startDropperPlaySession(tgId, uid);
+  if (!practice && (!Number.isFinite(uid) || uid <= 0)) {
+    res.status(400).json({ error: "bad_payload" });
+    return;
+  }
+  const started = startDropperPlaySession(tgId, practice && (!Number.isFinite(uid) || uid <= 0) ? 0 : uid, { practice });
   if (!started.ok) {
     const code = started.error;
     if (code === "game_disabled") {
@@ -642,10 +647,12 @@ router.post("/webapp/dropper/finish", async (req, res) => {
     res.status(400).json({ error: result.error });
     return;
   }
-  try {
-    await pushClientListToAllDeployedServers();
-  } catch {
-    // ignore
+  if (!result.practice) {
+    try {
+      await pushClientListToAllDeployedServers();
+    } catch {
+      // ignore
+    }
   }
   res.json({ ok: true });
 });

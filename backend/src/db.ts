@@ -188,6 +188,8 @@ export type DropperSessionRow = {
   user_id: number;
   seed: number;
   started_at: string;
+  /** Тренировка: без списания билета, без записи в статистику и наград. */
+  practice?: boolean;
 };
 
 export type DropperPlayLogRow = {
@@ -371,6 +373,7 @@ function normalizeDropperSession(raw: unknown): DropperSessionRow | null {
     user_id: Math.floor(uid),
     seed: Number.isFinite(seed) ? Math.floor(seed) : 0,
     started_at: started,
+    practice: o.practice === true || o.practice === 1 || o.practice === "1",
   };
 }
 
@@ -1684,39 +1687,55 @@ export function grantDropperTicketsForPurchaseChat(tgChatId: number, tickets: nu
 export function startDropperPlaySession(
   tgUserId: number,
   targetUserId: number,
+  opts?: { practice?: boolean },
 ): { ok: true; session_id: string; seed: number } | { ok: false; error: string } {
+  const practice = opts?.practice === true;
   const cfg = getDropperGameConfig();
   if (!cfg.enabled) return { ok: false, error: "game_disabled" };
   const linked = findUsersByTelegramChatId(tgUserId);
-  const target = linked.find((u) => u.id === targetUserId);
-  if (!target) return { ok: false, error: "forbidden" };
-  if (sumDropperTicketsForTgUser(tgUserId) < 1) return { ok: false, error: "no_tickets" };
+  if (linked.length === 0) return { ok: false, error: "forbidden" };
+
+  let resolvedTargetId = Math.floor(Number(targetUserId));
+  if (practice) {
+    if (!Number.isFinite(resolvedTargetId) || resolvedTargetId <= 0) {
+      resolvedTargetId = [...linked].sort((a, b) => a.id - b.id)[0]!.id;
+    } else if (!linked.some((u) => u.id === resolvedTargetId)) {
+      return { ok: false, error: "forbidden" };
+    }
+  } else {
+    const target = linked.find((u) => u.id === resolvedTargetId);
+    if (!target) return { ok: false, error: "forbidden" };
+    if (sumDropperTicketsForTgUser(tgUserId) < 1) return { ok: false, error: "no_tickets" };
+  }
 
   const sessionBox: { row: DropperSessionRow | null } = { row: null };
   mutate((store) => {
-    const key = String(tgUserId).trim();
-    const sorted = [...store.users]
-      .filter((u) => String(u.tg_id).trim() === key)
-      .sort((a, b) => a.id - b.id);
-    let consumed = false;
-    for (const u of sorted) {
-      const idx = store.users.findIndex((x) => x.id === u.id);
-      if (idx === -1) continue;
-      const row = store.users[idx]!;
-      if (row.dropper_tickets > 0) {
-        store.users[idx] = normalizeUser({ ...row, dropper_tickets: row.dropper_tickets - 1 });
-        consumed = true;
-        break;
+    if (!practice) {
+      const key = String(tgUserId).trim();
+      const sorted = [...store.users]
+        .filter((u) => String(u.tg_id).trim() === key)
+        .sort((a, b) => a.id - b.id);
+      let consumed = false;
+      for (const u of sorted) {
+        const idx = store.users.findIndex((x) => x.id === u.id);
+        if (idx === -1) continue;
+        const row = store.users[idx]!;
+        if (row.dropper_tickets > 0) {
+          store.users[idx] = normalizeUser({ ...row, dropper_tickets: row.dropper_tickets - 1 });
+          consumed = true;
+          break;
+        }
       }
+      if (!consumed) return;
     }
-    if (!consumed) return;
     const seed = Math.floor(Math.random() * 2147483646) + 1;
     const session: DropperSessionRow = {
       id: randomBytes(8).toString("hex"),
       tg_user_id: tgUserId,
-      user_id: targetUserId,
+      user_id: resolvedTargetId,
       seed,
       started_at: new Date().toISOString(),
+      ...(practice ? { practice: true } : {}),
     };
     const cutoff = Date.now() - 30 * 60 * 1000;
     store.dropper_sessions = (store.dropper_sessions ?? []).filter((s) => Date.parse(s.started_at) >= cutoff);
@@ -1725,7 +1744,7 @@ export function startDropperPlaySession(
   });
 
   const created = sessionBox.row;
-  if (!created) return { ok: false, error: "no_tickets" };
+  if (!created) return { ok: false, error: practice ? "forbidden" : "no_tickets" };
   return { ok: true, session_id: created.id, seed: created.seed };
 }
 
@@ -1735,11 +1754,12 @@ export function finishDropperPlay(input: {
   won: boolean;
   flightMs: number;
   choice?: "gb" | "days";
-}): { ok: true } | { ok: false; error: string } {
+}): { ok: true; practice?: boolean } | { ok: false; error: string } {
   const cfg = getDropperGameConfig();
   if (!cfg.enabled) return { ok: false, error: "game_disabled" };
 
   let err: string | null = null;
+  const out: { practice: boolean } = { practice: false };
   mutate((store) => {
     const sessions = store.dropper_sessions ?? [];
     const idx = sessions.findIndex((s) => s.id === input.sessionId);
@@ -1750,6 +1770,12 @@ export function finishDropperPlay(input: {
     const sess = sessions[idx]!;
     if (sess.tg_user_id !== input.tgUserId) {
       err = "forbidden";
+      return;
+    }
+    if (sess.practice === true) {
+      out.practice = true;
+      sessions.splice(idx, 1);
+      store.dropper_sessions = sessions;
       return;
     }
     const elapsed = Date.now() - Date.parse(sess.started_at);
@@ -1848,7 +1874,7 @@ export function finishDropperPlay(input: {
   });
 
   if (err) return { ok: false, error: err };
-  return { ok: true };
+  return out.practice ? { ok: true, practice: true } : { ok: true };
 }
 
 export function getDropperStatsForTgUser(tgUserId: number): {

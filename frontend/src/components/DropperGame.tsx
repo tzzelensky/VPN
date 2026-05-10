@@ -92,6 +92,8 @@ type Props = {
   profile: MySubProfileDto;
   onDone: () => void;
   fullscreen?: boolean;
+  /** Тренировка: без подарков, результат не в статистику. */
+  practiceMode?: boolean;
 };
 
 function drawPixelForest(ctx: CanvasRenderingContext2D, viewTop: number, viewBottom: number) {
@@ -149,7 +151,16 @@ function drawEarthBlocksRow(ctx: CanvasRenderingContext2D, worldX: number, world
   }
 }
 
-export default function DropperGame({ initData, sessionId, seed, targetUserId, profile, onDone, fullscreen }: Props) {
+export default function DropperGame({
+  initData,
+  sessionId,
+  seed,
+  targetUserId,
+  profile,
+  onDone,
+  fullscreen,
+  practiceMode = false,
+}: Props) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [phase, setPhase] = useState<"playing" | "won" | "lost">("playing");
   const [flightMs, setFlightMs] = useState(0);
@@ -168,6 +179,8 @@ export default function DropperGame({ initData, sessionId, seed, targetUserId, p
   const reportedRef = useRef(false);
   const fullscreenRef = useRef(!!fullscreen);
   fullscreenRef.current = !!fullscreen;
+  const practiceModeRef = useRef(practiceMode);
+  practiceModeRef.current = practiceMode;
 
   const submitFinish = useCallback(
     async (won: boolean, ms: number, choice?: "gb" | "days") => {
@@ -312,7 +325,11 @@ export default function DropperGame({ initData, sessionId, seed, targetUserId, p
           const ms = now - startTRef.current;
           setFlightMs(ms);
           phaseRef.current = "won";
-          setPhase("won");
+          if (practiceModeRef.current) {
+            void submitFinish(true, ms);
+          } else {
+            setPhase("won");
+          }
         }
       }
 
@@ -362,7 +379,7 @@ export default function DropperGame({ initData, sessionId, seed, targetUserId, p
       window.removeEventListener("resize", onVvResize);
       window.visualViewport?.removeEventListener("resize", onVvResize);
     };
-  }, [sessionId, seed, submitFinish, fullscreen]);
+  }, [sessionId, seed, submitFinish, fullscreen, practiceMode]);
 
   const targetSub = profile.subscriptions.find((s) => s.id === targetUserId);
   const subHasGbCap = (targetSub?.total_gb ?? 0) > 0;
@@ -372,7 +389,7 @@ export default function DropperGame({ initData, sessionId, seed, targetUserId, p
   return (
     <div className={`dropper-game-wrap ${fullscreen ? "dropper-game-wrap--fullscreen" : ""}`.trim()}>
       <canvas ref={canvasRef} className="dropper-canvas" />
-      {phase === "won" ? (
+      {phase === "won" && !practiceMode ? (
         <div className="dropper-overlay dropper-overlay--pixel">
           <p className="dropper-pixel-title">Победа! Выберите подарок</p>
           <p className="dropper-pixel-sub">#{targetUserId}</p>
@@ -405,7 +422,11 @@ export default function DropperGame({ initData, sessionId, seed, targetUserId, p
       {phase === "lost" ? (
         <div className="dropper-overlay dropper-overlay--pixel">
           <p className="dropper-pixel-title">Упс!</p>
-          <p className="dropper-pixel-sub">Врезались в препятствие. Билет использован.</p>
+          <p className="dropper-pixel-sub">
+            {practiceMode
+              ? "Врезались в препятствие. Это тренировка — билет не списан, попробуйте ещё."
+              : "Врезались в препятствие. Билет использован."}
+          </p>
           <button type="button" className="dropper-gift-btn" onClick={onDone}>
             Закрыть
           </button>

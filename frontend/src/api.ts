@@ -697,6 +697,7 @@ export async function loadDropperGameReport(): Promise<DropperAdminReportDto> {
 export async function startDropperSession(payload: {
   init_data: string;
   user_id: number;
+  practice?: boolean;
 }): Promise<{ session_id: string; seed: number }> {
   const res = await fetch("/api/mysub/webapp/dropper/start", {
     method: "POST",
