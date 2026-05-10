@@ -441,7 +441,7 @@ export type SendCommunicationPayload = {
   photo_base64?: string;
   photo_mime?: string;
   photo_name?: string;
-  buttons?: Array<"pay" | "ref" | "sub" | "buygb">;
+  buttons?: Array<"pay" | "ref" | "sub" | "buygb" | "webapp">;
 };
 
 export type SendCommunicationResult = {
@@ -571,6 +571,7 @@ export type MySubProfileDto = {
   }>;
   payment_url: string;
   plans: Array<{ id: number; title: string; total_gb: number; days: number; price_rub: number }>;
+  topup_plans: Array<{ id: number; title: string; add_gb: number; price_rub: number }>;
   referral: {
     enabled: boolean;
     invite_copy_text: string;
@@ -603,6 +604,7 @@ export async function loadMySubWebAppProfile(initData: string): Promise<MySubPro
 
 export async function sendMySubPaymentProof(payload: {
   init_data: string;
+  pay_kind?: "subscription" | "topup";
   user_id?: number;
   plan_id: number;
   photo_base64: string;

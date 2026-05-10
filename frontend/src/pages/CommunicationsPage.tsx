@@ -131,7 +131,7 @@ export default function CommunicationsPage({ onLogout }: { onLogout: () => void 
   const [editingSegmentId, setEditingSegmentId] = useState("");
   const [segmentPresetEnabled, setSegmentPresetEnabled] = useState(false);
   const [segmentPresetText, setSegmentPresetText] = useState("");
-  const [messageButtons, setMessageButtons] = useState<Array<"pay" | "ref" | "sub" | "buygb">>([]);
+  const [messageButtons, setMessageButtons] = useState<Array<"pay" | "ref" | "sub" | "buygb" | "webapp">>([]);
   const [segmentPreviewUsers, setSegmentPreviewUsers] = useState<Array<{ id: number; name: string; tg_id: string }>>([]);
   const [segmentPreviewLoading, setSegmentPreviewLoading] = useState(false);
   const [autoTextMenuOpen, setAutoTextMenuOpen] = useState(false);
@@ -617,6 +617,7 @@ export default function CommunicationsPage({ onLogout }: { onLogout: () => void 
                   ["ref", "Пригласи друга"],
                   ["sub", "Подписка"],
                   ["buygb", "Докупить ГБ"],
+                  ["webapp", "Открыть приложение"],
                 ] as const).map(([id, label]) => {
                   const active = messageButtons.includes(id);
                   return (

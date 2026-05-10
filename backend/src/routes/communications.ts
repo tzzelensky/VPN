@@ -10,7 +10,7 @@ import {
 } from "../db.js";
 import { requireAuth } from "../middleware/requireAuth.js";
 import { sendTelegramHtml, sendTelegramPhotoBinary, telegramHasDialog } from "../telegram/api.js";
-import { getTelegramBotToken } from "../telegram/env.js";
+import { getTelegramBotToken, getTelegramWebAppUrl } from "../telegram/env.js";
 
 const router = Router();
 router.use(requireAuth);
@@ -121,15 +121,23 @@ function parseSegmentBody(body: SegmentBody): Omit<CommunicationSegmentRow, "id"
   };
 }
 
-function parseButtons(raw: unknown): Array<{ text: string; callback_data: string }> {
+type CommInlineBtn =
+  | { text: string; callback_data: string }
+  | { text: string; web_app: { url: string } };
+
+function parseButtons(raw: unknown): CommInlineBtn[] {
   const arr = Array.isArray(raw) ? raw : [];
   const ids = [...new Set(arr.map((x) => String(x ?? "").trim()))];
-  const out: Array<{ text: string; callback_data: string }> = [];
+  const out: CommInlineBtn[] = [];
   for (const id of ids) {
     if (id === "pay") out.push({ text: "Оплата подписки", callback_data: "pay" });
     else if (id === "ref") out.push({ text: "Пригласи друга", callback_data: "ref_menu" });
     else if (id === "sub") out.push({ text: "Подписка", callback_data: "sub" });
     else if (id === "buygb") out.push({ text: "Докупить ГБ", callback_data: "buygb" });
+    else if (id === "webapp") {
+      const url = getTelegramWebAppUrl();
+      if (url) out.push({ text: "Открыть приложение", web_app: { url } });
+    }
   }
   return out;
 }

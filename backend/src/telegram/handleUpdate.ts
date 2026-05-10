@@ -31,6 +31,8 @@ import {
   getPromoContext,
   sendVpnPlanPicker,
   vpnPlansKeyboardPromo,
+  gbTopUpPlansKeyboardPromo,
+  setPromoPendingCodeForChat,
 } from "./paymentFlow.js";
 import type { PaymentPlanId } from "../db.js";
 import { getTelegramPaymentNotifyChatIds } from "./env.js";
@@ -295,27 +297,41 @@ export async function handleTelegramUpdate(body: unknown): Promise<void> {
 
   const promoAwait = promoAwaitByChat.get(chatId);
   if (promoAwait && promoAwait.ownerId === from.id) {
-    const promoCode = text.trim().toUpperCase();
-    if (!promoCode || promoCode === "/CANCEL" || promoCode === "ОТМЕНА") {
+    const promoCodeRaw = String(text).trim().replace(/\s+/g, "");
+    const cancel = promoCodeRaw.toLowerCase() === "/cancel" || promoCodeRaw.toLowerCase() === "отмена";
+    if (!promoCodeRaw || cancel) {
       promoAwaitByChat.delete(chatId);
       await sendTelegramHtml(chatId, "Применение промокода отменено.", mainMenuInline(isAdminTg(from.id), getReferralProgram().enabled));
       return;
     }
     const ctx = getPromoContext(chatId);
     const shop = getSubscriptionShop();
-    const samplePrice = shop.plans[0]?.price_rub ?? 0;
+    const samplePrice =
+      ctx?.flow === "topup"
+        ? (shop.topup_plans[0]?.price_rub ?? shop.plans[0]?.price_rub ?? 0)
+        : (shop.plans[0]?.price_rub ?? 0);
     try {
-      applyPromoCodeForUser({
-        code: promoCode,
+      const calc = applyPromoCodeForUser({
+        code: promoCodeRaw,
         tg_user_id: from.id,
         original_price_rub: samplePrice,
       });
       promoAwaitByChat.delete(chatId);
-      await sendTelegramHtml(
-        chatId,
-        "Скидка применилась! Стоимость тарифа пересчитана.",
-        vpnPlansKeyboardPromo(promoCode, from.id, ctx?.target_user_id),
-      );
+      const canonical = calc.promo.code;
+      if (ctx?.flow === "topup") {
+        setPromoPendingCodeForChat(chatId, canonical);
+        await sendTelegramHtml(
+          chatId,
+          "Скидка применилась! Стоимость пакетов докупки пересчитана.",
+          gbTopUpPlansKeyboardPromo(chatId, from.id, ctx.target_user_id),
+        );
+      } else {
+        await sendTelegramHtml(
+          chatId,
+          "Скидка применилась! Стоимость тарифа пересчитана.",
+          vpnPlansKeyboardPromo(canonical, from.id, ctx?.target_user_id),
+        );
+      }
       return;
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -730,10 +746,10 @@ async function handleCallback(q: CallbackQuery): Promise<void> {
       return;
     }
 
-    const ppp = /^pplanpromo:([123]):([A-Z0-9_-]{3,40})(?::(\d+))?$/.exec(data);
+    const ppp = /^pplanpromo:([123]):([\p{L}\p{N}_-]{3,40})(?::(\d+))?$/u.exec(data);
     if (ppp) {
       const planId = Number(ppp[1]) as PaymentPlanId;
-      const promoCode = String(ppp[2] ?? "").trim().toUpperCase();
+      const promoCode = String(ppp[2] ?? "").trim();
       const targetUserId = ppp[3] ? Number(ppp[3]) : undefined;
       const ctx = getPromoContext(chatId);
       await answerCallbackQuery(q.id);
@@ -752,6 +768,17 @@ async function handleCallback(q: CallbackQuery): Promise<void> {
       await answerCallbackQuery(q.id);
       await onVpnPlanChosen(chatId, fromId, planId, undefined, String(draftName.name).trim(), q.from);
       newSubscriptionDraftByChat.delete(chatId);
+      return;
+    }
+
+    const gpp = /^gplanpromo:([123])(?::(\d+))?$/.exec(data);
+    if (gpp) {
+      const planId = Number(gpp[1]) as PaymentPlanId;
+      const targetUserId = gpp[2] ? Number(gpp[2]) : undefined;
+      const ctx = getPromoContext(chatId);
+      const promoCode = ctx?.pending_promo_code;
+      await answerCallbackQuery(q.id);
+      await onGbTopUpPlanChosen(chatId, fromId, planId, targetUserId, q.from, promoCode);
       return;
     }
 

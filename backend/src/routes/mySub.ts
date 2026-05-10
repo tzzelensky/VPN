@@ -34,6 +34,7 @@ type TgFileResult = { file_path?: string };
 type WebAppUser = { id?: number; first_name?: string; last_name?: string; username?: string };
 type SendProofBody = {
   init_data?: unknown;
+  pay_kind?: unknown;
   user_id?: unknown;
   plan_id?: unknown;
   photo_base64?: unknown;
@@ -213,6 +214,7 @@ router.post("/webapp/profile", async (req, res) => {
     subscriptions,
     payment_url: shop.payment_url.trim() || getTelegramPaymentUrl(),
     plans: shop.plans,
+    topup_plans: shop.topup_plans,
     referral: {
       enabled: referralCfg.enabled,
       invite_copy_text: referralCfg.invite_copy_text,
@@ -340,8 +342,10 @@ router.post("/webapp/payment-proof", async (req, res) => {
     res.status(400).json({ error: "bad_payload" });
     return;
   }
+  const payKindRaw = String(body.pay_kind ?? "subscription").trim().toLowerCase();
+  const payKind = payKindRaw === "topup" ? "topup" : "subscription";
   const newSubscriptionName = String(body.new_subscription_name ?? "").trim().slice(0, 25);
-  const promoCode = String(body.promo_code ?? "").trim().toUpperCase();
+  const promoCode = String(body.promo_code ?? "").trim().replace(/\s+/g, "");
   const linked = findUsersByTelegramChatId(tgId);
   const target = userId > 0 ? linked.find((u) => u.id === userId) ?? null : null;
   if (userId > 0 && !target) {
@@ -355,6 +359,105 @@ router.post("/webapp/payment-proof", async (req, res) => {
     return;
   }
   const shop = getSubscriptionShop();
+
+  if (payKind === "topup") {
+    if (userId <= 0 || !target) {
+      res.status(400).json({ error: "topup_target_required" });
+      return;
+    }
+    const top = shop.topup_plans.find((p) => p.id === planId);
+    if (!top) {
+      res.status(400).json({ error: "bad_plan" });
+      return;
+    }
+    let finalPrice = top.price_rub;
+    let discountLine = "";
+    if (promoCode) {
+      try {
+        const calc = applyPromoCodeForUser({
+          code: promoCode,
+          tg_user_id: tgId,
+          original_price_rub: top.price_rub,
+        });
+        finalPrice = calc.final_price_rub;
+        discountLine = `\nПромокод: <b>${calc.promo.code}</b> (скидка ${calc.discount_percent}%)`;
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        if (msg === "promo_not_found") {
+          res.status(404).json({ error: msg });
+          return;
+        }
+        if (msg === "promo_already_used") {
+          res.status(409).json({ error: msg });
+          return;
+        }
+        if (msg === "promo_inactive") {
+          res.status(400).json({ error: msg });
+          return;
+        }
+        if (msg === "promo_expired") {
+          res.status(400).json({ error: msg });
+          return;
+        }
+        res.status(400).json({ error: msg });
+        return;
+      }
+    }
+    const caption =
+      `<b>Оплата из WebApp (докупка ГБ)</b>\n` +
+      `Пользователь: <b>${String(ver.user.first_name ?? "").trim() || target.name || "Пользователь"}</b> (chat <code>${tgId}</code>)\n` +
+      `Подписка: <b>#${target.id} ${target.name}</b>\n` +
+      `Пакет докупки: <b>${top.id}</b> — +${top.add_gb} ГБ\n` +
+      (promoCode ? `Сумма: <s>${top.price_rub} ₽</s> <b>${finalPrice} ₽</b>` : `Сумма: <b>${top.price_rub} ₽</b>`) +
+      discountLine;
+    const sessionId = startPaymentAwaitingProof(
+      tgId,
+      tgId,
+      top.id,
+      "topup",
+      target.id,
+      undefined,
+      { username: String(ver.user.username ?? "").trim() || undefined, first_name: String(ver.user.first_name ?? "").trim() || undefined },
+    );
+    if (promoCode) {
+      try {
+        registerPromoCodeUsage({
+          code: promoCode,
+          tg_user_id: tgId,
+          tg_username: String(ver.user.username ?? "").trim() || undefined,
+          tg_first_name: String(ver.user.first_name ?? "").trim() || undefined,
+          session_id: sessionId,
+        });
+      } catch {
+        // no-op
+      }
+    }
+    markPaymentSessionPendingAdmin(sessionId, "webapp");
+
+    let sent = 0;
+    const admins = getTelegramPaymentNotifyChatIds();
+    for (const chatId of admins) {
+      try {
+        await sendTelegramPhotoBinary(chatId, parsed.bytes, {
+          caption,
+          filename: String(body.photo_name ?? "proof.jpg").trim() || "proof.jpg",
+          mimeType: String(body.photo_mime ?? parsed.mime) || parsed.mime,
+          parse_mode: "HTML",
+          reply_markup: adminDecisionKeyboard(sessionId),
+        });
+        sent++;
+      } catch {
+        // skip
+      }
+    }
+    if (sent === 0) {
+      res.status(502).json({ error: "send_failed" });
+      return;
+    }
+    res.json({ ok: true });
+    return;
+  }
+
   const plan = shop.plans.find((p) => p.id === planId);
   if (!plan) {
     res.status(400).json({ error: "bad_plan" });
@@ -379,6 +482,14 @@ router.post("/webapp/payment-proof", async (req, res) => {
       }
       if (msg === "promo_already_used") {
         res.status(409).json({ error: msg });
+        return;
+      }
+      if (msg === "promo_inactive") {
+        res.status(400).json({ error: msg });
+        return;
+      }
+      if (msg === "promo_expired") {
+        res.status(400).json({ error: msg });
         return;
       }
       res.status(400).json({ error: msg });

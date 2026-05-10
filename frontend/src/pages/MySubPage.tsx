@@ -28,6 +28,10 @@ function formatMySubPlanMeta(p: { total_gb: number; days: number }): string {
   return `${gb} · ${p.days} дн.`;
 }
 
+function formatTopUpMeta(p: { add_gb: number }): string {
+  return `+${p.add_gb} ГБ`;
+}
+
 function NavIcon({ tab }: { tab: Tab }) {
   if (tab === "home") {
     return (
@@ -70,6 +74,7 @@ export default function MySubPage() {
   const [err, setErr] = useState<string>("");
   const [showInstruction, setShowInstruction] = useState(false);
   const [showPickModal, setShowPickModal] = useState(false);
+  const [payProduct, setPayProduct] = useState<"subscription" | "topup">("subscription");
   const [payPlanId, setPayPlanId] = useState<number>(1);
   const [payPhoto, setPayPhoto] = useState<File | null>(null);
   const [busyPay, setBusyPay] = useState(false);
@@ -158,6 +163,21 @@ export default function MySubPage() {
     if (!data) return null;
     return data.plans.find((p) => p.id === payPlanId) ?? null;
   }, [data, payPlanId]);
+  const selectedTopUpPlan = useMemo(() => {
+    if (!data?.topup_plans?.length) return null;
+    return data.topup_plans.find((p) => p.id === payPlanId) ?? null;
+  }, [data, payPlanId]);
+
+  function switchPayProduct(next: "subscription" | "topup") {
+    setPromoApplied(null);
+    setPromoFeedback(null);
+    setPromoCodeInput("");
+    setPayPlanId(1);
+    if (next === "topup" && data?.subscriptions.length) {
+      setPayTargetId((prev) => (prev <= 0 ? data.subscriptions[0]!.id : prev));
+    }
+    setPayProduct(next);
+  }
 
   useEffect(() => {
     // Если пользователь меняет введенный промокод после применения — снимаем скидку,
@@ -216,10 +236,23 @@ export default function MySubPage() {
 
   async function submitPaymentProof() {
     if (!data || !payPhoto) {
-      setMsg("Выберите тариф и фото чека.");
+      setMsg("Выберите тариф или пакет ГБ и фото чека.");
       return;
     }
-    if (payTargetId > 0 && !payTargetSub) {
+    if (payProduct === "topup") {
+      if (!data.subscriptions.length) {
+        setMsg("Докупка ГБ доступна только при привязанной подписке.");
+        return;
+      }
+      if (payTargetId <= 0 || !payTargetSub) {
+        setMsg("Выберите подписку, к которой докупаете ГБ.");
+        return;
+      }
+      if (!selectedTopUpPlan) {
+        setMsg("Выберите пакет докупки.");
+        return;
+      }
+    } else if (payTargetId > 0 && !payTargetSub) {
       setMsg("Выберите подписку для продления.");
       return;
     }
@@ -231,15 +264,20 @@ export default function MySubPage() {
       const compressed = await compressImage(payPhoto);
       await sendMySubPaymentProof({
         init_data: initData,
+        pay_kind: payProduct,
         user_id: payTargetId > 0 ? payTargetId : undefined,
         plan_id: payPlanId,
         photo_base64: compressed.base64,
         photo_mime: compressed.mime,
         photo_name: compressed.name,
-        new_subscription_name: payTargetId === 0 ? chosenNewName.slice(0, 25) : undefined,
+        new_subscription_name: payProduct === "subscription" && payTargetId === 0 ? chosenNewName.slice(0, 25) : undefined,
         promo_code: promoApplied?.code,
       });
-      setMsg("Чек получен. Администратор проверит оплату и примет решение. Обычно это занимает немного времени. После подтверждения подписка придет в чат");
+      setMsg(
+        payProduct === "topup"
+          ? "Чек получен. Администратор проверит оплату и начислит ГБ. Обычно это занимает немного времени."
+          : "Чек получен. Администратор проверит оплату и примет решение. Обычно это занимает немного времени. После подтверждения подписка придет в чат",
+      );
       setPayPhoto(null);
       if (payTargetId === 0) setNewSubName("");
     } catch (e) {
@@ -252,8 +290,10 @@ export default function MySubPage() {
   }
 
   async function applyPromoCode() {
-    if (!selectedPlan) {
-      setPromoFeedback({ type: "err", text: "Сначала выберите тариф." });
+    const priceBase =
+      payProduct === "topup" ? selectedTopUpPlan?.price_rub : selectedPlan?.price_rub;
+    if (priceBase == null) {
+      setPromoFeedback({ type: "err", text: payProduct === "topup" ? "Сначала выберите пакет ГБ." : "Сначала выберите тариф." });
       return;
     }
     const code = promoCodeInput.replace(/\s+/g, "").trim().toLocaleUpperCase("ru-RU");
@@ -265,7 +305,7 @@ export default function MySubPage() {
       const calc = await previewMySubPromoCode({
         init_data: initData,
         code,
-        original_price_rub: selectedPlan.price_rub,
+        original_price_rub: priceBase,
       });
       setPromoApplied({
         code: calc.promo.code,
@@ -437,7 +477,36 @@ export default function MySubPage() {
             ) : tab === "subscription" ? (
               <section className="mysub-section mysub-section-anim">
                 <h3 className="mysub-title">Оплата</h3>
-                {data.subscriptions.length > 0 ? (
+                <div className="mysub-sub-box" style={{ marginBottom: "0.65rem" }}>
+                  <div className="form-field">
+                    <label>Что оплачиваете</label>
+                    <div className="mysub-stat-list">
+                      <button
+                        type="button"
+                        className={payProduct === "subscription" ? "primary" : "ghost"}
+                        onClick={() => switchPayProduct("subscription")}
+                        style={{ width: "100%" }}
+                      >
+                        Тариф подписки
+                      </button>
+                      <button
+                        type="button"
+                        className={payProduct === "topup" ? "primary" : "ghost"}
+                        disabled={!data.subscriptions.length}
+                        onClick={() => switchPayProduct("topup")}
+                        style={{ width: "100%" }}
+                      >
+                        Докупка ГБ
+                      </button>
+                    </div>
+                    {payProduct === "topup" && !data.subscriptions.length ? (
+                      <p className="field-hint" style={{ marginTop: "0.4rem" }}>
+                        Нужна привязанная подписка. Обратитесь к администратору или оформите тариф.
+                      </p>
+                    ) : null}
+                  </div>
+                </div>
+                {payProduct === "subscription" && data.subscriptions.length > 0 ? (
                   <div className="mysub-sub-box" style={{ marginBottom: "0.65rem" }}>
                     <div className="form-field" style={{ marginBottom: "0.6rem" }}>
                       <label>Новая подписка</label>
@@ -486,43 +555,93 @@ export default function MySubPage() {
                       </p>
                     )}
                   </div>
+                ) : payProduct === "topup" && data.subscriptions.length > 0 ? (
+                  <div className="mysub-sub-box" style={{ marginBottom: "0.65rem" }}>
+                    <div className="form-field">
+                      <label>Подписка для докупки ГБ</label>
+                      <div className="mysub-stat-list">
+                        {data.subscriptions.map((s) => (
+                          <button
+                            key={`pay-topup-${s.id}`}
+                            type="button"
+                            className={payTargetId === s.id ? "primary" : "ghost"}
+                            onClick={() => setPayTargetId(s.id)}
+                          >
+                            #{s.id} {s.name}
+                            {s.allowed ? " · активна" : ""}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
                 ) : null}
                 <div className="mysub-sub-box mysub-pay-panel">
                   <p className="mysub-pay-lead">
-                    {data.subscriptions.length === 0
-                      ? "У вас пока нет подписок. Выберите тариф, оплатите и отправьте чек — после проверки администратором появится доступ."
-                      : payTargetId === 0
-                        ? "Оплата пойдёт на новую подписку — после подтверждения чека вы получите отдельный конфиг."
-                        : `Оплата для продления: #${payTargetSub?.id} ${payTargetSub?.name}.`}
+                    {payProduct === "topup"
+                      ? data.subscriptions.length === 0
+                        ? "Докупка ГБ станет доступна после привязки подписки к этому Telegram."
+                        : `Докупка ГБ для подписки #${payTargetSub?.id} ${payTargetSub?.name}. Лимит трафика увеличится после подтверждения оплаты.`
+                      : data.subscriptions.length === 0
+                        ? "У вас пока нет подписок. Выберите тариф, оплатите и отправьте чек — после проверки администратором появится доступ."
+                        : payTargetId === 0
+                          ? "Оплата пойдёт на новую подписку — после подтверждения чека вы получите отдельный конфиг."
+                          : `Оплата для продления: #${payTargetSub?.id} ${payTargetSub?.name}.`}
                   </p>
                   <div className="mysub-pay-flow">
                     <div className="mysub-pay-step">
                       <span className="mysub-pay-step-badge">1</span>
                       <div className="mysub-pay-step-body">
-                        <p className="mysub-pay-step-title">Тариф</p>
-                        <div className="mysub-plan-grid" role="radiogroup" aria-label="Тариф">
-                          {data.plans.map((p) => (
-                            <button
-                              key={p.id}
-                              type="button"
-                              role="radio"
-                              aria-checked={payPlanId === p.id}
-                              className={`mysub-plan-card ${payPlanId === p.id ? "is-selected" : ""}`.trim()}
-                              onClick={() => setPayPlanId(p.id)}
-                            >
-                              <span className="mysub-plan-card-title">{p.title.trim() || `Тариф ${p.id}`}</span>
-                              <span className="mysub-plan-card-meta">{formatMySubPlanMeta(p)}</span>
-                              <span className="mysub-plan-card-price">
-                                {promoApplied ? (
-                                  <>
-                                    <s>{p.price_rub} ₽</s> {discountedPriceForPlan(p.price_rub)} ₽
-                                  </>
-                                ) : (
-                                  `${p.price_rub} ₽`
-                                )}
-                              </span>
-                            </button>
-                          ))}
+                        <p className="mysub-pay-step-title">{payProduct === "topup" ? "Пакет ГБ" : "Тариф"}</p>
+                        <div
+                          className="mysub-plan-grid"
+                          role="radiogroup"
+                          aria-label={payProduct === "topup" ? "Пакет докупки" : "Тариф"}
+                        >
+                          {payProduct === "topup"
+                            ? (data.topup_plans ?? []).map((p) => (
+                                <button
+                                  key={p.id}
+                                  type="button"
+                                  role="radio"
+                                  aria-checked={payPlanId === p.id}
+                                  className={`mysub-plan-card ${payPlanId === p.id ? "is-selected" : ""}`.trim()}
+                                  onClick={() => setPayPlanId(p.id)}
+                                >
+                                  <span className="mysub-plan-card-title">{p.title.trim() || `Пакет ${p.id}`}</span>
+                                  <span className="mysub-plan-card-meta">{formatTopUpMeta(p)}</span>
+                                  <span className="mysub-plan-card-price">
+                                    {promoApplied ? (
+                                      <>
+                                        <s>{p.price_rub} ₽</s> {discountedPriceForPlan(p.price_rub)} ₽
+                                      </>
+                                    ) : (
+                                      `${p.price_rub} ₽`
+                                    )}
+                                  </span>
+                                </button>
+                              ))
+                            : data.plans.map((p) => (
+                                <button
+                                  key={p.id}
+                                  type="button"
+                                  role="radio"
+                                  aria-checked={payPlanId === p.id}
+                                  className={`mysub-plan-card ${payPlanId === p.id ? "is-selected" : ""}`.trim()}
+                                  onClick={() => setPayPlanId(p.id)}
+                                >
+                                  <span className="mysub-plan-card-title">{p.title.trim() || `Тариф ${p.id}`}</span>
+                                  <span className="mysub-plan-card-meta">{formatMySubPlanMeta(p)}</span>
+                                  <span className="mysub-plan-card-price">
+                                    {promoApplied ? (
+                                      <>
+                                        <s>{p.price_rub} ₽</s> {discountedPriceForPlan(p.price_rub)} ₽
+                                      </>
+                                    ) : (
+                                      `${p.price_rub} ₽`
+                                    )}
+                                  </span>
+                                </button>
+                              ))}
                         </div>
                       </div>
                     </div>
@@ -530,7 +649,18 @@ export default function MySubPage() {
                       <span className="mysub-pay-step-badge">2</span>
                       <div className="mysub-pay-step-body">
                         <p className="mysub-pay-step-title">Оплата</p>
-                        <p className="sub">В комментарии к переводу укажите номер тарифа: <b>{payPlanId}</b>.</p>
+                        <p className="sub">
+                          {payProduct === "topup" ? (
+                            <>
+                              В комментарии к переводу укажите <b>номер пакета докупки</b>: <b>{payPlanId}</b> (обычно{" "}
+                              <code>1</code>, <code>2</code> или <code>3</code>).
+                            </>
+                          ) : (
+                            <>
+                              В комментарии к переводу укажите номер тарифа: <b>{payPlanId}</b>.
+                            </>
+                          )}
+                        </p>
                         <div className="mysub-promo-box">
                           <input
                             className="mysub-promo-input"
@@ -541,9 +671,10 @@ export default function MySubPage() {
                           <button type="button" className="ghost mysub-promo-apply-btn" onClick={() => void applyPromoCode()}>
                             Применить промокод
                           </button>
-                          {promoApplied && selectedPlan ? (
+                          {promoApplied && (payProduct === "topup" ? selectedTopUpPlan : selectedPlan) ? (
                             <p className="mysub-promo-feedback ok">
-                              Скидка применилась! Стоимость тарифа {discountedPriceForPlan(selectedPlan.price_rub)} руб
+                              Скидка применилась! К оплате {discountedPriceForPlan((payProduct === "topup" ? selectedTopUpPlan! : selectedPlan!).price_rub)}{" "}
+                              руб
                             </p>
                           ) : promoFeedback ? (
                             <p className="mysub-promo-feedback err">{promoFeedback.text}</p>

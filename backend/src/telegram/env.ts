@@ -28,6 +28,11 @@ export function getTelegramPaymentUrl(): string {
   return u || "https://www.tbank.ru/cf/81hWUzyhiQB";
 }
 
+/** HTTPS URL мини-приложения (как в @BotFather). Для кнопки «Открыть приложение» в рассылках. */
+export function getTelegramWebAppUrl(): string {
+  return (process.env.TELEGRAM_WEBAPP_URL ?? "").trim();
+}
+
 /** Секретный сегмент URL вебхука (случайная строка). */
 export function getTelegramWebhookSecret(): string {
   return (process.env.TELEGRAM_WEBHOOK_SECRET ?? "").trim();

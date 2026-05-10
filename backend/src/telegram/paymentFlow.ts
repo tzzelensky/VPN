@@ -48,12 +48,28 @@ export type TopUpPlanRuntimeMeta = {
 type PromoContext = {
   target_user_id?: number;
   new_subscription_name?: string;
+  flow?: "subscription" | "topup";
+  /** Промокод после ввода в чате (для докупки ГБ callback без длинной строки в callback_data). */
+  pending_promo_code?: string;
 };
 
 const promoContextByChat = new Map<number, PromoContext>();
 
 export function getPromoContext(chatId: number): PromoContext | undefined {
   return promoContextByChat.get(chatId);
+}
+
+export function setPromoPendingCodeForChat(chatId: number, code: string): void {
+  const prev = promoContextByChat.get(chatId) ?? {};
+  promoContextByChat.set(chatId, { ...prev, pending_promo_code: String(code ?? "").trim() });
+}
+
+export function clearPromoPendingCodeForChat(chatId: number): void {
+  const p = promoContextByChat.get(chatId);
+  if (!p?.pending_promo_code) return;
+  const { pending_promo_code: _drop, ...rest } = p;
+  if (Object.keys(rest).length > 0) promoContextByChat.set(chatId, rest);
+  else promoContextByChat.delete(chatId);
 }
 
 export function getPlanRuntimeMeta(planId: PaymentPlanId): PlanRuntimeMeta {
@@ -173,7 +189,7 @@ export function vpnPlansKeyboardForNew() {
 }
 
 export function vpnPlansKeyboardPromo(code: string, tgUserId: number, targetUserId?: number) {
-  const promo = String(code ?? "").trim().toUpperCase();
+  const promo = String(code ?? "").trim().replace(/\s+/g, "");
   let promoRow;
   try {
     promoRow = applyPromoCodeForUser({ code: promo, tg_user_id: tgUserId, original_price_rub: 100 }).promo;
@@ -201,6 +217,29 @@ export function gbTopUpPlansKeyboard(targetUserId?: number) {
   const rows = shop.topup_plans.map((p) => [
     { text: topupPickerButtonLabel(p), callback_data: targetUserId ? `gplan:${p.id}:${targetUserId}` : `gplan:${p.id}` },
   ]);
+  rows.push([{ text: "🎟 Применить промокод", callback_data: "promoask" }]);
+  rows.push([{ text: "« Главное меню", callback_data: "home" }]);
+  return { inline_keyboard: rows };
+}
+
+/** Клавиатура докупки со скидкой; промокод хранится в контексте чата (`pending_promo_code`). */
+export function gbTopUpPlansKeyboardPromo(chatId: number, tgUserId: number, targetUserId?: number) {
+  const code = getPromoContext(chatId)?.pending_promo_code?.trim();
+  if (!code) return gbTopUpPlansKeyboard(targetUserId);
+  const shop = getSubscriptionShop();
+  const samplePrice = shop.topup_plans[0]?.price_rub ?? shop.plans[0]?.price_rub ?? 100;
+  let discountPercent = 0;
+  try {
+    discountPercent = applyPromoCodeForUser({ code, tg_user_id: tgUserId, original_price_rub: samplePrice }).promo.discount_percent;
+  } catch {
+    return gbTopUpPlansKeyboard(targetUserId);
+  }
+  const rows = shop.topup_plans.map((p) => {
+    const finalPrice = Math.max(0, Math.floor(p.price_rub - (p.price_rub * discountPercent) / 100));
+    let t = `${p.id} — +${p.add_gb} ГБ — ${finalPrice} ₽`;
+    if (t.length > 58) t = `${t.slice(0, 55)}…`;
+    return [{ text: t, callback_data: targetUserId ? `gplanpromo:${p.id}:${targetUserId}` : `gplanpromo:${p.id}` }];
+  });
   rows.push([{ text: "« Главное меню", callback_data: "home" }]);
   return { inline_keyboard: rows };
 }
@@ -239,6 +278,7 @@ export async function sendVpnPlanPicker(
     ...(newSubscriptionName && String(newSubscriptionName).trim()
       ? { new_subscription_name: String(newSubscriptionName).trim() }
       : {}),
+    flow: "subscription",
   });
   const linked = findUsersByTelegramChatId(tgUserId);
   const shop = getSubscriptionShop();
@@ -303,13 +343,18 @@ export async function sendGbTopUpPlanPicker(chatId: number, tgUserId: number, ta
     await sendTelegramHtml(chatId, "<b>Сначала выберите подписку для докупки ГБ.</b>", backHomeRow);
     return;
   }
+  const planTargetId = target?.id ?? (linked.length === 1 ? linked[0]!.id : undefined);
+  promoContextByChat.set(chatId, {
+    ...(planTargetId ? { target_user_id: planTargetId } : {}),
+    flow: "topup",
+  });
   const prefix = target
     ? `<b>Докупка для подписки:</b> ${escHtml(userTargetTitle(target))}\n\n`
     : "<b>Выберите пакет докупки</b>\n\n";
   await sendTelegramHtml(
     chatId,
     `${prefix}ГБ добавятся к текущему лимиту после подтверждения оплаты:`,
-    gbTopUpPlansKeyboard(target?.id),
+    gbTopUpPlansKeyboard(planTargetId),
   );
 }
 
@@ -345,7 +390,7 @@ export async function onVpnPlanChosen(
   const refCfg = getReferralProgram();
   const discountPercent =
     !target && !newName && linked.length === 0 && invite && refCfg.enabled ? refCfg.invited_discount_percent : 0;
-  const cleanPromo = String(promoCode ?? "").trim().toUpperCase();
+  const cleanPromo = String(promoCode ?? "").trim().replace(/\s+/g, "");
   let promoCalc: ReturnType<typeof applyPromoCodeForUser> | null = null;
   if (cleanPromo) {
     try {
@@ -400,6 +445,7 @@ export async function onGbTopUpPlanChosen(
   planId: PaymentPlanId,
   targetUserId?: number,
   from?: TgFromLite,
+  promoCode?: string,
 ): Promise<void> {
   const linked = findUsersByTelegramChatId(tgUserId);
   if (linked.length === 0) {
@@ -410,23 +456,48 @@ export async function onGbTopUpPlanChosen(
     );
     return;
   }
-  const target = resolveLinkedTarget(tgUserId, targetUserId);
+  const target = resolveLinkedTarget(tgUserId, targetUserId) ?? (linked.length === 1 ? linked[0] : undefined);
   if (linked.length > 1 && !target) {
     await sendTelegramHtml(chatId, "<b>Выберите подписку, к которой нужно докупить ГБ.</b>", backHomeRow);
     return;
   }
   const meta = getTopUpPlanRuntimeMeta(planId);
   const payUrl = effectivePaymentUrl();
-  startPaymentAwaitingProof(chatId, tgUserId, planId, "topup", target?.id, undefined, {
+  const cleanPromo = String(promoCode ?? "").trim();
+  if (!cleanPromo) clearPromoPendingCodeForChat(chatId);
+  let promoCalc: ReturnType<typeof applyPromoCodeForUser> | null = null;
+  if (cleanPromo) {
+    try {
+      promoCalc = applyPromoCodeForUser({ code: cleanPromo, tg_user_id: tgUserId, original_price_rub: meta.priceRub });
+    } catch {
+      promoCalc = null;
+    }
+  }
+  const sessionId = startPaymentAwaitingProof(chatId, tgUserId, planId, "topup", target?.id, undefined, {
     username: from?.username,
     first_name: from?.first_name,
   });
+  if (promoCalc) {
+    registerPromoCodeUsage({
+      code: promoCalc.promo.code,
+      tg_user_id: tgUserId,
+      tg_username: from?.username,
+      tg_first_name: from?.first_name,
+      session_id: sessionId,
+    });
+  }
+  clearPromoPendingCodeForChat(chatId);
   const linkEsc = escHtml(payUrl);
   const body =
     `<b>Выбрано:</b> ${escHtml(topupSummary(meta))}\n` +
     (target ? `<b>Подписка:</b> ${escHtml(userTargetTitle(target))}\n` : "") +
     `<b>Пополнение:</b> +${meta.add_gb} ГБ\n` +
-    `<b>Сумма к оплате:</b> ${meta.priceRub} ₽\n\n` +
+    (promoCalc
+      ? `<b>Скидка применилась! Стоимость пакета ${promoCalc.final_price_rub} руб</b>\n` +
+        `<b>Сумма к оплате:</b> <s>${meta.priceRub} ₽</s> <b>${promoCalc.final_price_rub} ₽</b> (промокод ${escHtml(
+          promoCalc.promo.code,
+        )})\n\n`
+      : `<b>Сумма к оплате:</b> ${meta.priceRub} ₽\n\n`) +
     `<b>Ссылка для оплаты:</b>\n<a href="${linkEsc}">${linkEsc}</a>\n\n` +
     `В комментарии к переводу укажите <b>номер пакета докупки</b>: <code>1</code>, <code>2</code> или <code>3</code>.\n\n` +
     `После оплаты пришлите в этот чат <b>скриншот или фото подтверждения перевода</b> — администратор проверит и начислит ГБ.`;
