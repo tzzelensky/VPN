@@ -39,6 +39,8 @@ const FINISH_ZONE = 110;
 const EARTH_ROW_H = 22;
 /** Пикселей от старта (y≈48) до условия победы (py &gt; WORLD_H−40), при скорости WORLD/travelSec ≈ целевое время полёта. */
 const DROP_TRAVEL_PX = WORLD_H - 48 - 40;
+/** Первые секунды после старта — без столкновений с препятствиями (успеть сориентироваться). */
+const DROP_START_GRACE_MS = 4000;
 
 type ObstacleRow = { y: number; gapLeft: number; gapRight: number };
 
@@ -333,23 +335,26 @@ export default function DropperGame({
         const px = p.x;
         const py = p.y;
 
-        for (const row of obstaclesRef.current) {
-          if (Math.abs(row.y - py) > 260) continue;
-          if (row.gapLeft > 4 && aabbHit(px, py, PLAYER_W, PLAYER_H, 0, row.y, row.gapLeft, EARTH_ROW_H)) {
-            const ms = now - startTRef.current;
-            setFlightMs(ms);
-            phaseRef.current = "lost";
-            setPhase("lost");
-            void submitFinish(false, ms);
-            break;
-          }
-          if (row.gapRight < WORLD_W - 4 && aabbHit(px, py, PLAYER_W, PLAYER_H, row.gapRight, row.y, WORLD_W - row.gapRight, EARTH_ROW_H)) {
-            const ms = now - startTRef.current;
-            setFlightMs(ms);
-            phaseRef.current = "lost";
-            setPhase("lost");
-            void submitFinish(false, ms);
-            break;
+        const elapsedMs = now - startTRef.current;
+        if (elapsedMs >= DROP_START_GRACE_MS) {
+          for (const row of obstaclesRef.current) {
+            if (Math.abs(row.y - py) > 260) continue;
+            if (row.gapLeft > 4 && aabbHit(px, py, PLAYER_W, PLAYER_H, 0, row.y, row.gapLeft, EARTH_ROW_H)) {
+              const ms = elapsedMs;
+              setFlightMs(ms);
+              phaseRef.current = "lost";
+              setPhase("lost");
+              void submitFinish(false, ms);
+              break;
+            }
+            if (row.gapRight < WORLD_W - 4 && aabbHit(px, py, PLAYER_W, PLAYER_H, row.gapRight, row.y, WORLD_W - row.gapRight, EARTH_ROW_H)) {
+              const ms = elapsedMs;
+              setFlightMs(ms);
+              phaseRef.current = "lost";
+              setPhase("lost");
+              void submitFinish(false, ms);
+              break;
+            }
           }
         }
 
