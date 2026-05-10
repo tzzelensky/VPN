@@ -170,6 +170,8 @@ export default function DropperGame({
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [phase, setPhase] = useState<"playing" | "won" | "lost">("playing");
   const [flightMs, setFlightMs] = useState(0);
+  /** Целые секунды до финиша (по пройденному пути). */
+  const [countdownSec, setCountdownSec] = useState(() => Math.ceil(flightDurationSec));
   const [busyGift, setBusyGift] = useState(false);
   const [giftErr, setGiftErr] = useState("");
   const [rewardPickUserId, setRewardPickUserId] = useState(targetUserId);
@@ -194,6 +196,7 @@ export default function DropperGame({
   fullscreenRef.current = !!fullscreen;
   const practiceModeRef = useRef(practiceMode);
   practiceModeRef.current = practiceMode;
+  const countdownSecRef = useRef(-1);
 
   const submitFinish = useCallback(
     async (won: boolean, ms: number, choice?: "gb" | "days") => {
@@ -239,6 +242,9 @@ export default function DropperGame({
     setPhase("playing");
     setFlightMs(0);
     setGiftErr("");
+    const cd0 = Math.ceil(flightDurationSec);
+    countdownSecRef.current = cd0;
+    setCountdownSec(cd0);
 
     const canvas = canvasRef.current;
     if (!canvas) {
@@ -352,6 +358,19 @@ export default function DropperGame({
             setPhase("won");
           }
         }
+
+        if (phaseRef.current === "playing") {
+          const traveled = Math.max(0, py - 48);
+          const remSec = Math.max(0, (DROP_TRAVEL_PX - traveled) / fallSpeed);
+          const nextCd = Math.ceil(remSec);
+          if (nextCd !== countdownSecRef.current) {
+            countdownSecRef.current = nextCd;
+            setCountdownSec(nextCd);
+          }
+        } else if (countdownSecRef.current !== 0) {
+          countdownSecRef.current = 0;
+          setCountdownSec(0);
+        }
       }
 
       const camY = camYRef.current;
@@ -400,7 +419,7 @@ export default function DropperGame({
       window.removeEventListener("resize", onVvResize);
       window.visualViewport?.removeEventListener("resize", onVvResize);
     };
-  }, [sessionId, seed, submitFinish, fullscreen, practiceMode, fallSpeed]);
+  }, [sessionId, seed, submitFinish, fullscreen, practiceMode, fallSpeed, flightDurationSec]);
 
   const rewardSub = profile.subscriptions.find((s) => s.id === rewardPickUserId);
   const subHasGbCap = (rewardSub?.total_gb ?? 0) > 0;
@@ -410,6 +429,13 @@ export default function DropperGame({
 
   return (
     <div className={`dropper-game-wrap ${fullscreen ? "dropper-game-wrap--fullscreen" : ""}`.trim()}>
+      {phase === "playing" ? (
+        <div className="dropper-countdown" aria-live="polite">
+          <span className="dropper-countdown__label">до финиша</span>
+          <span className="dropper-countdown__value">{countdownSec}</span>
+          <span className="dropper-countdown__unit">сек</span>
+        </div>
+      ) : null}
       <canvas ref={canvasRef} className="dropper-canvas" />
       {phase === "won" && !practiceMode ? (
         <div className="dropper-overlay dropper-overlay--pixel">

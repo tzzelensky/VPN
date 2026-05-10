@@ -35,6 +35,12 @@ export default function DropperGamePage({ onLogout }: { onLogout: () => void }) 
   const [resettingTickets, setResettingTickets] = useState(false);
   const [ticketsListSearch, setTicketsListSearch] = useState("");
   const [msg, setMsg] = useState<{ type: "ok" | "err"; text: string } | null>(null);
+  const [flightDurDraft, setFlightDurDraft] = useState("");
+  const [flightDurFocused, setFlightDurFocused] = useState(false);
+
+  useEffect(() => {
+    if (!flightDurFocused && cfg) setFlightDurDraft(String(cfg.flight_duration_sec));
+  }, [cfg, flightDurFocused]);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -55,12 +61,19 @@ export default function DropperGamePage({ onLogout }: { onLogout: () => void }) 
     void refresh();
   }, [refresh]);
 
+  function clampFlightSec(raw: string, fallback: number): number {
+    const n = Math.floor(Number(String(raw).replace(/[^\d]/g, "")) || fallback);
+    return Math.max(15, Math.min(180, n));
+  }
+
   async function onSave() {
     if (!cfg) return;
     setSaving(true);
     setMsg(null);
     try {
-      const next = await saveDropperGameConfig(cfg);
+      const flightSec = clampFlightSec(flightDurDraft, cfg.flight_duration_sec);
+      setFlightDurDraft(String(flightSec));
+      const next = await saveDropperGameConfig({ ...cfg, flight_duration_sec: flightSec });
       setCfg(next);
       setMsg({ type: "ok", text: "Настройки игры сохранены." });
     } catch (e) {
@@ -201,22 +214,40 @@ export default function DropperGamePage({ onLogout }: { onLogout: () => void }) 
             />
           </div>
           <div className="form-field form-field-span-2">
-            <label>Длительность полёта до финиша, сек</label>
+            <label>Длительность полёта до финиша, сек (15–180)</label>
             <input
-              inputMode="numeric"
+              type="range"
               min={15}
               max={180}
+              step={1}
               value={cfg.flight_duration_sec}
-              onChange={(e) =>
-                setCfg({
-                  ...cfg,
-                  flight_duration_sec: Math.max(15, Math.min(180, Math.floor(Number(e.target.value) || 40))),
-                })
-              }
+              onChange={(e) => {
+                const n = Number(e.target.value);
+                setCfg({ ...cfg, flight_duration_sec: n });
+                setFlightDurDraft(String(n));
+              }}
+              style={{ width: "100%", maxWidth: "420px", display: "block", marginTop: "0.35rem" }}
+            />
+            <input
+              inputMode="numeric"
+              aria-label="Точное значение секунд"
+              value={flightDurDraft}
+              onFocus={() => setFlightDurFocused(true)}
+              onChange={(e) => setFlightDurDraft(e.target.value.replace(/[^\d]/g, ""))}
+              onBlur={() => {
+                setFlightDurFocused(false);
+                const n = clampFlightSec(flightDurDraft, cfg.flight_duration_sec);
+                setCfg({ ...cfg, flight_duration_sec: n });
+                setFlightDurDraft(String(n));
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+              }}
+              style={{ marginTop: "0.5rem", maxWidth: "120px" }}
             />
             <p className="field-hint">
-              Меньше значение — быстрее падение и короче раунд; больше — дольше. Допустимые значения 15–180. На клиенте
-              пересчитывается скорость; сервер проверяет время победы пропорционально этой настройке.
+              Ползунок или ввод числа (при вводе ограничение 15–180 применяется при уходе с поля или по «Сохранить»).
+              На клиенте пересчитывается скорость; сервер проверяет время победы пропорционально этой настройке.
             </p>
           </div>
           <div className="form-field">

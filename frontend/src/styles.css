@@ -3374,6 +3374,47 @@ th {
   box-shadow: 0 12px 28px rgba(0, 0, 0, 0.45);
 }
 
+.dropper-countdown {
+  position: absolute;
+  top: 0.4rem;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 3;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: center;
+  gap: 0.35rem 0.5rem;
+  max-width: min(96%, 360px);
+  padding: 0.35rem 0.65rem;
+  border-radius: 10px;
+  background: rgba(8, 9, 14, 0.88);
+  border: 2px solid rgba(212, 168, 38, 0.35);
+  font-family: "Press Start 2P", ui-monospace, monospace;
+  pointer-events: none;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+}
+
+.dropper-countdown__label {
+  font-size: clamp(0.32rem, 1.4vw, 0.42rem);
+  color: #b8c5d8;
+  text-shadow: 1px 1px 0 #000;
+}
+
+.dropper-countdown__value {
+  font-size: clamp(0.55rem, 2.4vw, 0.72rem);
+  color: #f0e6a8;
+  text-shadow: 2px 2px 0 #000;
+  min-width: 1.2em;
+  text-align: center;
+}
+
+.dropper-countdown__unit {
+  font-size: clamp(0.3rem, 1.3vw, 0.4rem);
+  color: #8fa3b8;
+  text-shadow: 1px 1px 0 #000;
+}
+
 .dropper-overlay {
   position: absolute;
   left: 50%;
