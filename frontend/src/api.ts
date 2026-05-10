@@ -217,6 +217,8 @@ export type UserDto = {
   online_devices: number;
   /** Unix ms последнего sync трафика с узлов. */
   stats_synced_at: number;
+  /** Билеты «Дроппер»; при одинаковом tg_id сумма по записям — общий пул в WebApp. */
+  dropper_tickets: number;
   created_at: string;
   updated_at: string;
 };
@@ -681,6 +683,19 @@ export async function grantDropperGameTickets(body: {
   tickets: number;
 }): Promise<{ ok: boolean; granted_users: number; tickets_each: number }> {
   const res = await fetch("/api/dropper-game/grant-tickets", {
+    method: "POST",
+    credentials: "include",
+    headers: jsonHeaders,
+    body: JSON.stringify(body),
+  });
+  return handle(res);
+}
+
+export async function setDropperUserTicketsPool(body: {
+  user_id: number;
+  tickets: number;
+}): Promise<{ ok: boolean }> {
+  const res = await fetch("/api/dropper-game/set-user-tickets", {
     method: "POST",
     credentials: "include",
     headers: jsonHeaders,

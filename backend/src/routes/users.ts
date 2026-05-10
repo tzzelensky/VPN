@@ -142,6 +142,7 @@ function userDto(u: UserRow) {
     online_devices: Number(u.online_devices) || 0,
     stats_synced_at: u.stats_synced_at,
     connection_profile: u.connection_profile,
+    dropper_tickets: u.dropper_tickets,
     created_at: u.created_at,
     updated_at: u.updated_at,
   };

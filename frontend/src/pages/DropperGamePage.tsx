@@ -7,10 +7,17 @@ import {
   loadDropperGameConfig,
   loadDropperGameReport,
   saveDropperGameConfig,
+  setDropperUserTicketsPool,
   type DropperAdminReportDto,
   type DropperGameConfigDto,
   type UserDto,
 } from "../api";
+
+function dropperPoolForRow(u: UserDto, all: UserDto[]): number {
+  const tg = (u.tg_id || "").trim();
+  if (!tg) return u.dropper_tickets ?? 0;
+  return all.filter((x) => (x.tg_id || "").trim() === tg).reduce((s, x) => s + (x.dropper_tickets ?? 0), 0);
+}
 
 export default function DropperGamePage({ onLogout }: { onLogout: () => void }) {
   const [cfg, setCfg] = useState<DropperGameConfigDto | null>(null);
@@ -21,6 +28,9 @@ export default function DropperGamePage({ onLogout }: { onLogout: () => void }) 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [granting, setGranting] = useState(false);
+  const [ticketsEditUserId, setTicketsEditUserId] = useState<number | null>(null);
+  const [ticketsEditDraft, setTicketsEditDraft] = useState("");
+  const [ticketsSaving, setTicketsSaving] = useState(false);
   const [msg, setMsg] = useState<{ type: "ok" | "err"; text: string } | null>(null);
 
   const refresh = useCallback(async () => {
@@ -83,6 +93,24 @@ export default function DropperGamePage({ onLogout }: { onLogout: () => void }) 
   }
 
   const userOptions = useMemo(() => [...users].sort((a, b) => a.id - b.id), [users]);
+
+  async function saveEditedTickets(anchorUserId: number) {
+    const n = Math.max(0, Math.floor(Number(ticketsEditDraft) || 0));
+    setTicketsSaving(true);
+    setMsg(null);
+    try {
+      await setDropperUserTicketsPool({ user_id: anchorUserId, tickets: n });
+      const u = await listUsers();
+      setUsers(u);
+      setTicketsEditUserId(null);
+      setTicketsEditDraft("");
+      setMsg({ type: "ok", text: "Билеты сохранены." });
+    } catch (e) {
+      setMsg({ type: "err", text: String(e) });
+    } finally {
+      setTicketsSaving(false);
+    }
+  }
 
   if (loading || !cfg) {
     return (
@@ -163,6 +191,98 @@ export default function DropperGamePage({ onLogout }: { onLogout: () => void }) 
             />
             <p className="field-hint">Это значение используется ботом при подтверждении оплаты (WebApp / чек).</p>
           </div>
+        </div>
+      </section>
+
+      <section className="panel">
+        <h2 className="user-modal-section-title">Билеты по клиентам</h2>
+        <p className="field-hint" style={{ marginTop: 0, marginBottom: "0.75rem" }}>
+          Для одного Telegram несколько подписок — один общий счётчик (сумма по записям). Редактирование задаёт этот
+          общий пул для всех таких подписок.
+        </p>
+        <div style={{ overflowX: "auto" }}>
+          <table className="dropper-tickets-admin-table">
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Имя</th>
+                <th>Telegram</th>
+                <th>Билетов</th>
+                <th />
+              </tr>
+            </thead>
+            <tbody>
+              {userOptions.map((u) => {
+                const pool = dropperPoolForRow(u, users);
+                const editing = ticketsEditUserId === u.id;
+                return (
+                  <tr key={u.id}>
+                    <td className="mono">{u.id}</td>
+                    <td>{u.name}</td>
+                    <td className="mono">{u.tg_id || "—"}</td>
+                    <td>
+                      {editing ? (
+                        <div className="dropper-tickets-edit-row">
+                          <input
+                            className="dropper-tickets-edit-input"
+                            inputMode="numeric"
+                            autoFocus
+                            disabled={ticketsSaving}
+                            value={ticketsEditDraft}
+                            onChange={(e) => setTicketsEditDraft(e.target.value.replace(/[^\d]/g, ""))}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") void saveEditedTickets(u.id);
+                              if (e.key === "Escape") {
+                                setTicketsEditUserId(null);
+                                setTicketsEditDraft("");
+                              }
+                            }}
+                          />
+                          <button
+                            type="button"
+                            className="ghost"
+                            disabled={ticketsSaving}
+                            onClick={() => void saveEditedTickets(u.id)}
+                          >
+                            OK
+                          </button>
+                          <button
+                            type="button"
+                            className="ghost"
+                            disabled={ticketsSaving}
+                            onClick={() => {
+                              setTicketsEditUserId(null);
+                              setTicketsEditDraft("");
+                            }}
+                          >
+                            Отмена
+                          </button>
+                        </div>
+                      ) : (
+                        <span className="mono">{pool}</span>
+                      )}
+                    </td>
+                    <td>
+                      {!editing ? (
+                        <button
+                          type="button"
+                          className="dropper-tickets-pencil"
+                          title="Изменить количество билетов"
+                          aria-label="Редактировать билеты"
+                          onClick={() => {
+                            setTicketsEditUserId(u.id);
+                            setTicketsEditDraft(String(pool));
+                          }}
+                        >
+                          ✏️
+                        </button>
+                      ) : null}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         </div>
       </section>
 

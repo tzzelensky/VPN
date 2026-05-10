@@ -1667,6 +1667,54 @@ export function grantDropperTicketsToUserIds(userIds: number[], tickets: number)
   });
 }
 
+/**
+ * Задать общий пул билетов для WebApp «Дроппер».
+ * Если у клиента указан tg_id и есть несколько подписок с тем же tg — суммарный пул хранится
+ * на записи с минимальным id, у остальных 0 (как в игре: сумма по tg_id).
+ */
+export function setDropperTicketsPoolForClientRow(
+  anchorUserId: number,
+  totalTickets: number,
+): { ok: true } | { ok: false; error: string } {
+  const t = Math.max(0, Math.floor(Number(totalTickets) || 0));
+  let err: string | null = null;
+  mutate((store) => {
+    const anchor = store.users.find((u) => u.id === anchorUserId);
+    if (!anchor) {
+      err = "user_not_found";
+      return;
+    }
+    const tgKey = String(anchor.tg_id ?? "").trim();
+    if (!tgKey) {
+      const idx = store.users.findIndex((u) => u.id === anchorUserId);
+      if (idx === -1) {
+        err = "user_not_found";
+        return;
+      }
+      store.users[idx] = normalizeUser({ ...store.users[idx]!, dropper_tickets: t });
+      return;
+    }
+    const linked = store.users
+      .filter((u) => String(u.tg_id ?? "").trim() === tgKey)
+      .sort((a, b) => a.id - b.id);
+    const firstId = linked[0]?.id;
+    if (firstId == null) {
+      err = "user_not_found";
+      return;
+    }
+    for (const u of linked) {
+      const idx = store.users.findIndex((x) => x.id === u.id);
+      if (idx === -1) continue;
+      store.users[idx] = normalizeUser({
+        ...store.users[idx]!,
+        dropper_tickets: u.id === firstId ? t : 0,
+      });
+    }
+  });
+  if (err) return { ok: false, error: err };
+  return { ok: true };
+}
+
 /** Начисление билетов всем клиентам с указанным Telegram chat id (после покупки). */
 export function grantDropperTicketsForPurchaseChat(tgChatId: number, tickets: number): number {
   const key = String(tgChatId).trim();

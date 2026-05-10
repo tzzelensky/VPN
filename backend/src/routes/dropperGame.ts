@@ -5,6 +5,7 @@ import {
   grantDropperTicketsToUserIds,
   normalizeDropperGame,
   setDropperGameConfig,
+  setDropperTicketsPoolForClientRow,
   type DropperGameConfig,
 } from "../db.js";
 import { requireAuth } from "../middleware/requireAuth.js";
@@ -41,6 +42,23 @@ router.post("/grant-tickets", (req, res) => {
   }
   grantDropperTicketsToUserIds(ids, tickets);
   res.json({ ok: true, granted_users: ids.length, tickets_each: tickets });
+});
+
+/** Установить пул билетов для строки клиента (общий для всех подписок с тем же tg_id). */
+router.post("/set-user-tickets", (req, res) => {
+  const body = (req.body ?? {}) as { user_id?: unknown; tickets?: unknown };
+  const userId = Math.floor(Number(body.user_id));
+  const tickets = Math.max(0, Math.floor(Number(body.tickets) || 0));
+  if (!Number.isFinite(userId) || userId <= 0) {
+    res.status(400).json({ error: "user_id_required" });
+    return;
+  }
+  const result = setDropperTicketsPoolForClientRow(userId, tickets);
+  if (!result.ok) {
+    res.status(result.error === "user_not_found" ? 404 : 400).json({ error: result.error });
+    return;
+  }
+  res.json({ ok: true });
 });
 
 router.get("/report", (_req, res) => {

@@ -3463,3 +3463,57 @@ th {
   opacity: 0.55;
   cursor: not-allowed;
 }
+
+.dropper-tickets-admin-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+.dropper-tickets-admin-table th,
+.dropper-tickets-admin-table td {
+  padding: 0.45rem 0.5rem;
+  text-align: left;
+  border-bottom: 1px solid var(--border, rgba(255, 255, 255, 0.08));
+  vertical-align: middle;
+}
+
+.dropper-tickets-admin-table th {
+  font-weight: 600;
+  color: var(--muted, #94a3b8);
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.dropper-tickets-pencil {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.2rem 0.35rem;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-size: 1rem;
+  line-height: 1;
+  border-radius: 6px;
+  opacity: 0.85;
+}
+
+.dropper-tickets-pencil:hover {
+  opacity: 1;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.dropper-tickets-edit-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.dropper-tickets-edit-input {
+  width: 5rem;
+  padding: 0.25rem 0.4rem;
+  font-size: 0.88rem;
+}
