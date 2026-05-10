@@ -1,13 +1,15 @@
 import { useEffect, useMemo, useState } from "react";
+import DropperGame from "../components/DropperGame";
 import {
   claimMySubReferralReward,
   loadMySubWebAppProfile,
   previewMySubPromoCode,
   sendMySubPaymentProof,
+  startDropperSession,
   type MySubProfileDto,
 } from "../api";
 
-type Tab = "home" | "subscription" | "friends" | "profile";
+type Tab = "home" | "subscription" | "game" | "friends" | "profile";
 
 /** Если название не ввели: имя последней подписки (max id) + порядковый номер (следующий по счёту). */
 function defaultNewSubscriptionName(subs: MySubProfileDto["subscriptions"]): string {
@@ -58,6 +60,15 @@ function NavIcon({ tab }: { tab: Tab }) {
       </svg>
     );
   }
+  if (tab === "game") {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <rect x="4" y="8" width="16" height="9" rx="2" />
+        <path d="M8 12h2.5v2H8zM13.5 12H16v2h-2.5z" fill="currentColor" stroke="none" />
+        <path d="M4 14h16" />
+      </svg>
+    );
+  }
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true">
       <circle cx="12" cy="8" r="3.4" />
@@ -87,6 +98,10 @@ export default function MySubPage() {
   const [promoCodeInput, setPromoCodeInput] = useState("");
   const [promoApplied, setPromoApplied] = useState<{ code: string; discount_percent: number } | null>(null);
   const [promoFeedback, setPromoFeedback] = useState<{ type: "ok" | "err"; text: string } | null>(null);
+  const [dropperSession, setDropperSession] = useState<{ sessionId: string; seed: number } | null>(null);
+  const [dropperInstructionOpen, setDropperInstructionOpen] = useState(false);
+  const [dropperNoTickets, setDropperNoTickets] = useState(false);
+  const [dropperStartBusy, setDropperStartBusy] = useState(false);
 
   function getInitData(): string {
     const tgWebApp = (window as unknown as {
@@ -132,6 +147,16 @@ export default function MySubPage() {
   useEffect(() => {
     setMsg("");
   }, [tab]);
+
+  useEffect(() => {
+    if (data && !data.dropper.enabled && tab === "game") setTab("home");
+  }, [data, tab]);
+
+  const dropperTargetUserId = useMemo(() => {
+    if (!data?.subscriptions.length) return 0;
+    if (pickedSubId > 0 && data.subscriptions.some((s) => s.id === pickedSubId)) return pickedSubId;
+    return data.subscriptions[0]!.id;
+  }, [data, pickedSubId]);
 
   const homeSub = useMemo(() => {
     if (!data) return null;
@@ -385,6 +410,46 @@ export default function MySubPage() {
       }
     } finally {
       setFriendRewardBusy(false);
+    }
+  }
+
+  async function finishDropperAndRefresh() {
+    setDropperSession(null);
+    try {
+      const profile = await loadMySubWebAppProfile(initData);
+      setData(profile);
+    } catch (e) {
+      const m = e instanceof Error ? e.message : String(e);
+      if (m.includes("tg_webapp_auth_required")) setErr("Требуется авторизация через тг.");
+      else setMsg(m);
+    }
+  }
+
+  async function startDropperPlay() {
+    if (!data?.dropper.enabled) return;
+    const uid = dropperTargetUserId;
+    if (!uid) {
+      setMsg("Нужна хотя бы одна подписка, чтобы играть и получать награду.");
+      return;
+    }
+    if (data.dropper.tickets <= 0) {
+      setDropperNoTickets(true);
+      return;
+    }
+    setDropperNoTickets(false);
+    setDropperStartBusy(true);
+    setMsg("");
+    try {
+      const r = await startDropperSession({ init_data: initData, user_id: uid });
+      setDropperSession({ sessionId: r.session_id, seed: r.seed });
+    } catch (e) {
+      const m = e instanceof Error ? e.message : String(e);
+      if (m.includes("no_tickets")) setDropperNoTickets(true);
+      else if (m.includes("game_disabled")) setMsg("Игра временно отключена.");
+      else if (m.includes("forbidden")) setMsg("Нет доступа к этой подписке.");
+      else setMsg(m.slice(0, 200));
+    } finally {
+      setDropperStartBusy(false);
     }
   }
 
@@ -768,6 +833,87 @@ export default function MySubPage() {
                   <p className="sub">Реферальная программа временно отключена.</p>
                 )}
               </section>
+            ) : tab === "game" && data.dropper.enabled ? (
+              <section className="mysub-section mysub-section-anim mysub-dropper-section">
+                <h3 className="mysub-dropper-heading">Дроппер</h3>
+                <p className="mysub-dropper-tickets">
+                  Билетов: <b>{data.dropper.tickets}</b>
+                </p>
+
+                {dropperSession ? (
+                  <div className="mysub-dropper-run">
+                    <DropperGame
+                      initData={initData}
+                      sessionId={dropperSession.sessionId}
+                      seed={dropperSession.seed}
+                      targetUserId={dropperTargetUserId}
+                      profile={data}
+                      onDone={() => void finishDropperAndRefresh()}
+                    />
+                  </div>
+                ) : null}
+
+                <div className={`mysub-dropper-lobby ${dropperSession ? "mysub-dropper-lobby--hidden" : ""}`}>
+                  <div className="mysub-dropper-cliff" aria-hidden>
+                    <div className="mysub-dropper-sky" />
+                    <div className="mysub-dropper-edge" />
+                    <div className="mysub-dropper-figure" />
+                  </div>
+
+                  {data.subscriptions.length > 1 ? (
+                    <div className="form-field" style={{ marginTop: "0.65rem" }}>
+                      <label className="mysub-dropper-label">Подписка для награды</label>
+                      <select
+                        value={String(dropperTargetUserId)}
+                        onChange={(e) => setPickedSubId(Number(e.target.value) || 0)}
+                      >
+                        {data.subscriptions.map((s) => (
+                          <option key={s.id} value={s.id}>
+                            #{s.id} {s.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  ) : null}
+
+                  <button
+                    type="button"
+                    className="primary mysub-dropper-play"
+                    style={{ width: "100%", marginTop: "0.75rem" }}
+                    disabled={dropperStartBusy || !dropperTargetUserId}
+                    onClick={() => void startDropperPlay()}
+                  >
+                    {dropperStartBusy ? "Запуск…" : "Играть"}
+                  </button>
+
+                  {dropperNoTickets ? (
+                    <p className="mysub-dropper-pixel-hint">
+                      Нет билетов. Чтобы получить билеты, совершите любую покупку в разделе «Оплата».
+                    </p>
+                  ) : null}
+
+                  <button
+                    type="button"
+                    className="ghost"
+                    style={{ width: "100%", marginTop: "0.5rem" }}
+                    onClick={() => setDropperInstructionOpen(true)}
+                  >
+                    Инструкция
+                  </button>
+
+                  <div className="mysub-dropper-stats">
+                    <p className="mysub-dropper-stats-title">Ваша статистика</p>
+                    <p>Попыток: {data.dropper.plays}</p>
+                    <p>Побед: {data.dropper.wins}</p>
+                    <p>
+                      Выиграно: {data.dropper.won_gb > 0 ? `${data.dropper.won_gb} ГБ` : ""}
+                      {data.dropper.won_gb > 0 && data.dropper.won_days > 0 ? " · " : ""}
+                      {data.dropper.won_days > 0 ? `${data.dropper.won_days} дн.` : ""}
+                      {data.dropper.won_gb === 0 && data.dropper.won_days === 0 ? "—" : ""}
+                    </p>
+                  </div>
+                </div>
+              </section>
             ) : (
               <section className="mysub-section mysub-section-anim">
                 <h3 className="mysub-title">Профиль</h3>
@@ -802,17 +948,22 @@ export default function MySubPage() {
             )}
 
             {msg ? <div className="flash ok">{msg}</div> : null}
-            <div className="mysub-bottom-actions">
-              {([
-                ["home", "Главная"],
-                ["subscription", "Оплата"],
-                ["friends", "Друзья"],
-                ["profile", "Профиль"],
-              ] as Array<[Tab, string]>).map(([t, label]) => (
+            <div
+              className={`mysub-bottom-actions ${data.dropper.enabled ? "mysub-bottom-actions--5" : ""}`.trim()}
+            >
+              {(
+                [
+                  ["home", "Главная"],
+                  ["subscription", "Оплата"],
+                  ...(data.dropper.enabled ? ([["game", "Игра"]] as Array<[Tab, string]>) : []),
+                  ["friends", "Друзья"],
+                  ["profile", "Профиль"],
+                ] as Array<[Tab, string]>
+              ).map(([t, label]) => (
                 <button
                   key={t}
                   type="button"
-                  className={`mysub-nav-btn ${tab === t ? "active" : ""}`}
+                  className={`mysub-nav-btn ${tab === t ? "active" : ""} ${t === "game" ? "mysub-nav-btn--game" : ""}`.trim()}
                   onClick={() => setTab(t)}
                 >
                   <NavIcon tab={t} />
@@ -849,6 +1000,29 @@ export default function MySubPage() {
             </div>
             <div className="modal-footer">
               <button type="button" className="primary" onClick={() => setShowInstruction(false)}>
+                Понятно
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+      {dropperInstructionOpen ? (
+        <div className="modal-backdrop" onClick={() => setDropperInstructionOpen(false)}>
+          <div className="modal mysub-modal comms-picker-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-head">
+              <h2 className="mysub-dropper-modal-title">Как играть</h2>
+              <button type="button" className="ghost modal-close" onClick={() => setDropperInstructionOpen(false)}>
+                ×
+              </button>
+            </div>
+            <div className="modal-body">
+              <p className="mysub-dropper-pixel-hint" style={{ lineHeight: 1.85, margin: 0 }}>
+                Ведите пальцем по экрану влево и вправо — так вы управляете падением. Отдельных кнопок и стрелок нет.
+                Пролетайте между препятствиями и приземлитесь на жёлтую финишную полосу внизу.
+              </p>
+            </div>
+            <div className="modal-footer">
+              <button type="button" className="primary" onClick={() => setDropperInstructionOpen(false)}>
                 Понятно
               </button>
             </div>

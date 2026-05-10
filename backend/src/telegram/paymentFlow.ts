@@ -14,7 +14,9 @@ import {
   getReferralReward,
   getUser,
   getPaymentSession,
+  getDropperGameConfig,
   getSubscriptionShop,
+  grantDropperTicketsForPurchaseChat,
   registerPromoCodeUsage,
   markPaymentSessionPendingAdmin,
   snapExpiryTimeToNoonLocal,
@@ -28,6 +30,7 @@ import {
 } from "../db.js";
 import { pushClientListToAllDeployedServers } from "../userSync.js";
 import { answerCallbackQuery, sendTelegramHtml, sendTelegramPhoto } from "./api.js";
+import { notifyDropperTicketsAfterPurchase } from "./dropperTickets.js";
 import { escHtml } from "./format.js";
 import { backHomeRow, mainMenuInline, newUserKeyboard, publicSubscriptionUrl } from "./keyboards.js";
 import { getTelegramPaymentNotifyChatIds, getTelegramPaymentUrl } from "./env.js";
@@ -733,6 +736,19 @@ export async function onAdminPaymentConfirm(
         total_gb: subMeta.total_gb,
         days: subMeta.days,
       });
+    }
+  }
+
+  const dropCfg = getDropperGameConfig();
+  const perPurchase = Math.max(0, Math.floor(dropCfg.tickets_per_purchase || 0));
+  if (dropCfg.enabled && perPurchase > 0) {
+    const grantedUsers = grantDropperTicketsForPurchaseChat(sess.tg_chat_id, perPurchase);
+    if (grantedUsers > 0) {
+      try {
+        await notifyDropperTicketsAfterPurchase(sess.tg_chat_id, grantedUsers * perPurchase);
+      } catch (e) {
+        console.error("[telegram] dropper tickets notify:", e);
+      }
     }
   }
 

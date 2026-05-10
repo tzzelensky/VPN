@@ -3,7 +3,10 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import {
   applyPromoCodeForUser,
   claimReferralReward,
+  finishDropperPlay,
   findUsersByTelegramChatId,
+  getDropperGameConfig,
+  getDropperStatsForTgUser,
   getReferralReward,
   getReferralProgram,
   getSubscriptionShop,
@@ -11,7 +14,9 @@ import {
   listReferralRewardsForInviterUsers,
   markPaymentSessionPendingAdmin,
   registerPromoCodeUsage,
+  startDropperPlaySession,
   startPaymentAwaitingProof,
+  sumDropperTicketsForTgUser,
   updateUserRow,
   userAllowedOnServers,
 } from "../db.js";
@@ -206,6 +211,8 @@ router.post("/webapp/profile", async (req, res) => {
   const botName = String(process.env.TELEGRAM_BOT_USERNAME ?? "").trim().replace(/^@/, "");
   const inviteLink = linked[0] && botName ? `https://t.me/${botName}?start=ref_${linked[0].id}` : "";
   const shop = getSubscriptionShop();
+  const dg = getDropperGameConfig();
+  const dgStats = getDropperStatsForTgUser(tgId);
   res.json({
     tg_id: tgId,
     name: displayName,
@@ -215,6 +222,16 @@ router.post("/webapp/profile", async (req, res) => {
     payment_url: shop.payment_url.trim() || getTelegramPaymentUrl(),
     plans: shop.plans,
     topup_plans: shop.topup_plans,
+    dropper: {
+      enabled: dg.enabled,
+      tickets: sumDropperTicketsForTgUser(tgId),
+      reward_gb: dg.reward_gb,
+      reward_days: dg.reward_days,
+      plays: dgStats.plays,
+      wins: dgStats.wins,
+      won_gb: dgStats.won_gb,
+      won_days: dgStats.won_days,
+    },
     referral: {
       enabled: referralCfg.enabled,
       invite_copy_text: referralCfg.invite_copy_text,
@@ -549,6 +566,86 @@ router.post("/webapp/payment-proof", async (req, res) => {
   if (sent === 0) {
     res.status(502).json({ error: "send_failed" });
     return;
+  }
+  res.json({ ok: true });
+});
+
+router.post("/webapp/dropper/start", (req, res) => {
+  const body = (req.body ?? {}) as { init_data?: unknown; user_id?: unknown };
+  const initData = String(body.init_data ?? "").trim();
+  const ver = verifyTelegramWebAppInitData(initData);
+  if (!ver.ok) {
+    res.status(401).json({ error: "tg_webapp_auth_required", reason: ver.reason });
+    return;
+  }
+  const tgId = parseTgId(String(ver.user.id ?? ""));
+  const uid = Math.floor(Number(body.user_id));
+  if (!tgId || !Number.isFinite(uid) || uid <= 0) {
+    res.status(400).json({ error: "bad_payload" });
+    return;
+  }
+  const started = startDropperPlaySession(tgId, uid);
+  if (!started.ok) {
+    const code = started.error;
+    if (code === "game_disabled") {
+      res.status(403).json({ error: code });
+      return;
+    }
+    if (code === "no_tickets") {
+      res.status(409).json({ error: code });
+      return;
+    }
+    if (code === "forbidden") {
+      res.status(403).json({ error: code });
+      return;
+    }
+    res.status(400).json({ error: code });
+    return;
+  }
+  res.json({ session_id: started.session_id, seed: started.seed });
+});
+
+router.post("/webapp/dropper/finish", async (req, res) => {
+  const body = (req.body ?? {}) as {
+    init_data?: unknown;
+    session_id?: unknown;
+    won?: unknown;
+    flight_ms?: unknown;
+    choice?: unknown;
+  };
+  const initData = String(body.init_data ?? "").trim();
+  const ver = verifyTelegramWebAppInitData(initData);
+  if (!ver.ok) {
+    res.status(401).json({ error: "tg_webapp_auth_required", reason: ver.reason });
+    return;
+  }
+  const tgId = parseTgId(String(ver.user.id ?? ""));
+  const sessionId = String(body.session_id ?? "").trim();
+  const won = body.won === true || body.won === 1 || body.won === "1";
+  const flightMs = Math.max(0, Math.floor(Number(body.flight_ms) || 0));
+  const ch = String(body.choice ?? "").trim().toLowerCase();
+  const choice = ch === "gb" || ch === "days" ? (ch as "gb" | "days") : undefined;
+  if (!tgId || !sessionId) {
+    res.status(400).json({ error: "bad_payload" });
+    return;
+  }
+  const result = finishDropperPlay({ tgUserId: tgId, sessionId, won, flightMs, choice });
+  if (!result.ok) {
+    if (result.error === "choice_required") {
+      res.status(400).json({ error: result.error });
+      return;
+    }
+    if (result.error === "session_not_found") {
+      res.status(404).json({ error: result.error });
+      return;
+    }
+    res.status(400).json({ error: result.error });
+    return;
+  }
+  try {
+    await pushClientListToAllDeployedServers();
+  } catch {
+    // ignore
   }
   res.json({ ok: true });
 });

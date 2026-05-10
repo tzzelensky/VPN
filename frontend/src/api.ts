@@ -572,6 +572,16 @@ export type MySubProfileDto = {
   payment_url: string;
   plans: Array<{ id: number; title: string; total_gb: number; days: number; price_rub: number }>;
   topup_plans: Array<{ id: number; title: string; add_gb: number; price_rub: number }>;
+  dropper: {
+    enabled: boolean;
+    tickets: number;
+    reward_gb: number;
+    reward_days: number;
+    plays: number;
+    wins: number;
+    won_gb: number;
+    won_days: number;
+  };
   referral: {
     enabled: boolean;
     invite_copy_text: string;
@@ -627,6 +637,83 @@ export async function claimMySubReferralReward(payload: {
   kind: "gb" | "days";
 }): Promise<{ ok: boolean }> {
   const res = await fetch("/api/mysub/webapp/referral-reward", {
+    method: "POST",
+    headers: jsonHeaders,
+    body: JSON.stringify(payload),
+  });
+  return handle(res);
+}
+
+export type DropperGameConfigDto = {
+  enabled: boolean;
+  reward_gb: number;
+  reward_days: number;
+  tickets_per_purchase: number;
+};
+
+export type DropperAdminReportDto = {
+  total_plays: number;
+  total_wins: number;
+  total_loses: number;
+  unique_players: number;
+  unique_winners: number;
+  gifts_gb_choices: number;
+  gifts_days_choices: number;
+};
+
+export async function loadDropperGameConfig(): Promise<DropperGameConfigDto> {
+  const res = await fetch("/api/dropper-game", { credentials: "include" });
+  return handle(res);
+}
+
+export async function saveDropperGameConfig(body: DropperGameConfigDto): Promise<DropperGameConfigDto> {
+  const res = await fetch("/api/dropper-game", {
+    method: "PUT",
+    credentials: "include",
+    headers: jsonHeaders,
+    body: JSON.stringify(body),
+  });
+  return handle(res);
+}
+
+export async function grantDropperGameTickets(body: {
+  user_ids: number[];
+  tickets: number;
+}): Promise<{ ok: boolean; granted_users: number; tickets_each: number }> {
+  const res = await fetch("/api/dropper-game/grant-tickets", {
+    method: "POST",
+    credentials: "include",
+    headers: jsonHeaders,
+    body: JSON.stringify(body),
+  });
+  return handle(res);
+}
+
+export async function loadDropperGameReport(): Promise<DropperAdminReportDto> {
+  const res = await fetch("/api/dropper-game/report", { credentials: "include" });
+  return handle(res);
+}
+
+export async function startDropperSession(payload: {
+  init_data: string;
+  user_id: number;
+}): Promise<{ session_id: string; seed: number }> {
+  const res = await fetch("/api/mysub/webapp/dropper/start", {
+    method: "POST",
+    headers: jsonHeaders,
+    body: JSON.stringify(payload),
+  });
+  return handle(res);
+}
+
+export async function finishDropperSession(payload: {
+  init_data: string;
+  session_id: string;
+  won: boolean;
+  flight_ms: number;
+  choice?: "gb" | "days";
+}): Promise<{ ok: boolean }> {
+  const res = await fetch("/api/mysub/webapp/dropper/finish", {
     method: "POST",
     headers: jsonHeaders,
     body: JSON.stringify(payload),

@@ -8,6 +8,7 @@ import SubscriptionShopPage from "./pages/SubscriptionShopPage";
 import CommunicationsPage from "./pages/CommunicationsPage";
 import ReferralProgramPage from "./pages/ReferralProgramPage";
 import PromoCodesPage from "./pages/PromoCodesPage";
+import DropperGamePage from "./pages/DropperGamePage";
 import MySubPage from "./pages/MySubPage";
 
 function useSession() {
@@ -84,6 +85,10 @@ export default function App() {
       <Route
         path="/promo-codes"
         element={loggedIn ? <PromoCodesPage onLogout={() => setLoggedIn(false)} /> : <Navigate to="/login" replace />}
+      />
+      <Route
+        path="/dropper-game"
+        element={loggedIn ? <DropperGamePage onLogout={() => setLoggedIn(false)} /> : <Navigate to="/login" replace />}
       />
       <Route path="/mysub" element={<MySubPage />} />
       <Route path="/mysub/:tgId" element={<MySubPage />} />

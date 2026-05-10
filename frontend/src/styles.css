@@ -2904,3 +2904,268 @@ th {
     font-size: 1.85rem;
   }
 }
+
+/* --- MySub: Дроппер (WebApp) --- */
+.mysub-bottom-actions--5 {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
+@keyframes mysubGameGlow {
+  0%,
+  100% {
+    box-shadow:
+      0 0 0 1px rgba(72, 220, 120, 0.35),
+      0 0 14px rgba(72, 220, 120, 0.45);
+    border-color: rgba(72, 220, 120, 0.5);
+    color: #b8f5c8;
+  }
+  50% {
+    box-shadow:
+      0 0 0 1px rgba(120, 255, 170, 0.55),
+      0 0 22px rgba(72, 255, 140, 0.65);
+    border-color: rgba(120, 255, 170, 0.75);
+    color: #e6ffee;
+  }
+}
+
+.mysub-nav-btn--game:not(.active) {
+  animation: mysubGameGlow 2.4s ease-in-out infinite;
+  border-color: rgba(72, 220, 120, 0.35);
+  background: linear-gradient(180deg, rgba(72, 220, 120, 0.14), rgba(20, 40, 28, 0.35));
+}
+
+.mysub-nav-btn--game.active {
+  animation: mysubGameGlow 2.4s ease-in-out infinite;
+  color: #e6ffee;
+  border-color: rgba(120, 255, 170, 0.55);
+  background: linear-gradient(180deg, rgba(72, 220, 120, 0.22), rgba(30, 55, 40, 0.45));
+}
+
+.mysub-dropper-section {
+  padding-bottom: 0.25rem;
+}
+
+.mysub-dropper-heading {
+  font-family: "Press Start 2P", ui-monospace, monospace;
+  font-size: clamp(0.62rem, 2.8vw, 0.78rem);
+  line-height: 1.5;
+  letter-spacing: 0.04em;
+  text-align: center;
+  margin: 0 0 0.5rem;
+  color: #f2f2f4;
+  text-shadow:
+    0 0 1px #000,
+    2px 2px 0 #000;
+}
+
+.mysub-dropper-tickets {
+  font-family: "Press Start 2P", ui-monospace, monospace;
+  font-size: clamp(0.48rem, 2.2vw, 0.58rem);
+  text-align: center;
+  margin: 0 0 0.85rem;
+  line-height: 1.6;
+  color: #dbe7ff;
+}
+
+.mysub-dropper-label {
+  font-family: "Press Start 2P", ui-monospace, monospace;
+  font-size: 0.45rem;
+}
+
+.mysub-dropper-lobby {
+  opacity: 1;
+  max-height: 2800px;
+  transition:
+    opacity 0.4s ease,
+    max-height 0.45s ease,
+    margin 0.35s ease;
+  overflow: hidden;
+}
+
+.mysub-dropper-lobby--hidden {
+  opacity: 0;
+  max-height: 0;
+  margin: 0;
+  pointer-events: none;
+}
+
+.mysub-dropper-cliff {
+  position: relative;
+  height: 140px;
+  border-radius: 14px;
+  overflow: hidden;
+  border: 2px solid #111;
+  box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.06);
+}
+
+.mysub-dropper-sky {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, #1a1c2c 0%, #2c2040 55%, #3d2848 100%);
+}
+
+.mysub-dropper-edge {
+  position: absolute;
+  right: 12%;
+  top: 38%;
+  width: 44%;
+  height: 18px;
+  background: linear-gradient(180deg, #6a6a70, #3a3a40);
+  border-radius: 4px 4px 0 0;
+  box-shadow: 0 -3px 0 #222;
+  transform: rotate(-4deg);
+}
+
+.mysub-dropper-figure {
+  position: absolute;
+  right: 17%;
+  top: 22%;
+  width: 22px;
+  height: 32px;
+  background: #f4f4f4;
+  border: 2px solid #000;
+  border-radius: 2px;
+  box-shadow: 3px 4px 0 #000;
+}
+
+.mysub-dropper-figure::before,
+.mysub-dropper-figure::after {
+  content: "";
+  position: absolute;
+  width: 4px;
+  height: 4px;
+  background: #000;
+  top: 8px;
+}
+
+.mysub-dropper-figure::before {
+  left: 5px;
+}
+
+.mysub-dropper-figure::after {
+  right: 5px;
+}
+
+.mysub-dropper-play {
+  font-weight: 700;
+}
+
+.mysub-dropper-pixel-hint {
+  font-family: "Press Start 2P", ui-monospace, monospace;
+  font-size: clamp(0.42rem, 1.9vw, 0.52rem);
+  line-height: 1.75;
+  color: #ffb8b8;
+  text-align: center;
+  margin: 0.65rem 0 0;
+  text-shadow: 1px 1px 0 #000;
+}
+
+.mysub-dropper-stats {
+  margin-top: 0.85rem;
+  padding: 0.65rem 0.75rem;
+  border-radius: 12px;
+  border: 2px solid rgba(255, 255, 255, 0.12);
+  background: rgba(0, 0, 0, 0.35);
+  font-family: "Press Start 2P", ui-monospace, monospace;
+  font-size: clamp(0.4rem, 1.8vw, 0.5rem);
+  line-height: 1.7;
+  color: #c8d6e8;
+}
+
+.mysub-dropper-stats-title {
+  margin: 0 0 0.35rem;
+  color: #fff;
+}
+
+.mysub-dropper-stats p {
+  margin: 0.2rem 0;
+}
+
+.mysub-dropper-run {
+  margin-bottom: 0.65rem;
+}
+
+.mysub-dropper-modal-title {
+  font-family: "Press Start 2P", ui-monospace, monospace;
+  font-size: 0.62rem;
+}
+
+/* Canvas мини-игра */
+.dropper-game-wrap {
+  position: relative;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.dropper-canvas {
+  display: block;
+  touch-action: none;
+  border-radius: 12px;
+  border: 2px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.45);
+}
+
+.dropper-overlay {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: min(92%, 340px);
+  padding: 1rem 0.85rem;
+  border-radius: 12px;
+  background: rgba(8, 9, 14, 0.92);
+  border: 2px solid rgba(255, 255, 255, 0.14);
+  text-align: center;
+  z-index: 2;
+}
+
+.dropper-overlay--pixel {
+  font-family: "Press Start 2P", ui-monospace, monospace;
+}
+
+.dropper-pixel-title {
+  font-size: clamp(0.48rem, 2.2vw, 0.58rem);
+  line-height: 1.65;
+  margin: 0 0 0.65rem;
+  color: #fff;
+  text-shadow: 2px 2px 0 #000;
+}
+
+.dropper-pixel-sub {
+  font-size: clamp(0.38rem, 1.7vw, 0.48rem);
+  line-height: 1.65;
+  margin: 0 0 0.55rem;
+  color: #b8c5d8;
+}
+
+.dropper-pixel-err {
+  font-size: clamp(0.35rem, 1.5vw, 0.45rem);
+  color: #ff8a8a;
+  margin: 0.5rem 0 0;
+}
+
+.dropper-gift-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  justify-content: center;
+}
+
+.dropper-gift-btn {
+  font-family: "Press Start 2P", ui-monospace, monospace;
+  font-size: clamp(0.38rem, 1.7vw, 0.46rem);
+  padding: 0.55rem 0.65rem;
+  border-radius: 8px;
+  border: 2px solid #000;
+  background: linear-gradient(180deg, #5a8dee, #3a5fbf);
+  color: #fff;
+  cursor: pointer;
+  box-shadow: 3px 3px 0 #000;
+}
+
+.dropper-gift-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}

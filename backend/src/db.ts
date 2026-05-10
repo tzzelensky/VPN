@@ -93,6 +93,8 @@ export type UserRow = {
   /** Антиспам-состояние авто-уведомлений о трафике в Telegram. */
   traffic_notify_state: "" | "low30" | "empty";
   connection_profile: "legacy" | "reality";
+  /** Билеты на мини-игру «Дроппер» в WebApp. */
+  dropper_tickets: number;
   created_at: string;
   updated_at: string;
 };
@@ -167,6 +169,37 @@ export type ReferralInviteRow = {
   inviter_user_id: number;
   created_at: string;
   consumed: 0 | 1;
+};
+
+/** Мини-игра «Дроппер» в WebApp (Peace Death–стиль в UI). */
+export type DropperGameConfig = {
+  enabled: boolean;
+  /** Награда «ГБ» при выборе подарка (целое число ГБ). */
+  reward_gb: number;
+  /** Награда «дни» при выборе подарка. */
+  reward_days: number;
+  /** Билетов за одну подтверждённую покупку (бот / WebApp). */
+  tickets_per_purchase: number;
+};
+
+export type DropperSessionRow = {
+  id: string;
+  tg_user_id: number;
+  user_id: number;
+  seed: number;
+  started_at: string;
+};
+
+export type DropperPlayLogRow = {
+  id: string;
+  tg_user_id: number;
+  user_id: number;
+  user_name: string;
+  result: "win" | "lose";
+  reward_kind?: "gb" | "days";
+  reward_amount?: number;
+  flight_ms?: number;
+  created_at: string;
 };
 
 export type ReferralRewardRow = {
@@ -270,6 +303,9 @@ type FileStore = {
   promo_codes: PromoCodeRow[];
   promo_code_usages: PromoCodeUsageRow[];
   communication_segments: CommunicationSegmentRow[];
+  dropper_game: DropperGameConfig;
+  dropper_sessions: DropperSessionRow[];
+  dropper_play_log: DropperPlayLogRow[];
 };
 
 function defaultSubscriptionShop(): SubscriptionShopConfig {
@@ -299,6 +335,69 @@ function defaultReferralProgram(): ReferralProgramConfig {
   };
 }
 
+function defaultDropperGame(): DropperGameConfig {
+  return {
+    enabled: false,
+    reward_gb: 5,
+    reward_days: 3,
+    tickets_per_purchase: 1,
+  };
+}
+
+export function normalizeDropperGame(raw: unknown): DropperGameConfig {
+  const d = defaultDropperGame();
+  if (!raw || typeof raw !== "object") return d;
+  const o = raw as Record<string, unknown>;
+  return {
+    enabled: o.enabled === true || o.enabled === 1 || o.enabled === "1",
+    reward_gb: Math.max(0, Math.floor(Number(o.reward_gb) || 0)),
+    reward_days: Math.max(0, Math.floor(Number(o.reward_days) || 0)),
+    tickets_per_purchase: Math.max(0, Math.floor(Number(o.tickets_per_purchase) || 0)),
+  };
+}
+
+function normalizeDropperSession(raw: unknown): DropperSessionRow | null {
+  if (!raw || typeof raw !== "object") return null;
+  const o = raw as Record<string, unknown>;
+  const id = String(o.id ?? "").trim();
+  const tg = Number(o.tg_user_id);
+  const uid = Number(o.user_id);
+  const seed = Number(o.seed);
+  const started = String(o.started_at ?? "").trim();
+  if (!id || !Number.isFinite(tg) || tg <= 0 || !Number.isFinite(uid) || uid <= 0 || !started) return null;
+  return {
+    id,
+    tg_user_id: Math.floor(tg),
+    user_id: Math.floor(uid),
+    seed: Number.isFinite(seed) ? Math.floor(seed) : 0,
+    started_at: started,
+  };
+}
+
+function normalizeDropperPlayLog(raw: unknown): DropperPlayLogRow | null {
+  if (!raw || typeof raw !== "object") return null;
+  const o = raw as Record<string, unknown>;
+  const id = String(o.id ?? "").trim();
+  const tg = Number(o.tg_user_id);
+  const uid = Number(o.user_id);
+  const res = String(o.result ?? "").trim().toLowerCase();
+  if (!id || !Number.isFinite(tg) || tg <= 0 || !Number.isFinite(uid) || uid <= 0) return null;
+  if (res !== "win" && res !== "lose") return null;
+  const rk = String(o.reward_kind ?? "").trim().toLowerCase();
+  const reward_kind = rk === "gb" || rk === "days" ? (rk as "gb" | "days") : undefined;
+  return {
+    id,
+    tg_user_id: Math.floor(tg),
+    user_id: Math.floor(uid),
+    user_name: String(o.user_name ?? "").trim(),
+    result: res as "win" | "lose",
+    ...(reward_kind ? { reward_kind } : {}),
+    ...(Number.isFinite(Number(o.reward_amount)) ? { reward_amount: Math.floor(Number(o.reward_amount)) } : {}),
+    ...(Number.isFinite(Number(o.flight_ms)) ? { flight_ms: Math.floor(Number(o.flight_ms)) } : {}),
+    created_at: String(o.created_at ?? new Date().toISOString()),
+  };
+}
+
 function emptyStore(): FileStore {
   return {
     subscription_token: null,
@@ -315,6 +414,9 @@ function emptyStore(): FileStore {
     promo_codes: [],
     promo_code_usages: [],
     communication_segments: [],
+    dropper_game: defaultDropperGame(),
+    dropper_sessions: [],
+    dropper_play_log: [],
   };
 }
 
@@ -671,6 +773,7 @@ function normalizeUser(u: UserRow): UserRow {
     traffic_notify_state:
       u.traffic_notify_state === "low30" || u.traffic_notify_state === "empty" ? u.traffic_notify_state : "",
     connection_profile: mode === "reality" ? "reality" : "legacy",
+    dropper_tickets: Math.max(0, Math.floor(Number((u as { dropper_tickets?: unknown }).dropper_tickets) || 0)),
     created_at: u.created_at ?? new Date().toISOString(),
     updated_at: u.updated_at ?? u.created_at ?? new Date().toISOString(),
   };
@@ -756,6 +859,18 @@ function readStore(): FileStore {
     const communication_segments = commSegmentsRaw
       .map((x) => normalizeCommunicationSegment(x))
       .filter((x): x is CommunicationSegmentRow => x != null);
+    const dropperSessionsRaw = Array.isArray((parsed as { dropper_sessions?: unknown }).dropper_sessions)
+      ? (parsed as { dropper_sessions: unknown[] }).dropper_sessions
+      : [];
+    const dropper_sessions = dropperSessionsRaw
+      .map((x) => normalizeDropperSession(x))
+      .filter((x): x is DropperSessionRow => x != null);
+    const dropperLogRaw = Array.isArray((parsed as { dropper_play_log?: unknown }).dropper_play_log)
+      ? (parsed as { dropper_play_log: unknown[] }).dropper_play_log
+      : [];
+    const dropper_play_log = dropperLogRaw
+      .map((x) => normalizeDropperPlayLog(x))
+      .filter((x): x is DropperPlayLogRow => x != null);
     return {
       subscription_token: parsed.subscription_token ?? null,
       next_server_id: Number(parsed.next_server_id) > 0 ? Number(parsed.next_server_id) : 1,
@@ -773,6 +888,9 @@ function readStore(): FileStore {
       promo_codes,
       promo_code_usages,
       communication_segments: communication_segments.length > 0 ? communication_segments : defaultCommunicationSegments(),
+      dropper_game: normalizeDropperGame((parsed as { dropper_game?: unknown }).dropper_game),
+      dropper_sessions,
+      dropper_play_log,
     };
   } catch {
     return emptyStore();
@@ -1059,6 +1177,7 @@ export function createUser(input: CreateUserInput = {}): UserRow {
       stats_raw_down: -1,
       traffic_notify_state: "",
       connection_profile,
+      dropper_tickets: 0,
       created_at: now,
       updated_at: now,
     });
@@ -1512,6 +1631,281 @@ export function listReferralRewardsForInviterUsers(inviterUserIds: number[]): Re
   );
   if (ids.size === 0) return [];
   return readStore().referral_rewards.filter((r) => ids.has(r.inviter_user_id));
+}
+
+export function getDropperGameConfig(): DropperGameConfig {
+  return normalizeDropperGame(readStore().dropper_game);
+}
+
+export function setDropperGameConfig(cfg: DropperGameConfig): void {
+  mutate((store) => {
+    store.dropper_game = normalizeDropperGame(cfg);
+  });
+}
+
+export function sumDropperTicketsForTgUser(tgUserId: number): number {
+  const key = String(tgUserId).trim();
+  if (!key) return 0;
+  return readStore()
+    .users.filter((u) => String(u.tg_id).trim() === key)
+    .reduce((s, u) => s + u.dropper_tickets, 0);
+}
+
+export function grantDropperTicketsToUserIds(userIds: number[], tickets: number): void {
+  const n = Math.max(0, Math.floor(Number(tickets) || 0));
+  if (n <= 0 || userIds.length === 0) return;
+  const idSet = new Set(userIds.map((x) => Math.floor(Number(x))).filter((x) => Number.isFinite(x) && x > 0));
+  mutate((store) => {
+    for (let i = 0; i < store.users.length; i++) {
+      const u = store.users[i]!;
+      if (!idSet.has(u.id)) continue;
+      store.users[i] = normalizeUser({ ...u, dropper_tickets: u.dropper_tickets + n });
+    }
+  });
+}
+
+/** Начисление билетов всем клиентам с указанным Telegram chat id (после покупки). */
+export function grantDropperTicketsForPurchaseChat(tgChatId: number, tickets: number): number {
+  const key = String(tgChatId).trim();
+  const n = Math.max(0, Math.floor(Number(tickets) || 0));
+  if (!key || n <= 0) return 0;
+  let granted = 0;
+  mutate((store) => {
+    for (let i = 0; i < store.users.length; i++) {
+      const u = store.users[i]!;
+      if (String(u.tg_id).trim() !== key) continue;
+      store.users[i] = normalizeUser({ ...u, dropper_tickets: u.dropper_tickets + n });
+      granted++;
+    }
+  });
+  return granted;
+}
+
+export function startDropperPlaySession(
+  tgUserId: number,
+  targetUserId: number,
+): { ok: true; session_id: string; seed: number } | { ok: false; error: string } {
+  const cfg = getDropperGameConfig();
+  if (!cfg.enabled) return { ok: false, error: "game_disabled" };
+  const linked = findUsersByTelegramChatId(tgUserId);
+  const target = linked.find((u) => u.id === targetUserId);
+  if (!target) return { ok: false, error: "forbidden" };
+  if (sumDropperTicketsForTgUser(tgUserId) < 1) return { ok: false, error: "no_tickets" };
+
+  const sessionBox: { row: DropperSessionRow | null } = { row: null };
+  mutate((store) => {
+    const key = String(tgUserId).trim();
+    const sorted = [...store.users]
+      .filter((u) => String(u.tg_id).trim() === key)
+      .sort((a, b) => a.id - b.id);
+    let consumed = false;
+    for (const u of sorted) {
+      const idx = store.users.findIndex((x) => x.id === u.id);
+      if (idx === -1) continue;
+      const row = store.users[idx]!;
+      if (row.dropper_tickets > 0) {
+        store.users[idx] = normalizeUser({ ...row, dropper_tickets: row.dropper_tickets - 1 });
+        consumed = true;
+        break;
+      }
+    }
+    if (!consumed) return;
+    const seed = Math.floor(Math.random() * 2147483646) + 1;
+    const session: DropperSessionRow = {
+      id: randomBytes(8).toString("hex"),
+      tg_user_id: tgUserId,
+      user_id: targetUserId,
+      seed,
+      started_at: new Date().toISOString(),
+    };
+    const cutoff = Date.now() - 30 * 60 * 1000;
+    store.dropper_sessions = (store.dropper_sessions ?? []).filter((s) => Date.parse(s.started_at) >= cutoff);
+    store.dropper_sessions.push(session);
+    sessionBox.row = session;
+  });
+
+  const created = sessionBox.row;
+  if (!created) return { ok: false, error: "no_tickets" };
+  return { ok: true, session_id: created.id, seed: created.seed };
+}
+
+export function finishDropperPlay(input: {
+  tgUserId: number;
+  sessionId: string;
+  won: boolean;
+  flightMs: number;
+  choice?: "gb" | "days";
+}): { ok: true } | { ok: false; error: string } {
+  const cfg = getDropperGameConfig();
+  if (!cfg.enabled) return { ok: false, error: "game_disabled" };
+
+  let err: string | null = null;
+  mutate((store) => {
+    const sessions = store.dropper_sessions ?? [];
+    const idx = sessions.findIndex((s) => s.id === input.sessionId);
+    if (idx === -1) {
+      err = "session_not_found";
+      return;
+    }
+    const sess = sessions[idx]!;
+    if (sess.tg_user_id !== input.tgUserId) {
+      err = "forbidden";
+      return;
+    }
+    const elapsed = Date.now() - Date.parse(sess.started_at);
+    const flight = Math.max(0, Math.floor(Number(input.flightMs) || 0));
+
+    const user = store.users.find((u) => u.id === sess.user_id);
+    const userName = user ? String(user.name ?? "").trim() : "";
+
+    const pushLose = () => {
+      const row: DropperPlayLogRow = {
+        id: randomBytes(8).toString("hex"),
+        tg_user_id: sess.tg_user_id,
+        user_id: sess.user_id,
+        user_name: userName,
+        result: "lose",
+        flight_ms: flight,
+        created_at: new Date().toISOString(),
+      };
+      if (!store.dropper_play_log) store.dropper_play_log = [];
+      store.dropper_play_log.push(row);
+      store.dropper_play_log = store.dropper_play_log.slice(-15_000);
+    };
+
+    const removeSession = () => {
+      sessions.splice(idx, 1);
+      store.dropper_sessions = sessions;
+    };
+
+    if (!input.won) {
+      removeSession();
+      pushLose();
+      return;
+    }
+
+    const timingOk = flight >= 24_000 && flight <= 42_000 && elapsed >= 20_000 && elapsed <= 120_000;
+    if (!timingOk) {
+      removeSession();
+      pushLose();
+      return;
+    }
+
+    const choice = input.choice;
+    if (choice !== "gb" && choice !== "days") {
+      err = "choice_required";
+      return;
+    }
+    if (choice === "gb" && cfg.reward_gb <= 0) {
+      err = "reward_gb_disabled";
+      removeSession();
+      pushLose();
+      return;
+    }
+    if (choice === "days" && cfg.reward_days <= 0) {
+      err = "reward_days_disabled";
+      removeSession();
+      pushLose();
+      return;
+    }
+
+    const ui = store.users.findIndex((u) => u.id === sess.user_id);
+    if (ui === -1) {
+      err = "user_not_found";
+      removeSession();
+      return;
+    }
+    const u = store.users[ui]!;
+
+    if (choice === "gb") {
+      if (u.total_gb <= 0) {
+        removeSession();
+        pushLose();
+        return;
+      }
+      store.users[ui] = normalizeUser({ ...u, total_gb: u.total_gb + cfg.reward_gb });
+    } else {
+      const base = Math.max(Date.now(), u.expiry_time > 0 ? u.expiry_time : 0);
+      const newExp = snapExpiryTimeToNoonLocal(base + cfg.reward_days * 86_400_000);
+      store.users[ui] = normalizeUser({ ...u, expiry_time: newExp });
+    }
+
+    removeSession();
+    const winRow: DropperPlayLogRow = {
+      id: randomBytes(8).toString("hex"),
+      tg_user_id: sess.tg_user_id,
+      user_id: sess.user_id,
+      user_name: userName,
+      result: "win",
+      reward_kind: choice,
+      reward_amount: choice === "gb" ? cfg.reward_gb : cfg.reward_days,
+      flight_ms: flight,
+      created_at: new Date().toISOString(),
+    };
+    if (!store.dropper_play_log) store.dropper_play_log = [];
+    store.dropper_play_log.push(winRow);
+    store.dropper_play_log = store.dropper_play_log.slice(-15_000);
+  });
+
+  if (err) return { ok: false, error: err };
+  return { ok: true };
+}
+
+export function getDropperStatsForTgUser(tgUserId: number): {
+  plays: number;
+  wins: number;
+  won_gb: number;
+  won_days: number;
+} {
+  const log = readStore().dropper_play_log ?? [];
+  const rows = log.filter((r) => r.tg_user_id === tgUserId);
+  let wins = 0;
+  let wonGb = 0;
+  let wonDays = 0;
+  for (const r of rows) {
+    if (r.result === "win") {
+      wins++;
+      if (r.reward_kind === "gb" && r.reward_amount) wonGb += r.reward_amount;
+      if (r.reward_kind === "days" && r.reward_amount) wonDays += r.reward_amount;
+    }
+  }
+  return { plays: rows.length, wins, won_gb: wonGb, won_days: wonDays };
+}
+
+export function getDropperAdminReport(): {
+  total_plays: number;
+  total_wins: number;
+  total_loses: number;
+  unique_players: number;
+  unique_winners: number;
+  gifts_gb_choices: number;
+  gifts_days_choices: number;
+} {
+  const log = readStore().dropper_play_log ?? [];
+  const players = new Set<number>();
+  const winners = new Set<number>();
+  let wins = 0;
+  let loses = 0;
+  let gbC = 0;
+  let daysC = 0;
+  for (const r of log) {
+    players.add(r.tg_user_id);
+    if (r.result === "win") {
+      wins++;
+      winners.add(r.tg_user_id);
+      if (r.reward_kind === "gb") gbC++;
+      if (r.reward_kind === "days") daysC++;
+    } else loses++;
+  }
+  return {
+    total_plays: log.length,
+    total_wins: wins,
+    total_loses: loses,
+    unique_players: players.size,
+    unique_winners: winners.size,
+    gifts_gb_choices: gbC,
+    gifts_days_choices: daysC,
+  };
 }
 
 export function initDb(): void {
