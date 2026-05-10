@@ -2941,21 +2941,92 @@ th {
   background: linear-gradient(180deg, rgba(72, 220, 120, 0.22), rgba(30, 55, 40, 0.45));
 }
 
-.mysub-dropper-section {
-  padding-bottom: 0.25rem;
+.mysub-wrap--dropper-play {
+  padding: 0 !important;
+  padding-bottom: 0 !important;
+  align-items: stretch;
 }
 
-.mysub-dropper-heading {
+.mysub-card--dropper-play {
+  width: 100% !important;
+  max-width: none;
+  border-radius: 0;
+  overflow: visible;
+  padding: 0;
+  min-height: 100dvh;
+  border: none;
+  box-shadow: none;
+  background: transparent;
+}
+
+.mysub-card--dropper-play::before {
+  opacity: 0;
+}
+
+.mysub-dropper-page {
+  position: relative;
+  min-height: calc(100dvh - 5.5rem);
+  padding: 0.5rem 0.65rem 1rem;
+  border-radius: 0;
+  background-color: #0f1812;
+  background-image:
+    repeating-linear-gradient(
+      95deg,
+      transparent 0 52px,
+      rgba(22, 48, 30, 0.42) 52px 54px,
+      transparent 54px 104px
+    ),
+    repeating-linear-gradient(
+      88deg,
+      transparent 0 78px,
+      rgba(18, 36, 26, 0.35) 78px 80px,
+      transparent 80px 160px
+    ),
+    radial-gradient(ellipse 120% 80% at 50% -10%, rgba(55, 92, 62, 0.55) 0%, transparent 55%),
+    linear-gradient(180deg, #152a1c 0%, #0e1610 38%, #0a120e 100%);
+  overflow: hidden;
+}
+
+.mysub-dropper-page::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.42;
+  background-image: radial-gradient(circle at 12% 78%, rgba(30, 52, 36, 0.9) 0%, transparent 12px),
+    radial-gradient(circle at 28% 72%, rgba(26, 48, 34, 0.85) 0%, transparent 10px),
+    radial-gradient(circle at 44% 80%, rgba(34, 58, 40, 0.88) 0%, transparent 11px),
+    radial-gradient(circle at 62% 74%, rgba(24, 44, 32, 0.9) 0%, transparent 10px),
+    radial-gradient(circle at 78% 82%, rgba(32, 54, 38, 0.87) 0%, transparent 12px),
+    radial-gradient(circle at 90% 76%, rgba(28, 50, 36, 0.88) 0%, transparent 11px);
+  background-size: 100% 100%;
+}
+
+.mysub-dropper-page--playing::before {
+  opacity: 0.55;
+}
+
+.mysub-dropper-section {
+  position: relative;
+  z-index: 1;
+  padding-bottom: 0.25rem;
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+}
+
+.mysub-dropper-hero-title {
   font-family: "Press Start 2P", ui-monospace, monospace;
-  font-size: clamp(0.62rem, 2.8vw, 0.78rem);
-  line-height: 1.5;
-  letter-spacing: 0.04em;
+  font-size: clamp(0.95rem, 5.5vw, 1.35rem);
+  line-height: 1.35;
+  letter-spacing: 0.06em;
   text-align: center;
-  margin: 0 0 0.5rem;
-  color: #f2f2f4;
+  margin: 0.35rem 0 0.65rem;
+  color: #e8f5e9;
   text-shadow:
     0 0 1px #000,
-    2px 2px 0 #000;
+    3px 3px 0 #0d1f14,
+    -1px -1px 0 #1b3d28;
 }
 
 .mysub-dropper-tickets {
@@ -2964,7 +3035,7 @@ th {
   text-align: center;
   margin: 0 0 0.85rem;
   line-height: 1.6;
-  color: #dbe7ff;
+  color: #c8e6c9;
 }
 
 .mysub-dropper-label {
@@ -3001,7 +3072,7 @@ th {
 .mysub-dropper-sky {
   position: absolute;
   inset: 0;
-  background: linear-gradient(180deg, #1a1c2c 0%, #2c2040 55%, #3d2848 100%);
+  background: linear-gradient(180deg, #1b2e22 0%, #243c2e 45%, #2f4a38 100%);
 }
 
 .mysub-dropper-edge {
@@ -3016,38 +3087,116 @@ th {
   transform: rotate(-4deg);
 }
 
-.mysub-dropper-figure {
+.mysub-dropper-figure-sprite {
   position: absolute;
-  right: 17%;
-  top: 22%;
-  width: 22px;
-  height: 32px;
-  background: #f4f4f4;
-  border: 2px solid #000;
-  border-radius: 2px;
-  box-shadow: 3px 4px 0 #000;
+  right: 14%;
+  top: 18%;
+  width: 56px;
+  height: 72px;
+  background-repeat: no-repeat;
+  background-size: 400% 100%;
+  background-position: 0 50%;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+  filter: drop-shadow(3px 4px 0 rgba(0, 0, 0, 0.65));
 }
 
-.mysub-dropper-figure::before,
-.mysub-dropper-figure::after {
-  content: "";
+.mysub-dropper-field {
+  margin-top: 0.65rem;
+}
+
+.mysub-dropper-field select {
+  font-size: 0.85rem;
+}
+
+@keyframes mysubDropperBtnPulse {
+  0%,
+  100% {
+    transform: translateY(0);
+    box-shadow:
+      4px 4px 0 #000,
+      0 0 0 1px rgba(255, 255, 255, 0.12);
+  }
+  50% {
+    transform: translateY(-2px);
+    box-shadow:
+      4px 6px 0 #000,
+      0 0 18px rgba(110, 255, 150, 0.35);
+  }
+}
+
+.mysub-dropper-btn-pixel {
+  display: block;
+  width: 100%;
+  margin-top: 0.65rem;
+  font-family: "Press Start 2P", ui-monospace, monospace;
+  font-size: clamp(0.42rem, 2vw, 0.52rem);
+  line-height: 1.5;
+  padding: 0.75rem 0.6rem;
+  border-radius: 4px;
+  border: 3px solid #000;
+  cursor: pointer;
+  text-align: center;
+  animation: mysubDropperBtnPulse 2.2s ease-in-out infinite;
+  transition:
+    opacity 0.2s ease,
+    transform 0.15s ease;
+}
+
+.mysub-dropper-btn-pixel:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  animation: none;
+}
+
+.mysub-dropper-btn-pixel--primary {
+  color: #fff;
+  background: linear-gradient(180deg, #3d9a55, #2a6b3a);
+  box-shadow: 4px 4px 0 #000;
+}
+
+.mysub-dropper-btn-pixel--ghost {
+  margin-top: 0.5rem;
+  color: #dcedff;
+  background: linear-gradient(180deg, #2a3a4a, #1a2430);
+  animation-duration: 2.8s;
+  box-shadow: 4px 4px 0 #000;
+}
+
+.mysub-dropper-stats-wrap {
+  position: relative;
+  margin-top: 1rem;
+  transition:
+    opacity 0.55s ease,
+    max-height 0.55s ease,
+    margin 0.45s ease,
+    transform 0.5s ease;
+  max-height: 320px;
+  opacity: 1;
+}
+
+.mysub-dropper-stats-wrap--hidden {
+  opacity: 0;
+  max-height: 0;
+  margin-top: 0;
+  overflow: hidden;
+  pointer-events: none;
+  transform: translateY(8px);
+}
+
+.mysub-dropper-stats-fog {
   position: absolute;
-  width: 4px;
-  height: 4px;
-  background: #000;
-  top: 8px;
-}
-
-.mysub-dropper-figure::before {
-  left: 5px;
-}
-
-.mysub-dropper-figure::after {
-  right: 5px;
-}
-
-.mysub-dropper-play {
-  font-weight: 700;
+  left: 0;
+  right: 0;
+  top: -36px;
+  height: 48px;
+  pointer-events: none;
+  background: linear-gradient(
+    180deg,
+    transparent 0%,
+    rgba(15, 24, 18, 0.55) 35%,
+    rgba(10, 18, 14, 0.92) 100%
+  );
 }
 
 .mysub-dropper-pixel-hint {
@@ -3061,15 +3210,17 @@ th {
 }
 
 .mysub-dropper-stats {
-  margin-top: 0.85rem;
-  padding: 0.65rem 0.75rem;
+  position: relative;
+  margin-top: 0.35rem;
+  padding: 0.75rem 0.85rem 0.85rem;
   border-radius: 12px;
-  border: 2px solid rgba(255, 255, 255, 0.12);
-  background: rgba(0, 0, 0, 0.35);
+  border: 2px solid rgba(80, 120, 90, 0.35);
+  background: linear-gradient(180deg, rgba(8, 14, 11, 0.92), rgba(6, 10, 8, 0.96));
   font-family: "Press Start 2P", ui-monospace, monospace;
   font-size: clamp(0.4rem, 1.8vw, 0.5rem);
   line-height: 1.7;
-  color: #c8d6e8;
+  color: #b8d4c8;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
 }
 
 .mysub-dropper-stats-title {
@@ -3082,7 +3233,19 @@ th {
 }
 
 .mysub-dropper-run {
-  margin-bottom: 0.65rem;
+  position: fixed;
+  z-index: 100;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: max(6px, env(safe-area-inset-top)) max(6px, env(safe-area-inset-right))
+    max(10px, env(safe-area-inset-bottom)) max(6px, env(safe-area-inset-left));
+  background: linear-gradient(180deg, rgba(12, 22, 16, 0.97), rgba(8, 14, 10, 0.99));
+}
+
+.mysub-dropper-page--playing {
+  min-height: 100dvh;
 }
 
 .mysub-dropper-modal-title {
@@ -3097,6 +3260,15 @@ th {
   display: flex;
   flex-direction: column;
   align-items: center;
+}
+
+.dropper-game-wrap--fullscreen {
+  width: 100%;
+  max-width: 100%;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .dropper-canvas {

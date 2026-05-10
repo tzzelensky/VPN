@@ -14,9 +14,14 @@ function mulberry32(seed: number): () => number {
 
 const WORLD_W = 320;
 const WORLD_H = 8400;
-const ROW_STEP = 130;
-const PLAYER_W = 22;
-const PLAYER_H = 32;
+/** Вертикальный шаг между препятствиями: в начале ниже — больше времени на реакцию. */
+function rowStepForIndex(i: number): number {
+  if (i < 5) return 168;
+  if (i < 12) return 152;
+  return 138;
+}
+const PLAYER_W = 26;
+const PLAYER_H = 34;
 const FALL_SPEED = 275;
 const FINISH_ZONE = 110;
 const TARGET_FLIGHT_MS = 30_000;
@@ -26,12 +31,27 @@ type ObstacleRow = { y: number; gapLeft: number; gapRight: number };
 function buildObstacles(seed: number): ObstacleRow[] {
   const rnd = mulberry32(seed);
   const rows: ObstacleRow[] = [];
-  for (let y = 200; y < WORLD_H - FINISH_ZONE - 40; y += ROW_STEP) {
-    const gapW = 72 + Math.floor(rnd() * 18);
-    const cx = 40 + rnd() * (WORLD_W - 80);
-    const gapLeft = Math.max(8, Math.min(cx - gapW / 2, WORLD_W - gapW - 8));
+  let y = 200;
+  let i = 0;
+  while (y < WORLD_H - FINISH_ZONE - 40) {
+    let gapW: number;
+    if (i < 4) {
+      gapW = 128 + Math.floor(rnd() * 28);
+    } else if (i < 10) {
+      gapW = 108 + Math.floor(rnd() * 22);
+    } else if (i < 20) {
+      gapW = 96 + Math.floor(rnd() * 18);
+    } else {
+      gapW = 88 + Math.floor(rnd() * 16);
+    }
+    gapW = Math.min(gapW, WORLD_W - 36);
+    const margin = 14;
+    const cx = margin + gapW / 2 + rnd() * Math.max(8, WORLD_W - gapW - margin * 2);
+    const gapLeft = Math.max(margin, Math.min(cx - gapW / 2, WORLD_W - gapW - margin));
     const gapRight = gapLeft + gapW;
     rows.push({ y, gapLeft, gapRight });
+    y += rowStepForIndex(i);
+    i += 1;
   }
   return rows;
 }
@@ -56,9 +76,40 @@ type Props = {
   targetUserId: number;
   profile: MySubProfileDto;
   onDone: () => void;
+  /** Полноэкранный режим WebApp: почти весь экран под канвас. */
+  fullscreen?: boolean;
 };
 
-export default function DropperGame({ initData, sessionId, seed, targetUserId, profile, onDone }: Props) {
+const SPRITE_SRC = "/dropper-player.png";
+/** Кадр «со спины» — третий по горизонтали в листе 4×1. */
+const SPRITE_FRAME = 2;
+
+function drawPixelForest(ctx: CanvasRenderingContext2D, camY: number, viewTop: number, viewBottom: number) {
+  const treeSpacing = 44;
+  const endCol = Math.ceil(WORLD_W / treeSpacing) + 2;
+  for (let col = -1; col < endCol; col++) {
+    const baseX = col * treeSpacing + ((col * 17) % 11);
+    for (let ty = Math.floor((camY + viewTop) / 90) * 90 - 180; ty < camY + viewBottom + 180; ty += 90) {
+      const jitter = ((col * 31 + Math.floor(ty / 90) * 13) % 17) - 8;
+      const x = baseX + jitter;
+      const y = ty + ((col + ty) % 7);
+      if (y < -80 || y > WORLD_H + 80) continue;
+      ctx.fillStyle = "#1a2d1f";
+      ctx.fillRect(x + 10, y + 18, 8, 38);
+      ctx.fillStyle = "#2d4a32";
+      ctx.fillRect(x + 2, y + 4, 24, 22);
+      ctx.fillRect(x + 5, y - 6, 18, 18);
+      ctx.fillStyle = "#3d6b42";
+      ctx.fillRect(x + 7, y - 2, 14, 12);
+      ctx.fillStyle = "#244528";
+      ctx.fillRect(x + 4, y + 10, 20, 8);
+    }
+  }
+  ctx.fillStyle = "rgba(12, 18, 14, 0.35)";
+  ctx.fillRect(0, Math.max(0, camY + viewTop), WORLD_W, viewBottom - viewTop + 10);
+}
+
+export default function DropperGame({ initData, sessionId, seed, targetUserId, profile, onDone, fullscreen }: Props) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [phase, setPhase] = useState<"playing" | "won" | "lost">("playing");
   const [flightMs, setFlightMs] = useState(0);
@@ -75,6 +126,9 @@ export default function DropperGame({ initData, sessionId, seed, targetUserId, p
   const touchRef = useRef<number | null>(null);
   const rafRef = useRef(0);
   const reportedRef = useRef(false);
+  const spriteRef = useRef<HTMLImageElement | null>(null);
+  const fullscreenRef = useRef(!!fullscreen);
+  fullscreenRef.current = !!fullscreen;
 
   const submitFinish = useCallback(
     async (won: boolean, ms: number, choice?: "gb" | "days") => {
@@ -100,6 +154,10 @@ export default function DropperGame({ initData, sessionId, seed, targetUserId, p
   );
 
   useEffect(() => {
+    const img = new Image();
+    img.src = SPRITE_SRC;
+    spriteRef.current = img;
+
     reportedRef.current = false;
     obstaclesRef.current = buildObstacles(seed);
     playerRef.current = { x: WORLD_W / 2 - PLAYER_W / 2, y: 48, targetX: WORLD_W / 2 - PLAYER_W / 2 };
@@ -121,8 +179,17 @@ export default function DropperGame({ initData, sessionId, seed, targetUserId, p
 
     const resize = () => {
       const dpr = Math.min(2, window.devicePixelRatio || 1);
-      const cssW = Math.min(400, canvas.parentElement?.clientWidth ?? 320);
-      const cssH = Math.min(380, Math.floor(window.innerHeight * 0.52));
+      let cssW: number;
+      let cssH: number;
+      if (fullscreenRef.current) {
+        const padX = 8;
+        const padY = 12;
+        cssW = Math.max(280, Math.floor((window.visualViewport?.width ?? window.innerWidth) - padX * 2));
+        cssH = Math.max(360, Math.floor((window.visualViewport?.height ?? window.innerHeight) - padY * 2));
+      } else {
+        cssW = Math.min(400, canvas.parentElement?.clientWidth ?? 320);
+        cssH = Math.min(380, Math.floor(window.innerHeight * 0.52));
+      }
       canvas.style.width = `${cssW}px`;
       canvas.style.height = `${cssH}px`;
       canvas.width = Math.floor(cssW * dpr);
@@ -152,7 +219,8 @@ export default function DropperGame({ initData, sessionId, seed, targetUserId, p
       cssH = r.cssH;
       scale = r.scale;
     });
-    ro.observe(canvas.parentElement ?? canvas);
+    ro.observe(fullscreenRef.current ? document.documentElement : canvas.parentElement ?? canvas);
+    window.addEventListener("resize", resize);
 
     const loop = () => {
       if (!running) return;
@@ -205,13 +273,16 @@ export default function DropperGame({ initData, sessionId, seed, targetUserId, p
 
       const camY = camYRef.current;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      ctx.fillStyle = "#070708";
+      ctx.fillStyle = "#0d120f";
       ctx.fillRect(0, 0, cssW, cssH);
       ctx.scale(scale, scale);
       ctx.translate(0, -camY);
 
-      ctx.fillStyle = "#101014";
+      const viewTop = camY;
+      const viewBottom = camY + cssH / scale;
+      ctx.fillStyle = "#152018";
       ctx.fillRect(0, 0, WORLD_W, WORLD_H);
+      drawPixelForest(ctx, camY, viewTop, viewBottom);
 
       for (const row of obstaclesRef.current) {
         if (row.y < camY - 50 || row.y > camY + cssH / scale + 50) continue;
@@ -228,14 +299,20 @@ export default function DropperGame({ initData, sessionId, seed, targetUserId, p
         if (i % 2 === 0) ctx.fillRect(i * 10, finishY, 5, 12);
       }
 
-      ctx.fillStyle = "#f4f4f4";
-      ctx.fillRect(p.x, p.y, PLAYER_W, PLAYER_H);
-      ctx.strokeStyle = "#000";
-      ctx.lineWidth = 2;
-      ctx.strokeRect(p.x, p.y, PLAYER_W, PLAYER_H);
-      ctx.fillStyle = "#000";
-      ctx.fillRect(p.x + 5, p.y + 8, 4, 4);
-      ctx.fillRect(p.x + 13, p.y + 8, 4, 4);
+      const spr = spriteRef.current;
+      if (spr && spr.complete && spr.naturalWidth > 0) {
+        const fw = spr.naturalWidth / 4;
+        const fh = spr.naturalHeight;
+        const sx = SPRITE_FRAME * fw;
+        ctx.imageSmoothingEnabled = false;
+        ctx.drawImage(spr, sx, 0, fw, fh, p.x, p.y, PLAYER_W, PLAYER_H);
+      } else {
+        ctx.fillStyle = "#f4f4f4";
+        ctx.fillRect(p.x, p.y, PLAYER_W, PLAYER_H);
+        ctx.strokeStyle = "#000";
+        ctx.lineWidth = 2;
+        ctx.strokeRect(p.x, p.y, PLAYER_W, PLAYER_H);
+      }
 
       rafRef.current = requestAnimationFrame(loop);
     };
@@ -248,15 +325,16 @@ export default function DropperGame({ initData, sessionId, seed, targetUserId, p
       canvas.removeEventListener("touchstart", onTouch);
       canvas.removeEventListener("touchmove", onTouch);
       canvas.removeEventListener("mousemove", onMouse);
+      window.removeEventListener("resize", resize);
       ro.disconnect();
     };
-  }, [sessionId, seed, submitFinish]);
+  }, [sessionId, seed, submitFinish, fullscreen]);
 
   const canGb = profile.dropper.reward_gb > 0;
   const canDays = profile.dropper.reward_days > 0;
 
   return (
-    <div className="dropper-game-wrap">
+    <div className={`dropper-game-wrap ${fullscreen ? "dropper-game-wrap--fullscreen" : ""}`.trim()}>
       <canvas ref={canvasRef} className="dropper-canvas" />
       {phase === "won" ? (
         <div className="dropper-overlay dropper-overlay--pixel">

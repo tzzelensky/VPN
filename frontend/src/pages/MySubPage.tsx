@@ -152,6 +152,21 @@ export default function MySubPage() {
     if (data && !data.dropper.enabled && tab === "game") setTab("home");
   }, [data, tab]);
 
+  useEffect(() => {
+    if (!dropperSession || tab !== "game") return;
+    const tg = (
+      window as unknown as {
+        Telegram?: { WebApp?: { expand?: () => void; requestFullscreen?: () => void } };
+      }
+    ).Telegram?.WebApp;
+    tg?.expand?.();
+    try {
+      tg?.requestFullscreen?.();
+    } catch {
+      // не все клиенты поддерживают
+    }
+  }, [dropperSession, tab]);
+
   const dropperTargetUserId = useMemo(() => {
     if (!data?.subscriptions.length) return 0;
     if (pickedSubId > 0 && data.subscriptions.some((s) => s.id === pickedSubId)) return pickedSubId;
@@ -453,26 +468,30 @@ export default function MySubPage() {
     }
   }
 
+  const dropperPlaying = tab === "game" && Boolean(dropperSession);
+
   return (
-    <div className="mysub-wrap">
+    <div className={`mysub-wrap ${dropperPlaying ? "mysub-wrap--dropper-play" : ""}`.trim()}>
       {!err && !data ? (
         <div className="mysub-loading-screen" aria-live="polite">
           <div className="mysub-loader-ring" />
           <p className="sub">Загрузка...</p>
         </div>
       ) : null}
-      <div className="mysub-card">
+      <div className={`mysub-card ${dropperPlaying ? "mysub-card--dropper-play" : ""}`.trim()}>
         {err ? <div className="flash err">{err}</div> : null}
         {data ? (
           <>
-            <div className={`mysub-head ${headGlowClass}`.trim()}>
-              {data.avatar_url ? (
-                <img src={data.avatar_url} alt="avatar" className="mysub-avatar" />
-              ) : (
-                <div className="mysub-avatar-fallback">{(data.name || "U").trim().slice(0, 1).toUpperCase()}</div>
-              )}
-              <h1 className="mysub-name">{data.name}</h1>
-            </div>
+            {tab !== "game" ? (
+              <div className={`mysub-head ${headGlowClass}`.trim()}>
+                {data.avatar_url ? (
+                  <img src={data.avatar_url} alt="avatar" className="mysub-avatar" />
+                ) : (
+                  <div className="mysub-avatar-fallback">{(data.name || "U").trim().slice(0, 1).toUpperCase()}</div>
+                )}
+                <h1 className="mysub-name">{data.name}</h1>
+              </div>
+            ) : null}
 
             {tab === "home" ? (
               <section className="mysub-section mysub-section-anim">
@@ -834,86 +853,103 @@ export default function MySubPage() {
                 )}
               </section>
             ) : tab === "game" && data.dropper.enabled ? (
-              <section className="mysub-section mysub-section-anim mysub-dropper-section">
-                <h3 className="mysub-dropper-heading">Дроппер</h3>
-                <p className="mysub-dropper-tickets">
-                  Билетов: <b>{data.dropper.tickets}</b>
-                </p>
+              <div className={`mysub-dropper-page ${dropperSession ? "mysub-dropper-page--playing" : ""}`.trim()}>
+                <section className="mysub-section mysub-dropper-section">
+                  {!dropperSession ? (
+                    <h1 className="mysub-dropper-hero-title" aria-label="Дроппер">
+                      Дроппер
+                    </h1>
+                  ) : null}
+                  {!dropperSession ? (
+                    <p className="mysub-dropper-tickets">
+                      Билетов: <b>{data.dropper.tickets}</b>
+                    </p>
+                  ) : null}
 
-                {dropperSession ? (
-                  <div className="mysub-dropper-run">
-                    <DropperGame
-                      initData={initData}
-                      sessionId={dropperSession.sessionId}
-                      seed={dropperSession.seed}
-                      targetUserId={dropperTargetUserId}
-                      profile={data}
-                      onDone={() => void finishDropperAndRefresh()}
-                    />
-                  </div>
-                ) : null}
-
-                <div className={`mysub-dropper-lobby ${dropperSession ? "mysub-dropper-lobby--hidden" : ""}`}>
-                  <div className="mysub-dropper-cliff" aria-hidden>
-                    <div className="mysub-dropper-sky" />
-                    <div className="mysub-dropper-edge" />
-                    <div className="mysub-dropper-figure" />
-                  </div>
-
-                  {data.subscriptions.length > 1 ? (
-                    <div className="form-field" style={{ marginTop: "0.65rem" }}>
-                      <label className="mysub-dropper-label">Подписка для награды</label>
-                      <select
-                        value={String(dropperTargetUserId)}
-                        onChange={(e) => setPickedSubId(Number(e.target.value) || 0)}
-                      >
-                        {data.subscriptions.map((s) => (
-                          <option key={s.id} value={s.id}>
-                            #{s.id} {s.name}
-                          </option>
-                        ))}
-                      </select>
+                  {dropperSession ? (
+                    <div className="mysub-dropper-run">
+                      <DropperGame
+                        initData={initData}
+                        sessionId={dropperSession.sessionId}
+                        seed={dropperSession.seed}
+                        targetUserId={dropperTargetUserId}
+                        profile={data}
+                        fullscreen
+                        onDone={() => void finishDropperAndRefresh()}
+                      />
                     </div>
                   ) : null}
 
-                  <button
-                    type="button"
-                    className="primary mysub-dropper-play"
-                    style={{ width: "100%", marginTop: "0.75rem" }}
-                    disabled={dropperStartBusy || !dropperTargetUserId}
-                    onClick={() => void startDropperPlay()}
-                  >
-                    {dropperStartBusy ? "Запуск…" : "Играть"}
-                  </button>
+                  <div className={`mysub-dropper-lobby ${dropperSession ? "mysub-dropper-lobby--hidden" : ""}`}>
+                    <div className="mysub-dropper-cliff" aria-hidden>
+                      <div className="mysub-dropper-sky" />
+                      <div className="mysub-dropper-edge" />
+                      <div
+                        className="mysub-dropper-figure-sprite"
+                        style={{
+                          backgroundImage: "url(/dropper-player.png)",
+                        }}
+                      />
+                    </div>
 
-                  {dropperNoTickets ? (
-                    <p className="mysub-dropper-pixel-hint">
-                      Нет билетов. Чтобы получить билеты, совершите любую покупку в разделе «Оплата».
-                    </p>
-                  ) : null}
+                    {data.subscriptions.length > 1 ? (
+                      <div className="form-field mysub-dropper-field">
+                        <label className="mysub-dropper-label">Подписка для награды</label>
+                        <select
+                          value={String(dropperTargetUserId)}
+                          onChange={(e) => setPickedSubId(Number(e.target.value) || 0)}
+                        >
+                          {data.subscriptions.map((s) => (
+                            <option key={s.id} value={s.id}>
+                              #{s.id} {s.name}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    ) : null}
 
-                  <button
-                    type="button"
-                    className="ghost"
-                    style={{ width: "100%", marginTop: "0.5rem" }}
-                    onClick={() => setDropperInstructionOpen(true)}
-                  >
-                    Инструкция
-                  </button>
+                    <button
+                      type="button"
+                      className="mysub-dropper-btn-pixel mysub-dropper-btn-pixel--primary"
+                      disabled={dropperStartBusy || !dropperTargetUserId}
+                      onClick={() => void startDropperPlay()}
+                    >
+                      {dropperStartBusy ? "Запуск…" : "Играть"}
+                    </button>
 
-                  <div className="mysub-dropper-stats">
-                    <p className="mysub-dropper-stats-title">Ваша статистика</p>
-                    <p>Попыток: {data.dropper.plays}</p>
-                    <p>Побед: {data.dropper.wins}</p>
-                    <p>
-                      Выиграно: {data.dropper.won_gb > 0 ? `${data.dropper.won_gb} ГБ` : ""}
-                      {data.dropper.won_gb > 0 && data.dropper.won_days > 0 ? " · " : ""}
-                      {data.dropper.won_days > 0 ? `${data.dropper.won_days} дн.` : ""}
-                      {data.dropper.won_gb === 0 && data.dropper.won_days === 0 ? "—" : ""}
-                    </p>
+                    {dropperNoTickets ? (
+                      <p className="mysub-dropper-pixel-hint">
+                        Нет билетов. Чтобы получить билеты, совершите любую покупку в разделе «Оплата».
+                      </p>
+                    ) : null}
+
+                    <button
+                      type="button"
+                      className="mysub-dropper-btn-pixel mysub-dropper-btn-pixel--ghost"
+                      onClick={() => setDropperInstructionOpen(true)}
+                    >
+                      Инструкция
+                    </button>
                   </div>
-                </div>
-              </section>
+
+                  <div
+                    className={`mysub-dropper-stats-wrap ${dropperSession ? "mysub-dropper-stats-wrap--hidden" : ""}`.trim()}
+                  >
+                    <div className="mysub-dropper-stats-fog" aria-hidden />
+                    <div className="mysub-dropper-stats">
+                      <p className="mysub-dropper-stats-title">Ваша статистика</p>
+                      <p>Попыток: {data.dropper.plays}</p>
+                      <p>Побед: {data.dropper.wins}</p>
+                      <p>
+                        Выиграно: {data.dropper.won_gb > 0 ? `${data.dropper.won_gb} ГБ` : ""}
+                        {data.dropper.won_gb > 0 && data.dropper.won_days > 0 ? " · " : ""}
+                        {data.dropper.won_days > 0 ? `${data.dropper.won_days} дн.` : ""}
+                        {data.dropper.won_gb === 0 && data.dropper.won_days === 0 ? "—" : ""}
+                      </p>
+                    </div>
+                  </div>
+                </section>
+              </div>
             ) : (
               <section className="mysub-section mysub-section-anim">
                 <h3 className="mysub-title">Профиль</h3>
@@ -947,7 +983,8 @@ export default function MySubPage() {
               </section>
             )}
 
-            {msg ? <div className="flash ok">{msg}</div> : null}
+            {msg && !dropperPlaying ? <div className="flash ok">{msg}</div> : null}
+            {!dropperPlaying ? (
             <div
               className={`mysub-bottom-actions ${data.dropper.enabled ? "mysub-bottom-actions--5" : ""}`.trim()}
             >
@@ -971,6 +1008,7 @@ export default function MySubPage() {
                 </button>
               ))}
             </div>
+            ) : null}
           </>
         ) : null}
       </div>
