@@ -431,6 +431,15 @@ export default function MySubPage() {
   async function finishDropperAndRefresh() {
     setDropperSession(null);
     try {
+      (
+        window as unknown as {
+          Telegram?: { WebApp?: { exitFullscreen?: () => void } };
+        }
+      ).Telegram?.WebApp?.exitFullscreen?.();
+    } catch {
+      // ignore
+    }
+    try {
       const profile = await loadMySubWebAppProfile(initData);
       setData(profile);
     } catch (e) {
