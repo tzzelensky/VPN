@@ -200,6 +200,25 @@ export default function DropperGamePage({ onLogout }: { onLogout: () => void }) 
               onClick={() => setCfg({ ...cfg, enabled: !cfg.enabled })}
             />
           </div>
+          <div className="form-field form-field-span-2">
+            <label>Длительность полёта до финиша, сек</label>
+            <input
+              inputMode="numeric"
+              min={15}
+              max={180}
+              value={cfg.flight_duration_sec}
+              onChange={(e) =>
+                setCfg({
+                  ...cfg,
+                  flight_duration_sec: Math.max(15, Math.min(180, Math.floor(Number(e.target.value) || 40))),
+                })
+              }
+            />
+            <p className="field-hint">
+              Меньше значение — быстрее падение и короче раунд; больше — дольше. Допустимые значения 15–180. На клиенте
+              пересчитывается скорость; сервер проверяет время победы пропорционально этой настройке.
+            </p>
+          </div>
           <div className="form-field">
             <label>Награда за победу, ГБ</label>
             <input

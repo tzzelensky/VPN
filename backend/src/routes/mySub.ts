@@ -228,6 +228,7 @@ router.post("/webapp/profile", async (req, res) => {
       tickets: sumDropperTicketsForTgUser(tgId),
       reward_gb: dg.reward_gb,
       reward_days: dg.reward_days,
+      flight_duration_sec: dg.flight_duration_sec,
       plays: dgStats.plays,
       wins: dgStats.wins,
       won_gb: dgStats.won_gb,

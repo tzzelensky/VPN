@@ -180,6 +180,11 @@ export type DropperGameConfig = {
   reward_days: number;
   /** Билетов за одну подтверждённую покупку (бот / WebApp). */
   tickets_per_purchase: number;
+  /**
+   * Целевая длительность полёта от старта до финиша (сек).
+   * Клиент подстраивает скорость падения; сервер — допустимые интервалы flight_ms / elapsed.
+   */
+  flight_duration_sec: number;
 };
 
 export type DropperSessionRow = {
@@ -343,6 +348,24 @@ function defaultDropperGame(): DropperGameConfig {
     reward_gb: 5,
     reward_days: 3,
     tickets_per_purchase: 1,
+    flight_duration_sec: 40,
+  };
+}
+
+/** Допустимые интервалы времени победы (античит) от целевой длительности полёта в секундах. */
+export function dropperWinTimingMsFromDurationSec(secRaw: number): {
+  flightMin: number;
+  flightMax: number;
+  elapsedMin: number;
+  elapsedMax: number;
+} {
+  const sec = Math.max(15, Math.min(180, Math.floor(Number(secRaw) || 40)));
+  const target = sec * 1000;
+  return {
+    flightMin: Math.max(5000, Math.floor(target * 0.6)),
+    flightMax: Math.floor(target * 1.05),
+    elapsedMin: Math.max(8000, Math.floor(target * 0.45)),
+    elapsedMax: Math.floor(target * 3.0),
   };
 }
 
@@ -355,6 +378,7 @@ export function normalizeDropperGame(raw: unknown): DropperGameConfig {
     reward_gb: Math.max(0, Math.floor(Number(o.reward_gb) || 0)),
     reward_days: Math.max(0, Math.floor(Number(o.reward_days) || 0)),
     tickets_per_purchase: Math.max(0, Math.floor(Number(o.tickets_per_purchase) || 0)),
+    flight_duration_sec: Math.max(15, Math.min(180, Math.floor(Number(o.flight_duration_sec) || d.flight_duration_sec))),
   };
 }
 
@@ -1914,7 +1938,9 @@ export function finishDropperPlay(input: {
       return;
     }
 
-    const timingOk = flight >= 24_000 && flight <= 42_000 && elapsed >= 20_000 && elapsed <= 120_000;
+    const tw = dropperWinTimingMsFromDurationSec(cfg.flight_duration_sec);
+    const timingOk =
+      flight >= tw.flightMin && flight <= tw.flightMax && elapsed >= tw.elapsedMin && elapsed <= tw.elapsedMax;
     if (!timingOk) {
       removeSession();
       pushLose();

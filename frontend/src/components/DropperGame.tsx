@@ -34,12 +34,11 @@ function rowStepForIndex(i: number): number {
 }
 const PLAYER_W = 26;
 const PLAYER_H = 34;
-/** Ещё на 5% медленнее после 220 (220 × 0.95). */
-const FALL_SPEED = 209;
 const FINISH_ZONE = 110;
 /** Высота ряда блоков земли (хитбокс совпадает). */
 const EARTH_ROW_H = 22;
-const TARGET_FLIGHT_MS = 30_000;
+/** Пикселей от старта (y≈48) до условия победы (py &gt; WORLD_H−40), при скорости WORLD/travelSec ≈ целевое время полёта. */
+const DROP_TRAVEL_PX = WORLD_H - 48 - 40;
 
 type ObstacleRow = { y: number; gapLeft: number; gapRight: number };
 
@@ -161,6 +160,13 @@ export default function DropperGame({
   fullscreen,
   practiceMode = false,
 }: Props) {
+  const flightDurationSec = Math.max(
+    15,
+    Math.min(180, Math.floor(Number(profile.dropper.flight_duration_sec) || 40)),
+  );
+  const fallSpeed = DROP_TRAVEL_PX / flightDurationSec;
+  const targetFlightMsFallback = flightDurationSec * 1000;
+
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [phase, setPhase] = useState<"playing" | "won" | "lost">("playing");
   const [flightMs, setFlightMs] = useState(0);
@@ -309,7 +315,7 @@ export default function DropperGame({
         const tx = touchRef.current ?? p.x + PLAYER_W / 2;
         p.targetX = tx - PLAYER_W / 2;
         p.x += (p.targetX - p.x) * Math.min(1, dt * 10);
-        p.y += FALL_SPEED * dt;
+        p.y += fallSpeed * dt;
 
         camYRef.current = Math.max(0, Math.min(p.y - viewHWorld * 0.28, WORLD_H - viewHWorld));
 
@@ -394,7 +400,7 @@ export default function DropperGame({
       window.removeEventListener("resize", onVvResize);
       window.visualViewport?.removeEventListener("resize", onVvResize);
     };
-  }, [sessionId, seed, submitFinish, fullscreen, practiceMode]);
+  }, [sessionId, seed, submitFinish, fullscreen, practiceMode, fallSpeed]);
 
   const rewardSub = profile.subscriptions.find((s) => s.id === rewardPickUserId);
   const subHasGbCap = (rewardSub?.total_gb ?? 0) > 0;
@@ -438,7 +444,7 @@ export default function DropperGame({
                 type="button"
                 className="dropper-gift-btn"
                 disabled={busyGift}
-                onClick={() => void submitFinish(true, flightMs || TARGET_FLIGHT_MS, "gb")}
+                onClick={() => void submitFinish(true, flightMs || targetFlightMsFallback, "gb")}
               >
                 +{profile.dropper.reward_gb} ГБ
               </button>
@@ -448,7 +454,7 @@ export default function DropperGame({
                 type="button"
                 className="dropper-gift-btn"
                 disabled={busyGift}
-                onClick={() => void submitFinish(true, flightMs || TARGET_FLIGHT_MS, "days")}
+                onClick={() => void submitFinish(true, flightMs || targetFlightMsFallback, "days")}
               >
                 +{profile.dropper.reward_days} дн.
               </button>

@@ -579,6 +579,8 @@ export type MySubProfileDto = {
     tickets: number;
     reward_gb: number;
     reward_days: number;
+    /** Целевая длительность полёта (сек), из настроек игры. */
+    flight_duration_sec: number;
     plays: number;
     wins: number;
     won_gb: number;
@@ -651,6 +653,8 @@ export type DropperGameConfigDto = {
   reward_gb: number;
   reward_days: number;
   tickets_per_purchase: number;
+  /** Длительность полёта до финиша (сек), 15–180. */
+  flight_duration_sec: number;
 };
 
 export type DropperAdminReportDto = {
