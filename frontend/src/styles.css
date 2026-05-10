@@ -2906,6 +2906,63 @@ th {
 }
 
 /* --- MySub: Дроппер (WebApp) --- */
+.mysub-wrap--game-tab {
+  width: 100%;
+  max-width: none;
+  margin: 0;
+  padding: 0.45rem 0 6.2rem !important;
+  min-height: 100dvh;
+  align-items: stretch;
+  justify-content: flex-start;
+  background-color: #0f1812;
+  background-image:
+    repeating-linear-gradient(
+      95deg,
+      transparent 0 52px,
+      rgba(22, 48, 30, 0.42) 52px 54px,
+      transparent 54px 104px
+    ),
+    repeating-linear-gradient(
+      88deg,
+      transparent 0 78px,
+      rgba(18, 36, 26, 0.35) 78px 80px,
+      transparent 80px 160px
+    ),
+    radial-gradient(ellipse 120% 80% at 50% -10%, rgba(55, 92, 62, 0.55) 0%, transparent 55%),
+    linear-gradient(180deg, #152a1c 0%, #0e1610 38%, #0a120e 100%);
+}
+
+.mysub-wrap--game-tab::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  opacity: 0.4;
+  background-image: radial-gradient(circle at 12% 78%, rgba(30, 52, 36, 0.9) 0%, transparent 12px),
+    radial-gradient(circle at 28% 72%, rgba(26, 48, 34, 0.85) 0%, transparent 10px),
+    radial-gradient(circle at 44% 80%, rgba(34, 58, 40, 0.88) 0%, transparent 11px),
+    radial-gradient(circle at 62% 74%, rgba(24, 44, 32, 0.9) 0%, transparent 10px),
+    radial-gradient(circle at 78% 82%, rgba(32, 54, 38, 0.87) 0%, transparent 12px),
+    radial-gradient(circle at 90% 76%, rgba(28, 50, 36, 0.88) 0%, transparent 11px);
+}
+
+.mysub-wrap--game-tab .mysub-card {
+  position: relative;
+  z-index: 1;
+  width: 100% !important;
+  max-width: none !important;
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  border-radius: 0 !important;
+  overflow: visible !important;
+}
+
+.mysub-wrap--game-tab .mysub-card::before {
+  display: none !important;
+}
+
 .mysub-bottom-actions--5 {
   grid-template-columns: repeat(5, minmax(0, 1fr));
 }
@@ -2941,6 +2998,21 @@ th {
   background: linear-gradient(180deg, rgba(72, 220, 120, 0.22), rgba(30, 55, 40, 0.45));
 }
 
+.mysub-nav-btn--game-muted {
+  animation: none !important;
+  color: rgba(255, 255, 255, 0.38) !important;
+  border-color: rgba(255, 255, 255, 0.08) !important;
+  background: rgba(12, 18, 28, 0.35) !important;
+  box-shadow: none !important;
+}
+
+.mysub-nav-btn--game-muted.active {
+  animation: none !important;
+  color: rgba(200, 220, 255, 0.55) !important;
+  border-color: rgba(255, 255, 255, 0.12) !important;
+  background: rgba(20, 28, 42, 0.45) !important;
+}
+
 .mysub-wrap--dropper-play {
   padding: 0 !important;
   padding-bottom: 0 !important;
@@ -2965,45 +3037,10 @@ th {
 
 .mysub-dropper-page {
   position: relative;
-  min-height: calc(100dvh - 5.5rem);
-  padding: 0.5rem 0.65rem 1rem;
-  border-radius: 0;
-  background-color: #0f1812;
-  background-image:
-    repeating-linear-gradient(
-      95deg,
-      transparent 0 52px,
-      rgba(22, 48, 30, 0.42) 52px 54px,
-      transparent 54px 104px
-    ),
-    repeating-linear-gradient(
-      88deg,
-      transparent 0 78px,
-      rgba(18, 36, 26, 0.35) 78px 80px,
-      transparent 80px 160px
-    ),
-    radial-gradient(ellipse 120% 80% at 50% -10%, rgba(55, 92, 62, 0.55) 0%, transparent 55%),
-    linear-gradient(180deg, #152a1c 0%, #0e1610 38%, #0a120e 100%);
-  overflow: hidden;
-}
-
-.mysub-dropper-page::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  opacity: 0.42;
-  background-image: radial-gradient(circle at 12% 78%, rgba(30, 52, 36, 0.9) 0%, transparent 12px),
-    radial-gradient(circle at 28% 72%, rgba(26, 48, 34, 0.85) 0%, transparent 10px),
-    radial-gradient(circle at 44% 80%, rgba(34, 58, 40, 0.88) 0%, transparent 11px),
-    radial-gradient(circle at 62% 74%, rgba(24, 44, 32, 0.9) 0%, transparent 10px),
-    radial-gradient(circle at 78% 82%, rgba(32, 54, 38, 0.87) 0%, transparent 12px),
-    radial-gradient(circle at 90% 76%, rgba(28, 50, 36, 0.88) 0%, transparent 11px);
-  background-size: 100% 100%;
-}
-
-.mysub-dropper-page--playing::before {
-  opacity: 0.55;
+  min-height: 0;
+  padding: 0.35rem 0.75rem 0.75rem;
+  background: transparent;
+  overflow: visible;
 }
 
 .mysub-dropper-section {
@@ -3087,15 +3124,12 @@ th {
   transform: rotate(-4deg);
 }
 
-.mysub-dropper-figure-sprite {
+.mysub-dropper-lobby-hero {
   position: absolute;
   right: 14%;
-  top: 18%;
+  top: 16%;
   width: 56px;
   height: 72px;
-  background-repeat: no-repeat;
-  background-size: 400% 100%;
-  background-position: 0 50%;
   image-rendering: pixelated;
   image-rendering: crisp-edges;
   filter: drop-shadow(3px 4px 0 rgba(0, 0, 0, 0.65));
@@ -3232,20 +3266,17 @@ th {
   margin: 0.2rem 0;
 }
 
-.mysub-dropper-run {
+.mysub-dropper-run-portal {
   position: fixed;
-  z-index: 100;
   inset: 0;
+  z-index: 2147483000;
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: max(6px, env(safe-area-inset-top)) max(6px, env(safe-area-inset-right))
-    max(10px, env(safe-area-inset-bottom)) max(6px, env(safe-area-inset-left));
-  background: linear-gradient(180deg, rgba(12, 22, 16, 0.97), rgba(8, 14, 10, 0.99));
-}
-
-.mysub-dropper-page--playing {
-  min-height: 100dvh;
+  padding: max(8px, env(safe-area-inset-top, 0px)) max(8px, env(safe-area-inset-right, 0px))
+    max(10px, env(safe-area-inset-bottom, 0px)) max(8px, env(safe-area-inset-left, 0px));
+  background: #0a100d;
+  box-sizing: border-box;
 }
 
 .mysub-dropper-modal-title {

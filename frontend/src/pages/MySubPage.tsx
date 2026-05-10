@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import DropperGame from "../components/DropperGame";
+import DropperLobbyHero from "../components/DropperLobbyHero";
 import {
   claimMySubReferralReward,
   loadMySubWebAppProfile,
@@ -151,21 +153,6 @@ export default function MySubPage() {
   useEffect(() => {
     if (data && !data.dropper.enabled && tab === "game") setTab("home");
   }, [data, tab]);
-
-  useEffect(() => {
-    if (!dropperSession || tab !== "game") return;
-    const tg = (
-      window as unknown as {
-        Telegram?: { WebApp?: { expand?: () => void; requestFullscreen?: () => void } };
-      }
-    ).Telegram?.WebApp;
-    tg?.expand?.();
-    try {
-      tg?.requestFullscreen?.();
-    } catch {
-      // не все клиенты поддерживают
-    }
-  }, [dropperSession, tab]);
 
   const dropperTargetUserId = useMemo(() => {
     if (!data?.subscriptions.length) return 0;
@@ -431,15 +418,6 @@ export default function MySubPage() {
   async function finishDropperAndRefresh() {
     setDropperSession(null);
     try {
-      (
-        window as unknown as {
-          Telegram?: { WebApp?: { exitFullscreen?: () => void } };
-        }
-      ).Telegram?.WebApp?.exitFullscreen?.();
-    } catch {
-      // ignore
-    }
-    try {
       const profile = await loadMySubWebAppProfile(initData);
       setData(profile);
     } catch (e) {
@@ -465,6 +443,7 @@ export default function MySubPage() {
     setMsg("");
     try {
       const r = await startDropperSession({ init_data: initData, user_id: uid });
+      (window as unknown as { Telegram?: { WebApp?: { expand?: () => void } } }).Telegram?.WebApp?.expand?.();
       setDropperSession({ sessionId: r.session_id, seed: r.seed });
     } catch (e) {
       const m = e instanceof Error ? e.message : String(e);
@@ -478,9 +457,12 @@ export default function MySubPage() {
   }
 
   const dropperPlaying = tab === "game" && Boolean(dropperSession);
+  const isGameTab = tab === "game" && Boolean(data?.dropper.enabled);
 
   return (
-    <div className={`mysub-wrap ${dropperPlaying ? "mysub-wrap--dropper-play" : ""}`.trim()}>
+    <div
+      className={`mysub-wrap ${dropperPlaying ? "mysub-wrap--dropper-play" : ""} ${isGameTab ? "mysub-wrap--game-tab" : ""}`.trim()}
+    >
       {!err && !data ? (
         <div className="mysub-loading-screen" aria-live="polite">
           <div className="mysub-loader-ring" />
@@ -875,30 +857,11 @@ export default function MySubPage() {
                     </p>
                   ) : null}
 
-                  {dropperSession ? (
-                    <div className="mysub-dropper-run">
-                      <DropperGame
-                        initData={initData}
-                        sessionId={dropperSession.sessionId}
-                        seed={dropperSession.seed}
-                        targetUserId={dropperTargetUserId}
-                        profile={data}
-                        fullscreen
-                        onDone={() => void finishDropperAndRefresh()}
-                      />
-                    </div>
-                  ) : null}
-
                   <div className={`mysub-dropper-lobby ${dropperSession ? "mysub-dropper-lobby--hidden" : ""}`}>
                     <div className="mysub-dropper-cliff" aria-hidden>
                       <div className="mysub-dropper-sky" />
                       <div className="mysub-dropper-edge" />
-                      <div
-                        className="mysub-dropper-figure-sprite"
-                        style={{
-                          backgroundImage: "url(/dropper-player.png)",
-                        }}
-                      />
+                      <DropperLobbyHero />
                     </div>
 
                     {data.subscriptions.length > 1 ? (
@@ -1009,7 +972,9 @@ export default function MySubPage() {
                 <button
                   key={t}
                   type="button"
-                  className={`mysub-nav-btn ${tab === t ? "active" : ""} ${t === "game" ? "mysub-nav-btn--game" : ""}`.trim()}
+                  className={`mysub-nav-btn ${tab === t ? "active" : ""} ${
+                    t === "game" && data.dropper.tickets > 0 ? "mysub-nav-btn--game" : ""
+                  } ${t === "game" && data.dropper.tickets <= 0 ? "mysub-nav-btn--game-muted" : ""}`.trim()}
                   onClick={() => setTab(t)}
                 >
                   <NavIcon tab={t} />
@@ -1021,6 +986,22 @@ export default function MySubPage() {
           </>
         ) : null}
       </div>
+      {data && dropperSession && dropperPlaying
+        ? createPortal(
+            <div className="mysub-dropper-run-portal">
+              <DropperGame
+                initData={initData}
+                sessionId={dropperSession.sessionId}
+                seed={dropperSession.seed}
+                targetUserId={dropperTargetUserId}
+                profile={data}
+                fullscreen
+                onDone={() => void finishDropperAndRefresh()}
+              />
+            </div>,
+            document.body,
+          )
+        : null}
       {showInstruction ? (
         <div className="modal-backdrop" onClick={() => setShowInstruction(false)}>
           <div className="modal mysub-modal comms-picker-modal" onClick={(e) => e.stopPropagation()}>

@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { finishDropperSession, type MySubProfileDto } from "../api";
+import { drawHeroBack } from "../lib/dropperHero";
+import { startDropperAmbient } from "../lib/dropperMusic";
 
 function mulberry32(seed: number): () => number {
   let a = seed >>> 0;
@@ -12,9 +14,19 @@ function mulberry32(seed: number): () => number {
   };
 }
 
+function telegramViewportCssSize(): { w: number; h: number } {
+  const tg = (
+    window as unknown as {
+      Telegram?: { WebApp?: { viewportStableHeight?: number; viewportStableWidth?: number } };
+    }
+  ).Telegram?.WebApp;
+  const w = tg?.viewportStableWidth ?? window.visualViewport?.width ?? window.innerWidth;
+  const h = tg?.viewportStableHeight ?? window.visualViewport?.height ?? window.innerHeight;
+  return { w: Math.max(280, w), h: Math.max(280, h) };
+}
+
 const WORLD_W = 320;
 const WORLD_H = 8400;
-/** Вертикальный шаг между препятствиями: в начале ниже — больше времени на реакцию. */
 function rowStepForIndex(i: number): number {
   if (i < 5) return 168;
   if (i < 12) return 152;
@@ -76,13 +88,8 @@ type Props = {
   targetUserId: number;
   profile: MySubProfileDto;
   onDone: () => void;
-  /** Полноэкранный режим WebApp: почти весь экран под канвас. */
   fullscreen?: boolean;
 };
-
-const SPRITE_SRC = "/dropper-player.png";
-/** Кадр «со спины» — третий по горизонтали в листе 4×1. */
-const SPRITE_FRAME = 2;
 
 function drawPixelForest(ctx: CanvasRenderingContext2D, camY: number, viewTop: number, viewBottom: number) {
   const treeSpacing = 44;
@@ -126,7 +133,6 @@ export default function DropperGame({ initData, sessionId, seed, targetUserId, p
   const touchRef = useRef<number | null>(null);
   const rafRef = useRef(0);
   const reportedRef = useRef(false);
-  const spriteRef = useRef<HTMLImageElement | null>(null);
   const fullscreenRef = useRef(!!fullscreen);
   fullscreenRef.current = !!fullscreen;
 
@@ -154,9 +160,7 @@ export default function DropperGame({ initData, sessionId, seed, targetUserId, p
   );
 
   useEffect(() => {
-    const img = new Image();
-    img.src = SPRITE_SRC;
-    spriteRef.current = img;
+    const stopMusic = startDropperAmbient();
 
     reportedRef.current = false;
     obstaclesRef.current = buildObstacles(seed);
@@ -170,9 +174,17 @@ export default function DropperGame({ initData, sessionId, seed, targetUserId, p
     setGiftErr("");
 
     const canvas = canvasRef.current;
-    if (!canvas) return () => undefined;
+    if (!canvas) {
+      return () => {
+        stopMusic();
+      };
+    }
     const ctx = canvas.getContext("2d");
-    if (!ctx) return () => undefined;
+    if (!ctx) {
+      return () => {
+        stopMusic();
+      };
+    }
 
     let last = performance.now();
     let running = true;
@@ -182,10 +194,10 @@ export default function DropperGame({ initData, sessionId, seed, targetUserId, p
       let cssW: number;
       let cssH: number;
       if (fullscreenRef.current) {
-        const padX = 8;
-        const padY = 12;
-        cssW = Math.max(280, Math.floor((window.visualViewport?.width ?? window.innerWidth) - padX * 2));
-        cssH = Math.max(360, Math.floor((window.visualViewport?.height ?? window.innerHeight) - padY * 2));
+        const pad = 16;
+        const vv = telegramViewportCssSize();
+        cssW = Math.floor(vv.w - pad * 2);
+        cssH = Math.floor(vv.h - pad * 2);
       } else {
         cssW = Math.min(400, canvas.parentElement?.clientWidth ?? 320);
         cssH = Math.min(380, Math.floor(window.innerHeight * 0.52));
@@ -212,15 +224,15 @@ export default function DropperGame({ initData, sessionId, seed, targetUserId, p
     canvas.addEventListener("touchmove", onTouch, { passive: true });
     canvas.addEventListener("mousemove", onMouse);
 
-    const ro = new ResizeObserver(() => {
+    const onVvResize = () => {
       const r = resize();
       dpr = r.dpr;
       cssW = r.cssW;
       cssH = r.cssH;
       scale = r.scale;
-    });
-    ro.observe(fullscreenRef.current ? document.documentElement : canvas.parentElement ?? canvas);
-    window.addEventListener("resize", resize);
+    };
+    window.addEventListener("resize", onVvResize);
+    window.visualViewport?.addEventListener("resize", onVvResize);
 
     const loop = () => {
       if (!running) return;
@@ -230,6 +242,7 @@ export default function DropperGame({ initData, sessionId, seed, targetUserId, p
 
       const ph = phaseRef.current;
       const p = playerRef.current;
+      const viewHWorld = cssH / scale;
 
       if (ph === "playing") {
         const tx = touchRef.current ?? p.x + PLAYER_W / 2;
@@ -237,7 +250,7 @@ export default function DropperGame({ initData, sessionId, seed, targetUserId, p
         p.x += (p.targetX - p.x) * Math.min(1, dt * 10);
         p.y += FALL_SPEED * dt;
 
-        camYRef.current = Math.max(0, Math.min(p.y - cssH * 0.28, WORLD_H - cssH));
+        camYRef.current = Math.max(0, Math.min(p.y - viewHWorld * 0.28, WORLD_H - viewHWorld));
 
         const px = p.x;
         const py = p.y;
@@ -279,13 +292,13 @@ export default function DropperGame({ initData, sessionId, seed, targetUserId, p
       ctx.translate(0, -camY);
 
       const viewTop = camY;
-      const viewBottom = camY + cssH / scale;
+      const viewBottom = camY + viewHWorld;
       ctx.fillStyle = "#152018";
       ctx.fillRect(0, 0, WORLD_W, WORLD_H);
       drawPixelForest(ctx, camY, viewTop, viewBottom);
 
       for (const row of obstaclesRef.current) {
-        if (row.y < camY - 50 || row.y > camY + cssH / scale + 50) continue;
+        if (row.y < camY - 50 || row.y > camY + viewHWorld + 50) continue;
         ctx.fillStyle = "#eaeaea";
         ctx.fillRect(0, row.y, row.gapLeft, 18);
         ctx.fillRect(row.gapRight, row.y, WORLD_W - row.gapRight, 18);
@@ -299,20 +312,8 @@ export default function DropperGame({ initData, sessionId, seed, targetUserId, p
         if (i % 2 === 0) ctx.fillRect(i * 10, finishY, 5, 12);
       }
 
-      const spr = spriteRef.current;
-      if (spr && spr.complete && spr.naturalWidth > 0) {
-        const fw = spr.naturalWidth / 4;
-        const fh = spr.naturalHeight;
-        const sx = SPRITE_FRAME * fw;
-        ctx.imageSmoothingEnabled = false;
-        ctx.drawImage(spr, sx, 0, fw, fh, p.x, p.y, PLAYER_W, PLAYER_H);
-      } else {
-        ctx.fillStyle = "#f4f4f4";
-        ctx.fillRect(p.x, p.y, PLAYER_W, PLAYER_H);
-        ctx.strokeStyle = "#000";
-        ctx.lineWidth = 2;
-        ctx.strokeRect(p.x, p.y, PLAYER_W, PLAYER_H);
-      }
+      ctx.imageSmoothingEnabled = false;
+      drawHeroBack(ctx, p.x, p.y, PLAYER_W, PLAYER_H);
 
       rafRef.current = requestAnimationFrame(loop);
     };
@@ -321,12 +322,13 @@ export default function DropperGame({ initData, sessionId, seed, targetUserId, p
 
     return () => {
       running = false;
+      stopMusic();
       cancelAnimationFrame(rafRef.current);
       canvas.removeEventListener("touchstart", onTouch);
       canvas.removeEventListener("touchmove", onTouch);
       canvas.removeEventListener("mousemove", onMouse);
-      window.removeEventListener("resize", resize);
-      ro.disconnect();
+      window.removeEventListener("resize", onVvResize);
+      window.visualViewport?.removeEventListener("resize", onVvResize);
     };
   }, [sessionId, seed, submitFinish, fullscreen]);
 

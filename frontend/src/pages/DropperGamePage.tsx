@@ -123,14 +123,18 @@ export default function DropperGamePage({ onLogout }: { onLogout: () => void }) 
       <section className="panel">
         <div className="referral-program-form user-form-grid">
           <div className="form-field form-field-span-2 shop-toggle-row">
-            <label className="shop-toggle">
-              <input
-                type="checkbox"
-                checked={cfg.enabled}
-                onChange={(e) => setCfg({ ...cfg, enabled: e.target.checked })}
-              />
-              <span>Игра включена (кнопка видна в WebApp)</span>
-            </label>
+            <div>
+              <label>Игра в WebApp</label>
+              <p className="field-hint" style={{ marginTop: "0.25rem" }}>
+                Если выключено — вкладка «Игра» скрыта в мини-приложении.
+              </p>
+            </div>
+            <button
+              type="button"
+              className={`toggle ${cfg.enabled ? "on" : ""}`}
+              aria-pressed={cfg.enabled}
+              onClick={() => setCfg({ ...cfg, enabled: !cfg.enabled })}
+            />
           </div>
           <div className="form-field">
             <label>Награда за победу, ГБ</label>
