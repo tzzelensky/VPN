@@ -12,20 +12,21 @@ function grid(ctx: CanvasRenderingContext2D, gw: number, gh: number, cells: stri
   }
 }
 
+/** Зелёная футболка, голубые штаны, каштановые волосы, бежевая кожа — контраст с тёмно-зелёным фоном. */
 const PAL = {
-  h: "#5c3d2e",
-  H: "#4a3024",
-  s: "#f0c9a8",
-  S: "#e8b896",
-  j: "#3cdd70",
-  J: "#2fb85c",
-  K: "#259048",
-  p: "#3a3d52",
-  P: "#2a2d3e",
-  b: "#5c4030",
-  B: "#3d2a1f",
-  w: "#c8eef0",
-  x: "#1a1e2e",
+  h: "#6b4423",
+  H: "#4a2c12",
+  s: "#e8c4a0",
+  S: "#d4a574",
+  j: "#34d399",
+  J: "#10b981",
+  K: "#047857",
+  p: "#7dd3fc",
+  P: "#38bdf8",
+  b: "#57534e",
+  B: "#3f3f46",
+  w: "#bae6fd",
+  x: "#1e293b",
 } as const;
 
 /** Вид спереди (лобби). */
@@ -49,14 +50,14 @@ const FRONT: string[] = [
   "..BB....BB...",
 ];
 
-/** Вид со спины (полёт). */
+/** Вид со спины (полёт): волосы, футболка, голубые штаны. */
 const BACK: string[] = [
   "....h...H....",
   "...hhhHHh....",
   "..hhhhhhhh...",
-  "..hKKKKKKh...",
-  "..hKKKKKKh...",
   "..hhhhhhhh...",
+  "..hssssssh...",
+  "..hssssssh...",
   "...jjjjjj....",
   "..jjjjjjjj...",
   "..jJjjjjJj...",

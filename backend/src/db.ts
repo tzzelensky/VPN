@@ -1754,6 +1754,8 @@ export function finishDropperPlay(input: {
   won: boolean;
   flightMs: number;
   choice?: "gb" | "days";
+  /** Какому привязанному пользователю начислить награду (если не задан — из сессии). */
+  rewardUserId?: number;
 }): { ok: true; practice?: boolean } | { ok: false; error: string } {
   const cfg = getDropperGameConfig();
   if (!cfg.enabled) return { ok: false, error: "game_disabled" };
@@ -1835,7 +1837,22 @@ export function finishDropperPlay(input: {
       return;
     }
 
-    const ui = store.users.findIndex((u) => u.id === sess.user_id);
+    let rewardUid = sess.user_id;
+    const rawReward = input.rewardUserId;
+    if (rawReward != null && Number.isFinite(Number(rawReward)) && Math.floor(Number(rawReward)) > 0) {
+      const rid = Math.floor(Number(rawReward));
+      const linked = findUsersByTelegramChatId(input.tgUserId);
+      if (!linked.some((u) => u.id === rid)) {
+        err = "forbidden";
+        return;
+      }
+      rewardUid = rid;
+    }
+
+    const rewardUser = store.users.find((u) => u.id === rewardUid);
+    const rewardUserName = rewardUser ? String(rewardUser.name ?? "").trim() : "";
+
+    const ui = store.users.findIndex((u) => u.id === rewardUid);
     if (ui === -1) {
       err = "user_not_found";
       removeSession();
@@ -1860,8 +1877,8 @@ export function finishDropperPlay(input: {
     const winRow: DropperPlayLogRow = {
       id: randomBytes(8).toString("hex"),
       tg_user_id: sess.tg_user_id,
-      user_id: sess.user_id,
-      user_name: userName,
+      user_id: rewardUid,
+      user_name: rewardUserName,
       result: "win",
       reward_kind: choice,
       reward_amount: choice === "gb" ? cfg.reward_gb : cfg.reward_days,

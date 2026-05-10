@@ -617,6 +617,7 @@ router.post("/webapp/dropper/finish", async (req, res) => {
     won?: unknown;
     flight_ms?: unknown;
     choice?: unknown;
+    reward_user_id?: unknown;
   };
   const initData = String(body.init_data ?? "").trim();
   const ver = verifyTelegramWebAppInitData(initData);
@@ -630,11 +631,24 @@ router.post("/webapp/dropper/finish", async (req, res) => {
   const flightMs = Math.max(0, Math.floor(Number(body.flight_ms) || 0));
   const ch = String(body.choice ?? "").trim().toLowerCase();
   const choice = ch === "gb" || ch === "days" ? (ch as "gb" | "days") : undefined;
+  const rewardUserRaw = body.reward_user_id;
+  const rewardUserId =
+    rewardUserRaw != null && rewardUserRaw !== ""
+      ? Math.floor(Number(rewardUserRaw))
+      : undefined;
   if (!tgId || !sessionId) {
     res.status(400).json({ error: "bad_payload" });
     return;
   }
-  const result = finishDropperPlay({ tgUserId: tgId, sessionId, won, flightMs, choice });
+  const result = finishDropperPlay({
+    tgUserId: tgId,
+    sessionId,
+    won,
+    flightMs,
+    choice,
+    rewardUserId:
+      rewardUserId != null && Number.isFinite(rewardUserId) && rewardUserId > 0 ? rewardUserId : undefined,
+  });
   if (!result.ok) {
     if (result.error === "choice_required") {
       res.status(400).json({ error: result.error });

@@ -713,6 +713,7 @@ export async function finishDropperSession(payload: {
   won: boolean;
   flight_ms: number;
   choice?: "gb" | "days";
+  reward_user_id?: number;
 }): Promise<{ ok: boolean }> {
   const res = await fetch("/api/mysub/webapp/dropper/finish", {
     method: "POST",

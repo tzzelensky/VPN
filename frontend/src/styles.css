@@ -3413,6 +3413,33 @@ th {
   margin: 0.5rem 0 0;
 }
 
+.dropper-reward-sub-field {
+  margin: 0 0 0.75rem;
+  text-align: left;
+}
+
+.dropper-reward-sub-label {
+  display: block;
+  font-size: clamp(0.35rem, 1.5vw, 0.44rem);
+  line-height: 1.5;
+  margin-bottom: 0.35rem;
+  color: #94a3b8;
+}
+
+.dropper-reward-sub-select {
+  width: 100%;
+  font-family: "Press Start 2P", ui-monospace, monospace;
+  font-size: clamp(0.32rem, 1.35vw, 0.4rem);
+  line-height: 1.4;
+  padding: 0.45rem 0.4rem;
+  border-radius: 6px;
+  border: 2px solid #000;
+  background: #1e293b;
+  color: #e2e8f0;
+  box-shadow: 2px 2px 0 #000;
+  cursor: pointer;
+}
+
 .dropper-gift-row {
   display: flex;
   flex-wrap: wrap;

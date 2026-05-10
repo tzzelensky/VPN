@@ -166,6 +166,11 @@ export default function DropperGame({
   const [flightMs, setFlightMs] = useState(0);
   const [busyGift, setBusyGift] = useState(false);
   const [giftErr, setGiftErr] = useState("");
+  const [rewardPickUserId, setRewardPickUserId] = useState(targetUserId);
+
+  useEffect(() => {
+    setRewardPickUserId(targetUserId);
+  }, [sessionId, targetUserId]);
 
   const phaseRef = useRef(phase);
   phaseRef.current = phase;
@@ -188,7 +193,14 @@ export default function DropperGame({
       setBusyGift(true);
       setGiftErr("");
       try {
-        await finishDropperSession({ init_data: initData, session_id: sessionId, won, flight_ms: Math.round(ms), choice });
+        await finishDropperSession({
+          init_data: initData,
+          session_id: sessionId,
+          won,
+          flight_ms: Math.round(ms),
+          choice,
+          ...(won && rewardPickUserId > 0 ? { reward_user_id: rewardPickUserId } : {}),
+        });
         reportedRef.current = true;
         if (won) onDone();
       } catch (e) {
@@ -202,7 +214,7 @@ export default function DropperGame({
         setBusyGift(false);
       }
     },
-    [initData, sessionId, onDone],
+    [initData, sessionId, onDone, rewardPickUserId],
   );
 
   useEffect(() => {
@@ -381,10 +393,11 @@ export default function DropperGame({
     };
   }, [sessionId, seed, submitFinish, fullscreen, practiceMode]);
 
-  const targetSub = profile.subscriptions.find((s) => s.id === targetUserId);
-  const subHasGbCap = (targetSub?.total_gb ?? 0) > 0;
+  const rewardSub = profile.subscriptions.find((s) => s.id === rewardPickUserId);
+  const subHasGbCap = (rewardSub?.total_gb ?? 0) > 0;
   const canGb = profile.dropper.reward_gb > 0 && subHasGbCap;
   const canDays = profile.dropper.reward_days > 0;
+  const multiSubs = profile.subscriptions.length > 1;
 
   return (
     <div className={`dropper-game-wrap ${fullscreen ? "dropper-game-wrap--fullscreen" : ""}`.trim()}>
@@ -392,7 +405,30 @@ export default function DropperGame({
       {phase === "won" && !practiceMode ? (
         <div className="dropper-overlay dropper-overlay--pixel">
           <p className="dropper-pixel-title">Победа! Выберите подарок</p>
-          <p className="dropper-pixel-sub">#{targetUserId}</p>
+          {multiSubs ? (
+            <div className="dropper-reward-sub-field">
+              <label className="dropper-reward-sub-label" htmlFor="dropper-reward-sub">
+                Начислить на подписку
+              </label>
+              <select
+                id="dropper-reward-sub"
+                className="dropper-reward-sub-select"
+                value={String(rewardPickUserId)}
+                disabled={busyGift}
+                onChange={(e) => setRewardPickUserId(Number(e.target.value) || 0)}
+              >
+                {profile.subscriptions.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    #{s.id} {s.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          ) : (
+            <p className="dropper-pixel-sub">
+              {rewardSub ? `Подписка: #${rewardSub.id} ${rewardSub.name}` : `#${targetUserId}`}
+            </p>
+          )}
           <div className="dropper-gift-row">
             {canGb ? (
               <button
