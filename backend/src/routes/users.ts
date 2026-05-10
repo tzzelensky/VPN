@@ -5,6 +5,7 @@ import {
   coerceExpiryTimeMs,
   createUser,
   deleteUser,
+  dropperWinsForClientRow,
   findUserByVlessUuid,
   getUser,
   listUsers,
@@ -143,6 +144,7 @@ function userDto(u: UserRow) {
     stats_synced_at: u.stats_synced_at,
     connection_profile: u.connection_profile,
     dropper_tickets: u.dropper_tickets,
+    dropper_wins: dropperWinsForClientRow(u),
     created_at: u.created_at,
     updated_at: u.updated_at,
   };

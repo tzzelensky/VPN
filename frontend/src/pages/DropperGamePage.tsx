@@ -326,8 +326,8 @@ export default function DropperGamePage({ onLogout }: { onLogout: () => void }) 
       <section className="panel">
         <h2 className="user-modal-section-title">Билеты по клиентам</h2>
         <p className="field-hint" style={{ marginTop: 0, marginBottom: "0.75rem" }}>
-          Для одного Telegram несколько подписок — один общий счётчик (сумма по записям). Редактирование задаёт этот
-          общий пул для всех таких подписок.
+          Для одного Telegram несколько подписок — один общий счётчик билетов (сумма по записям) и одно число побед по
+          этому Telegram. Редактирование задаёт общий пул билетов для всех таких подписок.
         </p>
         <div className="form-field" style={{ marginBottom: "0.65rem" }}>
           <label htmlFor="dropper-tickets-search">Поиск по имени клиента</label>
@@ -349,13 +349,14 @@ export default function DropperGamePage({ onLogout }: { onLogout: () => void }) 
                 <th>Имя</th>
                 <th>Telegram</th>
                 <th>Билетов</th>
+                <th>Побед</th>
                 <th />
               </tr>
             </thead>
             <tbody>
               {filteredTicketRows.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="dropper-tickets-admin-empty">
+                  <td colSpan={6} className="dropper-tickets-admin-empty">
                     {ticketsListSearch.trim() ? "Никого не найдено." : "Нет клиентов."}
                   </td>
                 </tr>
@@ -410,6 +411,7 @@ export default function DropperGamePage({ onLogout }: { onLogout: () => void }) 
                         <span className="mono">{pool}</span>
                       )}
                     </td>
+                    <td className="mono">{u.dropper_wins ?? 0}</td>
                     <td>
                       {!editing ? (
                         <button

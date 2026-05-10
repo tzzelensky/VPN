@@ -219,6 +219,8 @@ export type UserDto = {
   stats_synced_at: number;
   /** Билеты «Дроппер»; при одинаковом tg_id сумма по записям — общий пул в WebApp. */
   dropper_tickets: number;
+  /** Победы в дроппере: при том же tg_id — общее число для Telegram; иначе по строке подписки. */
+  dropper_wins: number;
   created_at: string;
   updated_at: string;
 };

@@ -2062,6 +2062,16 @@ export function getDropperStatsForTgUser(tgUserId: number): {
   return { plays: rows.length, wins, won_gb: wonGb, won_days: wonDays };
 }
 
+/** Победы для строки клиента: при tg_id — как в WebApp (все победы этого Telegram); иначе — только wins с user_id = id строки. */
+export function dropperWinsForClientRow(u: { id: number; tg_id?: string }): number {
+  const t = String(u.tg_id ?? "").trim();
+  if (t && Number.isFinite(Number(t)) && Math.floor(Number(t)) > 0) {
+    return getDropperStatsForTgUser(Math.floor(Number(t))).wins;
+  }
+  const log = readStore().dropper_play_log ?? [];
+  return log.filter((r) => r.result === "win" && r.user_id === u.id).length;
+}
+
 export function getDropperAdminReport(): {
   total_plays: number;
   total_wins: number;
