@@ -44,6 +44,12 @@ const DROP_FREE_FALL_SEC = 4;
 
 type ObstacleRow = { y: number; gapLeft: number; gapRight: number };
 
+function firstObstacleRowYForFallSpeed(fallSpeed: number): number {
+  const capY = WORLD_H - FINISH_ZONE - 40;
+  const rawFirstRowY = 48 + fallSpeed * DROP_FREE_FALL_SEC + PLAYER_H + 24;
+  return Math.max(200, Math.min(Math.ceil(rawFirstRowY), capY - 300));
+}
+
 /** firstRowY — минимальный Y первого ряда блоков (ниже старта на free-fall участок). */
 function buildObstacles(seed: number, firstRowY: number): ObstacleRow[] {
   const rnd = mulberry32(seed);
@@ -194,7 +200,7 @@ export default function DropperGame({
   const phaseRef = useRef(phase);
   phaseRef.current = phase;
 
-  const obstaclesRef = useRef(buildObstacles(seed, 200));
+  const obstaclesRef = useRef(buildObstacles(seed, firstObstacleRowYForFallSpeed(fallSpeed)));
   const playerRef = useRef({ x: WORLD_W / 2 - PLAYER_W / 2, y: 48, targetX: WORLD_W / 2 - PLAYER_W / 2 });
   const camYRef = useRef(0);
   const startTRef = useRef(performance.now());
@@ -242,10 +248,7 @@ export default function DropperGame({
     const stopMusic = startDropperAmbient();
 
     reportedRef.current = false;
-    const capY = WORLD_H - FINISH_ZONE - 40;
-    const rawFirstRowY = 48 + fallSpeed * DROP_FREE_FALL_SEC + PLAYER_H + 24;
-    const firstObstacleRowY = Math.max(200, Math.min(Math.ceil(rawFirstRowY), capY - 300));
-    obstaclesRef.current = buildObstacles(seed, firstObstacleRowY);
+    obstaclesRef.current = buildObstacles(seed, firstObstacleRowYForFallSpeed(fallSpeed));
     playerRef.current = { x: WORLD_W / 2 - PLAYER_W / 2, y: 48, targetX: WORLD_W / 2 - PLAYER_W / 2 };
     camYRef.current = 0;
     startTRef.current = performance.now();
