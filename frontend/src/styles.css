@@ -3415,6 +3415,24 @@ th {
   text-shadow: 1px 1px 0 #000;
 }
 
+.dropper-start-countdown {
+  position: absolute;
+  left: 50%;
+  top: 18%;
+  transform: translateX(-50%);
+  z-index: 3;
+  font-family: "Press Start 2P", ui-monospace, monospace;
+  font-size: clamp(1.3rem, 10vw, 2.4rem);
+  line-height: 1;
+  color: #f0e6a8;
+  text-shadow:
+    3px 3px 0 #000,
+    0 0 14px rgba(240, 230, 168, 0.28);
+  pointer-events: none;
+  user-select: none;
+  opacity: 0.92;
+}
+
 .dropper-overlay {
   position: absolute;
   left: 50%;

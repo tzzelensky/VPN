@@ -189,6 +189,8 @@ export type DropperGameConfig = {
    * Ориентир времени до финиша: flight_duration_sec / flight_speed_mult (сек).
    */
   flight_speed_mult: number;
+  /** Умирать ли от бокового касания препятствия. */
+  side_hit_death_enabled: boolean;
 };
 
 export type DropperSessionRow = {
@@ -354,6 +356,7 @@ function defaultDropperGame(): DropperGameConfig {
     tickets_per_purchase: 1,
     flight_duration_sec: 40,
     flight_speed_mult: 1,
+    side_hit_death_enabled: true,
   };
 }
 
@@ -389,6 +392,10 @@ export function normalizeDropperGame(raw: unknown): DropperGameConfig {
     tickets_per_purchase: Math.max(0, Math.floor(Number(o.tickets_per_purchase) || 0)),
     flight_duration_sec: Math.max(15, Math.min(180, Math.floor(Number(o.flight_duration_sec) || d.flight_duration_sec))),
     flight_speed_mult: mult,
+    side_hit_death_enabled:
+      o.side_hit_death_enabled === undefined
+        ? d.side_hit_death_enabled
+        : o.side_hit_death_enabled === true || o.side_hit_death_enabled === 1 || o.side_hit_death_enabled === "1",
   };
 }
 

@@ -41,6 +41,8 @@ const EARTH_ROW_H = 22;
 const DROP_TRAVEL_PX = WORLD_H - 48 - 40;
 /** Сколько секунд пути без рядов препятствий (только свободное падение). */
 const DROP_FREE_FALL_SEC = 4;
+const DROP_START_COUNTDOWN_SEC = 3;
+const DROP_START_COUNTDOWN_MS = DROP_START_COUNTDOWN_SEC * 1000;
 
 type ObstacleRow = { y: number; gapLeft: number; gapRight: number };
 
@@ -91,6 +93,33 @@ function aabbHit(
   bh: number,
 ): boolean {
   return ax < bx + bw && ax + aw > bx && ay < by + bh && ay + ah > by;
+}
+
+function obstacleHitKind(
+  prevAx: number,
+  prevAy: number,
+  ax: number,
+  ay: number,
+  aw: number,
+  ah: number,
+  bx: number,
+  by: number,
+  bw: number,
+  bh: number,
+): "side" | "vertical" | null {
+  if (!aabbHit(ax, ay, aw, ah, bx, by, bw, bh)) return null;
+  const overlapX = Math.min(ax + aw, bx + bw) - Math.max(ax, bx);
+  const overlapY = Math.min(ay + ah, by + bh) - Math.max(ay, by);
+  if (overlapX <= 0 || overlapY <= 0) return null;
+
+  const prevBottom = prevAy + ah;
+  const prevTop = prevAy;
+  const prevRight = prevAx + aw;
+  const prevLeft = prevAx;
+
+  if (prevBottom <= by + 1 || prevTop >= by + bh - 1) return "vertical";
+  if (prevRight <= bx + 1 || prevLeft >= bx + bw - 1) return "side";
+  return overlapX < overlapY ? "side" : "vertical";
 }
 
 type Props = {
@@ -181,12 +210,14 @@ export default function DropperGame({
   const fallSpeed = (DROP_TRAVEL_PX / flightDurationSec) * flightSpeedMult;
   const effectiveFlightSec = flightDurationSec / flightSpeedMult;
   const targetFlightMsFallback = effectiveFlightSec * 1000;
+  const sideHitDeathEnabled = profile.dropper.side_hit_death_enabled !== false;
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [phase, setPhase] = useState<"playing" | "won" | "lost">("playing");
   const [flightMs, setFlightMs] = useState(0);
   /** Целые секунды до финиша (по пройденному пути). */
   const [countdownSec, setCountdownSec] = useState(() => Math.ceil(flightDurationSec / flightSpeedMult));
+  const [startCountdown, setStartCountdown] = useState(DROP_START_COUNTDOWN_SEC);
   const [busyGift, setBusyGift] = useState(false);
   const [giftErr, setGiftErr] = useState("");
   const [rewardPickUserId, setRewardPickUserId] = useState(targetUserId);
@@ -212,6 +243,7 @@ export default function DropperGame({
   const practiceModeRef = useRef(practiceMode);
   practiceModeRef.current = practiceMode;
   const countdownSecRef = useRef(-1);
+  const startCountdownRef = useRef(DROP_START_COUNTDOWN_SEC);
 
   const submitFinish = useCallback(
     async (won: boolean, ms: number, choice?: "gb" | "days") => {
@@ -251,12 +283,14 @@ export default function DropperGame({
     obstaclesRef.current = buildObstacles(seed, firstObstacleRowYForFallSpeed(fallSpeed));
     playerRef.current = { x: WORLD_W / 2 - PLAYER_W / 2, y: 48, targetX: WORLD_W / 2 - PLAYER_W / 2 };
     camYRef.current = 0;
-    startTRef.current = performance.now();
+    startTRef.current = performance.now() + DROP_START_COUNTDOWN_MS;
     touchRef.current = null;
     phaseRef.current = "playing";
     setPhase("playing");
     setFlightMs(0);
     setGiftErr("");
+    startCountdownRef.current = DROP_START_COUNTDOWN_SEC;
+    setStartCountdown(DROP_START_COUNTDOWN_SEC);
     const cd0 = Math.max(1, Math.ceil(effectiveFlightSec));
     countdownSecRef.current = cd0;
     setCountdownSec(cd0);
@@ -335,57 +369,104 @@ export default function DropperGame({
       if (ph === "playing") {
         const tx = touchRef.current ?? p.x + PLAYER_W / 2;
         p.targetX = tx - PLAYER_W / 2;
-        p.x += (p.targetX - p.x) * Math.min(1, dt * 10);
-        p.y += fallSpeed * dt;
+        const beforeStartMs = startTRef.current - now;
+        if (beforeStartMs > 0) {
+          const nextStartCountdown = Math.max(1, Math.ceil(beforeStartMs / 1000));
+          if (nextStartCountdown !== startCountdownRef.current) {
+            startCountdownRef.current = nextStartCountdown;
+            setStartCountdown(nextStartCountdown);
+          }
+        } else {
+          if (startCountdownRef.current !== 0) {
+            startCountdownRef.current = 0;
+            setStartCountdown(0);
+          }
 
-        camYRef.current = Math.max(0, Math.min(p.y - viewHWorld * 0.28, WORLD_H - viewHWorld));
+          const prevX = p.x;
+          const prevY = p.y;
+          p.x += (p.targetX - p.x) * Math.min(1, dt * 10);
+          p.y += fallSpeed * dt;
 
-        const px = p.x;
-        const py = p.y;
+          camYRef.current = Math.max(0, Math.min(p.y - viewHWorld * 0.28, WORLD_H - viewHWorld));
 
-        const elapsedMs = now - startTRef.current;
-        for (const row of obstaclesRef.current) {
-          if (Math.abs(row.y - py) > 260) continue;
-          if (row.gapLeft > 4 && aabbHit(px, py, PLAYER_W, PLAYER_H, 0, row.y, row.gapLeft, EARTH_ROW_H)) {
-            const ms = elapsedMs;
+          let px = p.x;
+          const py = p.y;
+
+          const elapsedMs = now - startTRef.current;
+          for (const row of obstaclesRef.current) {
+            if (Math.abs(row.y - py) > 260) continue;
+
+            const leftHit = row.gapLeft > 4
+              ? obstacleHitKind(prevX, prevY, px, py, PLAYER_W, PLAYER_H, 0, row.y, row.gapLeft, EARTH_ROW_H)
+              : null;
+            if (leftHit) {
+              if (leftHit === "side" && !sideHitDeathEnabled) {
+                p.x = Math.max(p.x, row.gapLeft);
+                p.targetX = Math.max(p.targetX, row.gapLeft);
+                px = p.x;
+              } else {
+                const ms = elapsedMs;
+                setFlightMs(ms);
+                phaseRef.current = "lost";
+                setPhase("lost");
+                void submitFinish(false, ms);
+                break;
+              }
+            }
+
+            const rightHit = row.gapRight < WORLD_W - 4
+              ? obstacleHitKind(
+                  prevX,
+                  prevY,
+                  px,
+                  py,
+                  PLAYER_W,
+                  PLAYER_H,
+                  row.gapRight,
+                  row.y,
+                  WORLD_W - row.gapRight,
+                  EARTH_ROW_H,
+                )
+              : null;
+            if (rightHit) {
+              if (rightHit === "side" && !sideHitDeathEnabled) {
+                p.x = Math.min(p.x, row.gapRight - PLAYER_W);
+                p.targetX = Math.min(p.targetX, row.gapRight - PLAYER_W);
+                px = p.x;
+              } else {
+                const ms = elapsedMs;
+                setFlightMs(ms);
+                phaseRef.current = "lost";
+                setPhase("lost");
+                void submitFinish(false, ms);
+                break;
+              }
+            }
+          }
+
+          if (phaseRef.current === "playing" && py > WORLD_H - 40) {
+            const ms = now - startTRef.current;
             setFlightMs(ms);
-            phaseRef.current = "lost";
-            setPhase("lost");
-            void submitFinish(false, ms);
-            break;
+            phaseRef.current = "won";
+            if (practiceModeRef.current) {
+              void submitFinish(true, ms);
+            } else {
+              setPhase("won");
+            }
           }
-          if (row.gapRight < WORLD_W - 4 && aabbHit(px, py, PLAYER_W, PLAYER_H, row.gapRight, row.y, WORLD_W - row.gapRight, EARTH_ROW_H)) {
-            const ms = elapsedMs;
-            setFlightMs(ms);
-            phaseRef.current = "lost";
-            setPhase("lost");
-            void submitFinish(false, ms);
-            break;
-          }
-        }
 
-        if (phaseRef.current === "playing" && py > WORLD_H - 40) {
-          const ms = now - startTRef.current;
-          setFlightMs(ms);
-          phaseRef.current = "won";
-          if (practiceModeRef.current) {
-            void submitFinish(true, ms);
-          } else {
-            setPhase("won");
+          if (phaseRef.current === "playing") {
+            const traveled = Math.max(0, py - 48);
+            const remSec = Math.max(0, (DROP_TRAVEL_PX - traveled) / fallSpeed);
+            const nextCd = Math.ceil(remSec);
+            if (nextCd !== countdownSecRef.current) {
+              countdownSecRef.current = nextCd;
+              setCountdownSec(nextCd);
+            }
+          } else if (countdownSecRef.current !== 0) {
+            countdownSecRef.current = 0;
+            setCountdownSec(0);
           }
-        }
-
-        if (phaseRef.current === "playing") {
-          const traveled = Math.max(0, py - 48);
-          const remSec = Math.max(0, (DROP_TRAVEL_PX - traveled) / fallSpeed);
-          const nextCd = Math.ceil(remSec);
-          if (nextCd !== countdownSecRef.current) {
-            countdownSecRef.current = nextCd;
-            setCountdownSec(nextCd);
-          }
-        } else if (countdownSecRef.current !== 0) {
-          countdownSecRef.current = 0;
-          setCountdownSec(0);
         }
       }
 
@@ -435,7 +516,7 @@ export default function DropperGame({
       window.removeEventListener("resize", onVvResize);
       window.visualViewport?.removeEventListener("resize", onVvResize);
     };
-  }, [sessionId, seed, submitFinish, fullscreen, practiceMode, fallSpeed, flightDurationSec, effectiveFlightSec]);
+  }, [sessionId, seed, submitFinish, fullscreen, practiceMode, fallSpeed, effectiveFlightSec, sideHitDeathEnabled]);
 
   const rewardSub = profile.subscriptions.find((s) => s.id === rewardPickUserId);
   const subHasGbCap = (rewardSub?.total_gb ?? 0) > 0;
@@ -445,11 +526,16 @@ export default function DropperGame({
 
   return (
     <div className={`dropper-game-wrap ${fullscreen ? "dropper-game-wrap--fullscreen" : ""}`.trim()}>
-      {phase === "playing" ? (
+      {phase === "playing" && startCountdown === 0 ? (
         <div className="dropper-countdown" aria-live="polite">
           <span className="dropper-countdown__label">до финиша</span>
           <span className="dropper-countdown__value">{countdownSec}</span>
           <span className="dropper-countdown__unit">сек</span>
+        </div>
+      ) : null}
+      {phase === "playing" && startCountdown > 0 ? (
+        <div className="dropper-start-countdown" aria-hidden="true">
+          {startCountdown}
         </div>
       ) : null}
       <canvas ref={canvasRef} className="dropper-canvas" />

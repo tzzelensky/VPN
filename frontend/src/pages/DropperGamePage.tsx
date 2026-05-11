@@ -218,6 +218,21 @@ export default function DropperGamePage({ onLogout }: { onLogout: () => void }) 
               onClick={() => setCfg({ ...cfg, enabled: !cfg.enabled })}
             />
           </div>
+          <div className="form-field form-field-span-2 shop-toggle-row">
+            <div>
+              <label>Смерть от удара о бок препятствия</label>
+              <p className="field-hint" style={{ marginTop: "0.25rem" }}>
+                Если выключено, боковое касание платформы не убивает: персонаж скользит вдоль края. Падение сверху на
+                препятствие по-прежнему считается проигрышем.
+              </p>
+            </div>
+            <button
+              type="button"
+              className={`toggle ${cfg.side_hit_death_enabled ? "on" : ""}`}
+              aria-pressed={cfg.side_hit_death_enabled}
+              onClick={() => setCfg({ ...cfg, side_hit_death_enabled: !cfg.side_hit_death_enabled })}
+            />
+          </div>
           <div className="form-field form-field-span-2">
             <label>Базовая длительность полёта, сек (15–180), при множителе скорости 1</label>
             <input
@@ -257,8 +272,8 @@ export default function DropperGamePage({ onLogout }: { onLogout: () => void }) 
           </div>
           <div className="form-field form-field-span-2">
             <label>
-              Резкость управления влево-вправо (×{cfg.flight_speed_mult.toFixed(2).replace(/\.?0+$/, "")}) — 1 как
-              обычно; ниже мягче, выше резче
+              Скорость падения (×{cfg.flight_speed_mult.toFixed(2).replace(/\.?0+$/, "")}) — 1 норма; меньше медленнее,
+              больше быстрее
             </label>
             <input
               type="range"
@@ -290,7 +305,7 @@ export default function DropperGamePage({ onLogout }: { onLogout: () => void }) 
               <strong>
                 {(cfg.flight_duration_sec / Math.max(0.25, cfg.flight_speed_mult)).toFixed(1)}
               </strong>{" "}
-              с. Античит на сервере по этому времени.
+              с. Управление влево-вправо фиксированное; античит на сервере по этому времени.
             </p>
           </div>
           <div className="form-field">

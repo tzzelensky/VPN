@@ -585,6 +585,8 @@ export type MySubProfileDto = {
     flight_duration_sec: number;
     /** Множитель скорости падения (1 = по умолчанию). */
     flight_speed_mult: number;
+    /** Умирать ли от бокового касания препятствия. */
+    side_hit_death_enabled: boolean;
     plays: number;
     wins: number;
     won_gb: number;
@@ -661,6 +663,8 @@ export type DropperGameConfigDto = {
   flight_duration_sec: number;
   /** Множитель скорости падения на клиенте, 0.25–4 (1 = база). */
   flight_speed_mult: number;
+  /** Умирать ли от удара о бок препятствия. */
+  side_hit_death_enabled: boolean;
 };
 
 export type DropperAdminReportDto = {
