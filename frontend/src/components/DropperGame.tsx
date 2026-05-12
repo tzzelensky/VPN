@@ -45,6 +45,7 @@ const DROP_START_COUNTDOWN_SEC = 3;
 const DROP_START_COUNTDOWN_MS = DROP_START_COUNTDOWN_SEC * 1000;
 const DROP_MAX_HEARTS = 3;
 const DROP_GHOST_HITS_AFTER_DAMAGE = 2;
+const DROP_HIT_BLINK_MS = 1000;
 
 type ObstacleRow = { y: number; gapLeft: number; gapRight: number };
 
@@ -250,6 +251,7 @@ export default function DropperGame({
   const healthRef = useRef(DROP_MAX_HEARTS);
   const ghostHitsRemainingRef = useRef(0);
   const ghostPassedRowsRef = useRef<Set<number>>(new Set());
+  const blinkUntilRef = useRef(0);
 
   const submitFinish = useCallback(
     async (won: boolean, ms: number, choice?: "gb" | "days") => {
@@ -299,6 +301,7 @@ export default function DropperGame({
     setHealth(DROP_MAX_HEARTS);
     ghostHitsRemainingRef.current = 0;
     ghostPassedRowsRef.current = new Set();
+    blinkUntilRef.current = 0;
     startCountdownRef.current = DROP_START_COUNTDOWN_SEC;
     setStartCountdown(DROP_START_COUNTDOWN_SEC);
     const cd0 = Math.max(1, Math.ceil(effectiveFlightSec));
@@ -435,6 +438,7 @@ export default function DropperGame({
                 const nextHealth = Math.max(0, healthRef.current - 1);
                 healthRef.current = nextHealth;
                 setHealth(nextHealth);
+                blinkUntilRef.current = now + DROP_HIT_BLINK_MS;
                 if (nextHealth <= 0) {
                   const ms = elapsedMs;
                   setFlightMs(ms);
@@ -487,6 +491,7 @@ export default function DropperGame({
                 const nextHealth = Math.max(0, healthRef.current - 1);
                 healthRef.current = nextHealth;
                 setHealth(nextHealth);
+                blinkUntilRef.current = now + DROP_HIT_BLINK_MS;
                 if (nextHealth <= 0) {
                   const ms = elapsedMs;
                   setFlightMs(ms);
@@ -557,8 +562,9 @@ export default function DropperGame({
       }
 
       ctx.imageSmoothingEnabled = false;
-      const isGhostBlinkVisible = ghostHitsRemainingRef.current <= 0 || Math.floor(now / 110) % 2 === 0;
-      if (isGhostBlinkVisible) {
+      const isBlinking = now < blinkUntilRef.current;
+      const isBlinkVisible = !isBlinking || Math.floor(now / 110) % 2 === 0;
+      if (isBlinkVisible) {
         drawHeroBack(ctx, p.x, p.y, PLAYER_W, PLAYER_H);
       }
 
