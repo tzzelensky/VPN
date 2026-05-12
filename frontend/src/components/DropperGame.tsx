@@ -44,7 +44,7 @@ const DROP_FREE_FALL_SEC = 4;
 const DROP_START_COUNTDOWN_SEC = 3;
 const DROP_START_COUNTDOWN_MS = DROP_START_COUNTDOWN_SEC * 1000;
 const DROP_MAX_HEARTS = 3;
-const DROP_HIT_INVULN_MS = 900;
+const DROP_GHOST_HITS_AFTER_DAMAGE = 2;
 
 type ObstacleRow = { y: number; gapLeft: number; gapRight: number };
 
@@ -248,7 +248,8 @@ export default function DropperGame({
   const countdownSecRef = useRef(-1);
   const startCountdownRef = useRef(DROP_START_COUNTDOWN_SEC);
   const healthRef = useRef(DROP_MAX_HEARTS);
-  const hitCooldownUntilRef = useRef(0);
+  const ghostHitsRemainingRef = useRef(0);
+  const ghostPassedRowsRef = useRef<Set<number>>(new Set());
 
   const submitFinish = useCallback(
     async (won: boolean, ms: number, choice?: "gb" | "days") => {
@@ -296,7 +297,8 @@ export default function DropperGame({
     setGiftErr("");
     healthRef.current = DROP_MAX_HEARTS;
     setHealth(DROP_MAX_HEARTS);
-    hitCooldownUntilRef.current = 0;
+    ghostHitsRemainingRef.current = 0;
+    ghostPassedRowsRef.current = new Set();
     startCountdownRef.current = DROP_START_COUNTDOWN_SEC;
     setStartCountdown(DROP_START_COUNTDOWN_SEC);
     const cd0 = Math.max(1, Math.ceil(effectiveFlightSec));
@@ -403,13 +405,20 @@ export default function DropperGame({
           const elapsedMs = now - startTRef.current;
           for (const row of obstaclesRef.current) {
             if (Math.abs(row.y - py) > 260) continue;
-
-            const damageAllowed = now >= hitCooldownUntilRef.current;
+            const rowKey = row.y;
+            const isGhosting = ghostHitsRemainingRef.current > 0;
 
             const leftHit = row.gapLeft > 4
               ? obstacleHitKind(prevX, prevY, px, py, PLAYER_W, PLAYER_H, 0, row.y, row.gapLeft, EARTH_ROW_H)
               : null;
             if (leftHit) {
+              if (isGhosting) {
+                if (!ghostPassedRowsRef.current.has(rowKey)) {
+                  ghostPassedRowsRef.current.add(rowKey);
+                  ghostHitsRemainingRef.current = Math.max(0, ghostHitsRemainingRef.current - 1);
+                }
+                break;
+              }
               if (leftHit === "side" && !sideHitDeathEnabled) {
                 p.x = Math.max(p.x, row.gapLeft);
                 p.targetX = Math.max(p.targetX, row.gapLeft);
@@ -423,18 +432,18 @@ export default function DropperGame({
                   p.y = Math.max(48, row.y - PLAYER_H - 6);
                   py = p.y;
                 }
-                if (damageAllowed) {
-                  hitCooldownUntilRef.current = now + DROP_HIT_INVULN_MS;
-                  const nextHealth = Math.max(0, healthRef.current - 1);
-                  healthRef.current = nextHealth;
-                  setHealth(nextHealth);
-                  if (nextHealth <= 0) {
-                    const ms = elapsedMs;
-                    setFlightMs(ms);
-                    phaseRef.current = "lost";
-                    setPhase("lost");
-                    void submitFinish(false, ms);
-                  }
+                const nextHealth = Math.max(0, healthRef.current - 1);
+                healthRef.current = nextHealth;
+                setHealth(nextHealth);
+                if (nextHealth <= 0) {
+                  const ms = elapsedMs;
+                  setFlightMs(ms);
+                  phaseRef.current = "lost";
+                  setPhase("lost");
+                  void submitFinish(false, ms);
+                } else {
+                  ghostHitsRemainingRef.current = DROP_GHOST_HITS_AFTER_DAMAGE;
+                  ghostPassedRowsRef.current = new Set();
                 }
                 break;
               }
@@ -455,6 +464,13 @@ export default function DropperGame({
                 )
               : null;
             if (rightHit) {
+              if (isGhosting) {
+                if (!ghostPassedRowsRef.current.has(rowKey)) {
+                  ghostPassedRowsRef.current.add(rowKey);
+                  ghostHitsRemainingRef.current = Math.max(0, ghostHitsRemainingRef.current - 1);
+                }
+                break;
+              }
               if (rightHit === "side" && !sideHitDeathEnabled) {
                 p.x = Math.min(p.x, row.gapRight - PLAYER_W);
                 p.targetX = Math.min(p.targetX, row.gapRight - PLAYER_W);
@@ -468,18 +484,18 @@ export default function DropperGame({
                   p.y = Math.max(48, row.y - PLAYER_H - 6);
                   py = p.y;
                 }
-                if (damageAllowed) {
-                  hitCooldownUntilRef.current = now + DROP_HIT_INVULN_MS;
-                  const nextHealth = Math.max(0, healthRef.current - 1);
-                  healthRef.current = nextHealth;
-                  setHealth(nextHealth);
-                  if (nextHealth <= 0) {
-                    const ms = elapsedMs;
-                    setFlightMs(ms);
-                    phaseRef.current = "lost";
-                    setPhase("lost");
-                    void submitFinish(false, ms);
-                  }
+                const nextHealth = Math.max(0, healthRef.current - 1);
+                healthRef.current = nextHealth;
+                setHealth(nextHealth);
+                if (nextHealth <= 0) {
+                  const ms = elapsedMs;
+                  setFlightMs(ms);
+                  phaseRef.current = "lost";
+                  setPhase("lost");
+                  void submitFinish(false, ms);
+                } else {
+                  ghostHitsRemainingRef.current = DROP_GHOST_HITS_AFTER_DAMAGE;
+                  ghostPassedRowsRef.current = new Set();
                 }
                 break;
               }
@@ -541,7 +557,10 @@ export default function DropperGame({
       }
 
       ctx.imageSmoothingEnabled = false;
-      drawHeroBack(ctx, p.x, p.y, PLAYER_W, PLAYER_H);
+      const isGhostBlinkVisible = ghostHitsRemainingRef.current <= 0 || Math.floor(now / 110) % 2 === 0;
+      if (isGhostBlinkVisible) {
+        drawHeroBack(ctx, p.x, p.y, PLAYER_W, PLAYER_H);
+      }
 
       rafRef.current = requestAnimationFrame(loop);
     };

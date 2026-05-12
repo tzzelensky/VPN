@@ -3404,7 +3404,6 @@ th {
   background: var(--heart-color);
   box-shadow:
     4px 0 0 var(--heart-color),
-    8px 0 0 var(--heart-color),
     16px 0 0 var(--heart-color),
     20px 0 0 var(--heart-color),
     0 4px 0 var(--heart-color),
