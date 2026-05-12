@@ -43,6 +43,8 @@ const DROP_TRAVEL_PX = WORLD_H - 48 - 40;
 const DROP_FREE_FALL_SEC = 4;
 const DROP_START_COUNTDOWN_SEC = 3;
 const DROP_START_COUNTDOWN_MS = DROP_START_COUNTDOWN_SEC * 1000;
+const DROP_MAX_HEARTS = 3;
+const DROP_HIT_INVULN_MS = 900;
 
 type ObstacleRow = { y: number; gapLeft: number; gapRight: number };
 
@@ -218,6 +220,7 @@ export default function DropperGame({
   /** Целые секунды до финиша (по пройденному пути). */
   const [countdownSec, setCountdownSec] = useState(() => Math.ceil(flightDurationSec / flightSpeedMult));
   const [startCountdown, setStartCountdown] = useState(DROP_START_COUNTDOWN_SEC);
+  const [health, setHealth] = useState(DROP_MAX_HEARTS);
   const [busyGift, setBusyGift] = useState(false);
   const [giftErr, setGiftErr] = useState("");
   const [rewardPickUserId, setRewardPickUserId] = useState(targetUserId);
@@ -244,6 +247,8 @@ export default function DropperGame({
   practiceModeRef.current = practiceMode;
   const countdownSecRef = useRef(-1);
   const startCountdownRef = useRef(DROP_START_COUNTDOWN_SEC);
+  const healthRef = useRef(DROP_MAX_HEARTS);
+  const hitCooldownUntilRef = useRef(0);
 
   const submitFinish = useCallback(
     async (won: boolean, ms: number, choice?: "gb" | "days") => {
@@ -289,6 +294,9 @@ export default function DropperGame({
     setPhase("playing");
     setFlightMs(0);
     setGiftErr("");
+    healthRef.current = DROP_MAX_HEARTS;
+    setHealth(DROP_MAX_HEARTS);
+    hitCooldownUntilRef.current = 0;
     startCountdownRef.current = DROP_START_COUNTDOWN_SEC;
     setStartCountdown(DROP_START_COUNTDOWN_SEC);
     const cd0 = Math.max(1, Math.ceil(effectiveFlightSec));
@@ -390,11 +398,13 @@ export default function DropperGame({
           camYRef.current = Math.max(0, Math.min(p.y - viewHWorld * 0.28, WORLD_H - viewHWorld));
 
           let px = p.x;
-          const py = p.y;
+          let py = p.y;
 
           const elapsedMs = now - startTRef.current;
           for (const row of obstaclesRef.current) {
             if (Math.abs(row.y - py) > 260) continue;
+
+            const damageAllowed = now >= hitCooldownUntilRef.current;
 
             const leftHit = row.gapLeft > 4
               ? obstacleHitKind(prevX, prevY, px, py, PLAYER_W, PLAYER_H, 0, row.y, row.gapLeft, EARTH_ROW_H)
@@ -405,11 +415,27 @@ export default function DropperGame({
                 p.targetX = Math.max(p.targetX, row.gapLeft);
                 px = p.x;
               } else {
-                const ms = elapsedMs;
-                setFlightMs(ms);
-                phaseRef.current = "lost";
-                setPhase("lost");
-                void submitFinish(false, ms);
+                if (leftHit === "side") {
+                  p.x = Math.max(p.x, row.gapLeft);
+                  p.targetX = Math.max(p.targetX, row.gapLeft);
+                  px = p.x;
+                } else {
+                  p.y = Math.max(48, row.y - PLAYER_H - 6);
+                  py = p.y;
+                }
+                if (damageAllowed) {
+                  hitCooldownUntilRef.current = now + DROP_HIT_INVULN_MS;
+                  const nextHealth = Math.max(0, healthRef.current - 1);
+                  healthRef.current = nextHealth;
+                  setHealth(nextHealth);
+                  if (nextHealth <= 0) {
+                    const ms = elapsedMs;
+                    setFlightMs(ms);
+                    phaseRef.current = "lost";
+                    setPhase("lost");
+                    void submitFinish(false, ms);
+                  }
+                }
                 break;
               }
             }
@@ -434,11 +460,27 @@ export default function DropperGame({
                 p.targetX = Math.min(p.targetX, row.gapRight - PLAYER_W);
                 px = p.x;
               } else {
-                const ms = elapsedMs;
-                setFlightMs(ms);
-                phaseRef.current = "lost";
-                setPhase("lost");
-                void submitFinish(false, ms);
+                if (rightHit === "side") {
+                  p.x = Math.min(p.x, row.gapRight - PLAYER_W);
+                  p.targetX = Math.min(p.targetX, row.gapRight - PLAYER_W);
+                  px = p.x;
+                } else {
+                  p.y = Math.max(48, row.y - PLAYER_H - 6);
+                  py = p.y;
+                }
+                if (damageAllowed) {
+                  hitCooldownUntilRef.current = now + DROP_HIT_INVULN_MS;
+                  const nextHealth = Math.max(0, healthRef.current - 1);
+                  healthRef.current = nextHealth;
+                  setHealth(nextHealth);
+                  if (nextHealth <= 0) {
+                    const ms = elapsedMs;
+                    setFlightMs(ms);
+                    phaseRef.current = "lost";
+                    setPhase("lost");
+                    void submitFinish(false, ms);
+                  }
+                }
                 break;
               }
             }
@@ -526,6 +568,17 @@ export default function DropperGame({
 
   return (
     <div className={`dropper-game-wrap ${fullscreen ? "dropper-game-wrap--fullscreen" : ""}`.trim()}>
+      {phase === "playing" ? (
+        <div className="dropper-health" aria-label={`Здоровье: ${health} из ${DROP_MAX_HEARTS}`}>
+          {Array.from({ length: DROP_MAX_HEARTS }, (_, i) => (
+            <span
+              key={i}
+              className={`dropper-heart ${i < health ? "dropper-heart--full" : "dropper-heart--empty"}`}
+              aria-hidden="true"
+            />
+          ))}
+        </div>
+      ) : null}
       {phase === "playing" && startCountdown === 0 ? (
         <div className="dropper-countdown" aria-live="polite">
           <span className="dropper-countdown__label">до финиша</span>
