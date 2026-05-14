@@ -38,6 +38,8 @@ export type CreateUserInput = {
   device_limit_enabled?: number;
   /** Максимум устройств при включённом device_limit_enabled. */
   device_limit_count?: number;
+  /** Лимит скорости, Мбит/с; 0 = без ограничения. */
+  speed_limit_mbps?: number;
   /** 1 = к подписке дописать последние 4 узла + строка Happ (белые списки). По умолчанию выкл. */
   whitelist_happ_enabled?: number;
   /** Служебные поля синхронизации с Xray (не задавать из формы клиента). */
@@ -83,6 +85,8 @@ export type UserRow = {
   device_limit_enabled: number;
   /** Максимум устройств, когда ограничение включено. */
   device_limit_count: number;
+  /** Лимит скорости, Мбит/с; 0 = без ограничения. */
+  speed_limit_mbps: number;
   /** 1 = к подписке дописываются последние 4 сервера + happ-строка белых списков. */
   whitelist_happ_enabled: number;
   /** Время последнего успешного sync трафика с узлов (ms). */
@@ -771,6 +775,14 @@ export function coerceExpiryTimeMs(raw: unknown): number {
   return snapExpiryTimeToNoonLocal(ms);
 }
 
+/** Лимит скорости в Мбит/с; 0 или пусто — без ограничения. */
+export function coerceSpeedLimitMbps(raw: unknown): number {
+  if (raw === "" || raw == null) return 0;
+  const n = Math.floor(Number(raw) || 0);
+  if (!Number.isFinite(n) || n <= 0) return 0;
+  return Math.min(9999, n);
+}
+
 /** Лимит в ГБ; если в поле попали байты (импорт), переводим в ГБ. */
 function coerceTotalGbField(raw: unknown): number {
   let gb = Number(raw);
@@ -806,6 +818,7 @@ function normalizeUser(u: UserRow): UserRow {
     online_devices: Math.max(0, Math.floor(Number((u as { online_devices?: unknown }).online_devices) || 0)),
     device_limit_enabled: Number((u as { device_limit_enabled?: unknown }).device_limit_enabled) === 1 ? 1 : 0,
     device_limit_count: Math.max(1, Math.floor(Number((u as { device_limit_count?: unknown }).device_limit_count) || 1)),
+    speed_limit_mbps: coerceSpeedLimitMbps((u as { speed_limit_mbps?: unknown }).speed_limit_mbps),
     whitelist_happ_enabled: Number((u as { whitelist_happ_enabled?: unknown }).whitelist_happ_enabled) === 1 ? 1 : 0,
     stats_synced_at: Number.isFinite(Number(u.stats_synced_at))
       ? Math.max(0, Math.floor(Number(u.stats_synced_at)))
@@ -1215,6 +1228,7 @@ export function createUser(input: CreateUserInput = {}): UserRow {
       online_devices: 0,
       device_limit_enabled: input.device_limit_enabled === 1 ? 1 : 0,
       device_limit_count: Math.max(1, Math.floor(Number(input.device_limit_count) || 1)),
+      speed_limit_mbps: coerceSpeedLimitMbps(input.speed_limit_mbps),
       whitelist_happ_enabled: input.whitelist_happ_enabled === 1 ? 1 : 0,
       stats_synced_at: 0,
       stats_raw_up: -1,
@@ -1279,6 +1293,8 @@ export function updateUserRow(id: number, patch: Partial<CreateUserInput>): User
         patch.device_limit_count !== undefined
           ? Math.max(1, Math.floor(Number(patch.device_limit_count) || 1))
           : cur.device_limit_count,
+      speed_limit_mbps:
+        patch.speed_limit_mbps !== undefined ? coerceSpeedLimitMbps(patch.speed_limit_mbps) : cur.speed_limit_mbps,
       whitelist_happ_enabled:
         patch.whitelist_happ_enabled !== undefined
           ? patch.whitelist_happ_enabled === 1

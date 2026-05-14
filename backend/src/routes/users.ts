@@ -138,6 +138,7 @@ function userDto(u: UserRow) {
     subscription_server_count: u.subscription_server_count,
     device_limit_enabled: u.device_limit_enabled === 1,
     device_limit_count: u.device_limit_count,
+    speed_limit_mbps: u.speed_limit_mbps,
     whitelist_happ_enabled: u.whitelist_happ_enabled === 1,
     online: deriveOnlineFromRow(u),
     online_devices: Number(u.online_devices) || 0,
@@ -197,6 +198,7 @@ function parseCreateBody(req: import("express").Request): CreateUserInput & { na
             ? 1
             : undefined,
     device_limit_count: b.device_limit_count != null ? Number(b.device_limit_count) : undefined,
+    speed_limit_mbps: b.speed_limit_mbps != null && b.speed_limit_mbps !== "" ? Number(b.speed_limit_mbps) : undefined,
     whitelist_happ_enabled:
       typeof b.whitelist_happ_enabled === "boolean"
         ? b.whitelist_happ_enabled

@@ -92,6 +92,7 @@ export default function UserModal({
   const [serverCount, setServerCount] = useState(0);
   const [deviceLimitEnabled, setDeviceLimitEnabled] = useState(false);
   const [deviceLimitCount, setDeviceLimitCount] = useState("2");
+  const [speedLimitMbps, setSpeedLimitMbps] = useState("");
   const [whitelistHappEnabled, setWhitelistHappEnabled] = useState(false);
   const [remotePort, setRemotePort] = useState("");
   const [realityPbk, setRealityPbk] = useState("");
@@ -122,6 +123,7 @@ export default function UserModal({
       setServerCount(0);
       setDeviceLimitEnabled(false);
       setDeviceLimitCount("2");
+      setSpeedLimitMbps("");
       setWhitelistHappEnabled(false);
       setRemotePort("");
       setRealityPbk("");
@@ -145,6 +147,9 @@ export default function UserModal({
     setServerCount(Math.max(0, Math.floor(Number(user.subscription_server_count) || 0)));
     setDeviceLimitEnabled(Boolean(user.device_limit_enabled));
     setDeviceLimitCount(String(Math.max(1, Math.floor(Number(user.device_limit_count) || 1))));
+    setSpeedLimitMbps(
+      Number(user.speed_limit_mbps) > 0 ? String(Math.floor(Number(user.speed_limit_mbps))) : "",
+    );
     setWhitelistHappEnabled(Boolean(user.whitelist_happ_enabled));
     setRemotePort(user.remote_port != null ? String(user.remote_port) : "");
     setRealityPbk(user.reality_pbk ?? "");
@@ -181,6 +186,12 @@ export default function UserModal({
     return sniMode;
   }
 
+  function parseSpeedLimitMbps(raw: string): number {
+    const n = Math.floor(Number(String(raw).replace(",", ".")) || 0);
+    if (!Number.isFinite(n) || n <= 0) return 0;
+    return Math.min(9999, n);
+  }
+
   function buildPayload(): CreateUserPayload {
     const rp = remotePort.trim() ? Number(remotePort) : null;
     const base: CreateUserPayload = {
@@ -201,6 +212,7 @@ export default function UserModal({
       subscription_server_count: serverCount,
       device_limit_enabled: deviceLimitEnabled,
       device_limit_count: Math.max(1, Math.floor(Number(deviceLimitCount) || 1)),
+      speed_limit_mbps: parseSpeedLimitMbps(speedLimitMbps),
       whitelist_happ_enabled: whitelistHappEnabled,
     };
     if (isCreate) return base;
@@ -437,6 +449,23 @@ export default function UserModal({
                   />
                 </div>
                 <p className="field-hint">По умолчанию выключено. При превышении клиент получает заглушку вместо серверов.</p>
+              </div>
+              <div className="form-field form-field-span-2">
+                <label>Ограничение скорости, Мбит/с</label>
+                <input
+                  value={speedLimitMbps}
+                  onChange={(e) => setSpeedLimitMbps(sanitizePositiveIntInput(e.target.value))}
+                  onBlur={() => setSpeedLimitMbps((v) => (v ? sanitizePositiveIntInput(v) : ""))}
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  placeholder="0 = без лимита"
+                  disabled={saving}
+                  style={{ maxWidth: "180px" }}
+                />
+                <p className="field-hint">
+                  По умолчанию выключено. Пусто или 0 — без ограничения. Лимит применяется на узлах Xray только к этому
+                  пользователю.
+                </p>
               </div>
               <div className="form-field form-field-span-2">
                 <label>Включить белые списки</label>

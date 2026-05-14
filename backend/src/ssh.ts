@@ -18,13 +18,42 @@ export type SshConfig = {
 };
 
 export type SshLog = (message: string) => void;
-/** maxIPs через policy.levels[level].maxIPs; у клиента выставляется `level` (не limitIp — для VLESS+Vision часто бесполезен). */
-export type ManagedClientInput = { id: string; deviceLimit?: number };
+/** maxIPs и uplinkSpeed/downlinkSpeed через policy.levels[level]; у клиента выставляется `level`. */
+export type ManagedClientInput = { id: string; deviceLimit?: number; speedLimitMbps?: number };
+
+const SPEED_POLICY_BASE = 10000;
+const COMBINED_POLICY_BASE = 50000;
 
 /** Уровень политики = base + N, где N — max одновременных исходящих IP для UUID. */
 export function deviceLimitPolicyLevel(maxIps: number): number {
   const n = Math.max(1, Math.floor(maxIps));
   return 200 + n;
+}
+
+function speedLimitPolicyLevel(mbps: number): number {
+  const m = Math.max(1, Math.min(9999, Math.floor(mbps)));
+  return SPEED_POLICY_BASE + m;
+}
+
+function combinedLimitPolicyLevel(maxIps: number, mbps: number): number {
+  const n = Math.max(1, Math.min(99, Math.floor(maxIps)));
+  const m = Math.max(1, Math.min(9999, Math.floor(mbps)));
+  return COMBINED_POLICY_BASE + n * 10000 + m;
+}
+
+export function clientPolicyLevel(entry: Pick<ManagedClientInput, "deviceLimit" | "speedLimitMbps">): number {
+  const dev = Number(entry.deviceLimit);
+  const spd = Number(entry.speedLimitMbps);
+  const hasDev = Number.isFinite(dev) && dev > 0;
+  const hasSpd = Number.isFinite(spd) && spd > 0;
+  if (!hasDev && !hasSpd) return 0;
+  if (hasDev && !hasSpd) return deviceLimitPolicyLevel(Math.floor(dev));
+  if (!hasDev && hasSpd) return speedLimitPolicyLevel(Math.floor(spd));
+  return combinedLimitPolicyLevel(Math.floor(dev), Math.floor(spd));
+}
+
+function xraySpeedMbpsTag(mbps: number): string {
+  return `${Math.max(1, Math.floor(mbps))}M`;
 }
 export const TZADMIN_XRAY_CONFIG_PATH = "/etc/tzadmin-xray/config.json";
 
@@ -367,28 +396,53 @@ export function ensureXrayStatsPolicyApi(config: Record<string, unknown>): void 
   config.routing = { ...prevRouting, rules };
 }
 
-/** Добавляет в config.policy.levels записи с maxIPs для всех ненулевых deviceLimit. Вызывать до ensureXrayStatsPolicyApi. */
-export function ensureDeviceLimitPolicyLevels(
+/** Добавляет в config.policy.levels записи maxIPs и uplinkSpeed/downlinkSpeed. Вызывать до ensureXrayStatsPolicyApi. */
+export function ensureClientPolicyLevels(
   config: Record<string, unknown>,
   clientEntries: ManagedClientInput[],
 ): void {
   const prevPol = (config.policy as Record<string, unknown>) || {};
   const levels = { ...((prevPol.levels as Record<string, Record<string, unknown>>) || {}) };
-  const byLevel = new Map<number, number>();
+  const byLevel = new Map<
+    number,
+    { maxIPs?: number; speedLimitMbps?: number }
+  >();
   for (const e of clientEntries) {
-    const n = Number(e.deviceLimit);
-    if (!Number.isFinite(n) || n <= 0) continue;
-    const maxIPs = Math.floor(n);
-    const lv = deviceLimitPolicyLevel(maxIPs);
-    byLevel.set(lv, maxIPs);
+    const dev = Number(e.deviceLimit);
+    const spd = Number(e.speedLimitMbps);
+    const hasDev = Number.isFinite(dev) && dev > 0;
+    const hasSpd = Number.isFinite(spd) && spd > 0;
+    if (!hasDev && !hasSpd) continue;
+    const lv = clientPolicyLevel(e);
+    const cur = byLevel.get(lv) ?? {};
+    if (hasDev) cur.maxIPs = Math.floor(dev);
+    if (hasSpd) cur.speedLimitMbps = Math.floor(spd);
+    byLevel.set(lv, cur);
   }
-  for (const [lvNum, maxIPs] of byLevel) {
+  for (const [lvNum, spec] of byLevel) {
     const k = String(lvNum);
     const lv = { ...(levels[k] || {}) };
-    lv.maxIPs = maxIPs;
+    if (spec.maxIPs != null) lv.maxIPs = spec.maxIPs;
+    else delete lv.maxIPs;
+    if (spec.speedLimitMbps != null) {
+      const tag = xraySpeedMbpsTag(spec.speedLimitMbps);
+      lv.uplinkSpeed = tag;
+      lv.downlinkSpeed = tag;
+    } else {
+      delete lv.uplinkSpeed;
+      delete lv.downlinkSpeed;
+    }
     levels[k] = lv;
   }
   config.policy = { ...prevPol, levels };
+}
+
+/** @deprecated Используйте ensureClientPolicyLevels. */
+export function ensureDeviceLimitPolicyLevels(
+  config: Record<string, unknown>,
+  clientEntries: ManagedClientInput[],
+): void {
+  ensureClientPolicyLevels(config, clientEntries);
 }
 
 function buildManagedClients(
@@ -409,12 +463,7 @@ function buildManagedClients(
       email: String(base.email ?? id).trim() || id,
     };
     delete out.limitIp;
-    const devLim = Number(entry.deviceLimit);
-    if (Number.isFinite(devLim) && devLim > 0) {
-      out.level = deviceLimitPolicyLevel(Math.floor(devLim));
-    } else {
-      out.level = 0;
-    }
+    out.level = clientPolicyLevel(entry);
     if (defaultFlow && (forceFlow || !flow)) out.flow = defaultFlow;
     return out;
   });
@@ -462,9 +511,7 @@ function findCandidateVlessInboundIndex(
 function buildMinimalConfig(clientEntries: ManagedClientInput[], vlessPort: number): Record<string, unknown> {
   const clients = clientEntries.map((entry) => {
     const id = String(entry.id ?? "").trim();
-    const devLim = Number(entry.deviceLimit);
-    const level =
-      Number.isFinite(devLim) && devLim > 0 ? deviceLimitPolicyLevel(Math.floor(devLim)) : 0;
+    const level = clientPolicyLevel(entry);
     return {
       id,
       email: id,
@@ -508,7 +555,7 @@ function buildMinimalConfig(clientEntries: ManagedClientInput[], vlessPort: numb
       rules: [{ type: "field", inboundTag: ["api"], outboundTag: "api" }],
     },
   };
-  ensureDeviceLimitPolicyLevels(cfg, clientEntries);
+  ensureClientPolicyLevels(cfg, clientEntries);
   ensureXrayStatsPolicyApi(cfg);
   return cfg;
 }
@@ -516,9 +563,7 @@ function buildMinimalConfig(clientEntries: ManagedClientInput[], vlessPort: numb
 function buildManagedInbound(clientEntries: ManagedClientInput[], vlessPort: number): Record<string, unknown> {
   const clients = clientEntries.map((entry) => {
     const id = String(entry.id ?? "").trim();
-    const devLim = Number(entry.deviceLimit);
-    const level =
-      Number.isFinite(devLim) && devLim > 0 ? deviceLimitPolicyLevel(Math.floor(devLim)) : 0;
+    const level = clientPolicyLevel(entry);
     return {
       id,
       email: id,
@@ -689,7 +734,11 @@ export async function alterInboundUsersViaApi(
         for (const c of opts.addClients ?? []) {
           const norm = String(c.id ?? "").trim();
           if (!norm) continue;
-          addById.set(norm.toLowerCase(), { id: norm, deviceLimit: c.deviceLimit });
+          addById.set(norm.toLowerCase(), {
+            id: norm,
+            deviceLimit: c.deviceLimit,
+            speedLimitMbps: c.speedLimitMbps,
+          });
         }
         const addClients = [...addById.values()];
         const removeUuids = [...new Set((opts.removeUuids ?? []).map((x) => String(x).trim()).filter(Boolean))];
@@ -697,9 +746,7 @@ export async function alterInboundUsersViaApi(
 
         if (addClients.length > 0) {
           const clients = addClients.map((entry) => {
-            const devLim = Number(entry.deviceLimit);
-            const level =
-              Number.isFinite(devLim) && devLim > 0 ? deviceLimitPolicyLevel(Math.floor(devLim)) : 0;
+            const level = clientPolicyLevel(entry);
             return {
               id: String(entry.id),
               email: String(entry.id),
@@ -862,6 +909,9 @@ export async function deployOrSyncVless(
       ...(Number.isFinite(Number(c.deviceLimit)) && Number(c.deviceLimit) > 0
         ? { deviceLimit: Math.floor(Number(c.deviceLimit)) }
         : {}),
+      ...(Number.isFinite(Number(c.speedLimitMbps)) && Number(c.speedLimitMbps) > 0
+        ? { speedLimitMbps: Math.floor(Number(c.speedLimitMbps)) }
+        : {}),
     });
   }
   for (const rawId of opts.clientUuids ?? []) {
@@ -1010,7 +1060,7 @@ export async function deployOrSyncVless(
           config = buildMinimalConfig(clientEntries, opts.vlessPort);
           log?.("Файл отсутствует или не JSON — записан минимальный конфиг.");
         }
-        ensureDeviceLimitPolicyLevels(config, clientEntries);
+        ensureClientPolicyLevels(config, clientEntries);
         ensureXrayStatsPolicyApi(config);
 
         hints = extractVlessLinkHintsFromConfig(config, opts.vlessPort);

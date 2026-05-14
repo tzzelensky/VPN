@@ -209,6 +209,8 @@ export type UserDto = {
   device_limit_enabled: boolean;
   /** Максимум устройств при включенном ограничении. */
   device_limit_count: number;
+  /** Лимит скорости, Мбит/с; 0 = без ограничения. */
+  speed_limit_mbps: number;
   /** К подписке дописываются последние 4 узла + happ (белые списки). По умолчанию выкл. */
   whitelist_happ_enabled: boolean;
   /** Активность по данным Xray (обновляется при опросе узлов). */
@@ -247,6 +249,7 @@ export type CreateUserPayload = {
   subscription_server_count?: number;
   device_limit_enabled?: boolean;
   device_limit_count?: number;
+  speed_limit_mbps?: number;
   whitelist_happ_enabled?: boolean;
 };
 

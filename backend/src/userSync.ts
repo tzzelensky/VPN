@@ -37,28 +37,42 @@ export async function resolveConfigPath(row: ServerRow, log?: SshLog): Promise<s
 let pushQueue: Promise<void> = Promise.resolve();
 /** Последняя успешно синхронизированная сигнатура UUID по server.id. */
 const lastSyncedSignatureByServerId = new Map<number, string>();
-/** Последняя успешно синхронизированная карта клиентов по server.id (id -> deviceLimit maxIPs). */
-const lastSyncedClientMapByServerId = new Map<number, Map<string, number | undefined>>();
+/** Последняя успешно синхронизированная карта клиентов по server.id (id -> policy). */
+const lastSyncedClientMapByServerId = new Map<number, Map<string, ClientPolicySnapshot>>();
+
+type ClientPolicySnapshot = { deviceLimit?: number; speedLimitMbps?: number };
+
+function policySnapshot(raw: ManagedClientInput): ClientPolicySnapshot {
+  const deviceLimit = Number(raw.deviceLimit);
+  const speedLimitMbps = Number(raw.speedLimitMbps);
+  const out: ClientPolicySnapshot = {};
+  if (Number.isFinite(deviceLimit) && deviceLimit > 0) out.deviceLimit = Math.floor(deviceLimit);
+  if (Number.isFinite(speedLimitMbps) && speedLimitMbps > 0) out.speedLimitMbps = Math.floor(speedLimitMbps);
+  return out;
+}
+
+function policySnapshotsEqual(a: ClientPolicySnapshot, b: ClientPolicySnapshot): boolean {
+  return (a.deviceLimit ?? 0) === (b.deviceLimit ?? 0) && (a.speedLimitMbps ?? 0) === (b.speedLimitMbps ?? 0);
+}
 
 function signatureForClients(clients: ManagedClientInput[]): string {
   return [...clients]
-    .map((c) => ({ id: String(c.id ?? "").trim(), deviceLimit: Number(c.deviceLimit) }))
+    .map((c) => ({
+      id: String(c.id ?? "").trim(),
+      ...policySnapshot(c),
+    }))
     .filter((c) => c.id)
     .sort((a, b) => a.id.localeCompare(b.id))
-    .map(
-      (c) =>
-        `${c.id}|${Number.isFinite(c.deviceLimit) && c.deviceLimit > 0 ? Math.floor(c.deviceLimit) : 0}`,
-    )
+    .map((c) => `${c.id}|${c.deviceLimit ?? 0}|${c.speedLimitMbps ?? 0}`)
     .join(",");
 }
 
-function mapFromClients(clients: ManagedClientInput[]): Map<string, number | undefined> {
-  const out = new Map<string, number | undefined>();
+function mapFromClients(clients: ManagedClientInput[]): Map<string, ClientPolicySnapshot> {
+  const out = new Map<string, ClientPolicySnapshot>();
   for (const raw of clients) {
     const id = String(raw.id ?? "").trim();
     if (!id) continue;
-    const lim = Number(raw.deviceLimit);
-    out.set(id, Number.isFinite(lim) && lim > 0 ? Math.floor(lim) : undefined);
+    out.set(id, policySnapshot(raw));
   }
   return out;
 }
@@ -83,6 +97,7 @@ function managedClientsForServer(serverUuid: string | null): ManagedClientInput[
       ...(u.device_limit_enabled === 1
         ? { deviceLimit: Math.max(1, Math.floor(Number(u.device_limit_count) || 1)) }
         : {}),
+      ...(u.speed_limit_mbps > 0 ? { speedLimitMbps: u.speed_limit_mbps } : {}),
     });
   }
   return out;
@@ -106,13 +121,13 @@ export async function pushClientListToAllDeployedServers(log?: SshLog): Promise<
         const add: ManagedClientInput[] = [];
         const rem: string[] = [];
         let hasMutableUpdates = false;
-        for (const [id, lim] of nextMap) {
-          if (!prevMap.has(id)) add.push({ id, ...(lim != null ? { deviceLimit: lim } : {}) });
-          else if ((prevMap.get(id) ?? undefined) !== lim) hasMutableUpdates = true;
+        for (const [id, snap] of nextMap) {
+          if (!prevMap.has(id)) add.push({ id, ...snap });
+          else if (!policySnapshotsEqual(prevMap.get(id) ?? {}, snap)) hasMutableUpdates = true;
         }
         for (const id of prevMap.keys()) if (!nextMap.has(id)) rem.push(id);
-        const addNeedsFullSync = add.some((c) => Number(c.deviceLimit) > 0);
-        // Быстрый путь без рестарта: только без лимита устройств (иначе не обновится policy.maxIPs в рантайме).
+        const addNeedsFullSync = add.some((c) => Number(c.deviceLimit) > 0 || Number(c.speedLimitMbps) > 0);
+        // Быстрый путь без рестарта: только без policy-лимитов (иначе не обновится policy в рантайме).
         if (
           !hasMutableUpdates &&
           !addNeedsFullSync &&
