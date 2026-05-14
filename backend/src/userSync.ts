@@ -10,10 +10,12 @@ import {
   alterInboundUsersViaApi,
   TZADMIN_XRAY_CONFIG_PATH,
   removeClientUuidFromTzadmin,
+  sshReadRemoteFile,
   syncServerClientUuids,
   type ManagedClientInput,
   type SshLog,
 } from "./ssh.js";
+import { enforceSpeedLimitsOnServer } from "./speedLimitEnforce.js";
 
 function sshCfg(row: ServerRow) {
   return {
@@ -103,6 +105,26 @@ function managedClientsForServer(serverUuid: string | null): ManagedClientInput[
   return out;
 }
 
+async function refreshSpeedLimitsOnServer(
+  row: ServerRow,
+  configPath: string,
+  clients: ManagedClientInput[],
+  log?: SshLog,
+): Promise<void> {
+  const rules = clients
+    .filter((c) => Number(c.speedLimitMbps) > 0)
+    .map((c) => ({ email: String(c.id ?? "").trim(), mbps: Math.floor(Number(c.speedLimitMbps) || 0) }))
+    .filter((r) => r.email && r.mbps > 0);
+  if (rules.length === 0) return;
+  try {
+    const raw = await sshReadRemoteFile(sshCfg(row), configPath, log);
+    const config = JSON.parse(raw.toString("utf8")) as Record<string, unknown>;
+    await enforceSpeedLimitsOnServer(sshCfg(row), config, rules, log);
+  } catch (e) {
+    log?.(`Лимит скорости на ${row.host}: ${e instanceof Error ? e.message : String(e)}`);
+  }
+}
+
 /** Обновить inbound на всех развёрнутых серверах по текущим пользователям в БД. */
 export async function pushClientListToAllDeployedServers(log?: SshLog): Promise<void> {
   const run = async () => {
@@ -113,6 +135,7 @@ export async function pushClientListToAllDeployedServers(log?: SshLog): Promise<
       const prevSig = lastSyncedSignatureByServerId.get(row.id);
       if (prevSig === sig) {
         log?.(`Синхронизация ${row.host} пропущена: список клиентов не изменился.`);
+        await refreshSpeedLimitsOnServer(row, path, clients, log);
         continue;
       }
       const nextMap = mapFromClients(clients);
@@ -143,6 +166,7 @@ export async function pushClientListToAllDeployedServers(log?: SshLog): Promise<
             log?.(`Быстрый sync ${row.host}: ${fast.detail}`);
             lastSyncedSignatureByServerId.set(row.id, sig);
             lastSyncedClientMapByServerId.set(row.id, nextMap);
+            await refreshSpeedLimitsOnServer(row, path, clients, log);
             continue;
           }
           log?.(`Быстрый sync недоступен на ${row.host}, fallback на полный sync: ${fast.detail}`);
@@ -181,11 +205,21 @@ export async function pushClientListToAllDeployedServers(log?: SshLog): Promise<
       }
       lastSyncedSignatureByServerId.set(row.id, sig);
       lastSyncedClientMapByServerId.set(row.id, nextMap);
+      await refreshSpeedLimitsOnServer(row, path, clients, log);
     }
   };
   const job = pushQueue.then(() => run());
   pushQueue = job.catch(() => {});
   await job;
+}
+
+/** Переприменить tc-лимиты по онлайн IP (без полного sync UUID). */
+export async function refreshSpeedLimitsOnAllDeployedServers(log?: SshLog): Promise<void> {
+  for (const row of listDeployedServers()) {
+    const path = await resolveConfigPath(row, log);
+    const clients = managedClientsForServer(row.vless_uuid);
+    await refreshSpeedLimitsOnServer(row, path, clients, log);
+  }
 }
 
 export async function removeUserUuidFromAllServers(userVlessUuid: string, log?: SshLog): Promise<void> {

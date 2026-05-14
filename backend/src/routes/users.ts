@@ -15,7 +15,7 @@ import {
   type UserRow,
 } from "../db.js";
 import { requireAuth } from "../middleware/requireAuth.js";
-import { pushClientListToAllDeployedServers, removeUserUuidFromAllServers } from "../userSync.js";
+import { pushClientListToAllDeployedServers, refreshSpeedLimitsOnAllDeployedServers, removeUserUuidFromAllServers } from "../userSync.js";
 import { initNdjsonStream, ndjsonLine, wantsNdjsonStream } from "../streamUtil.js";
 import { buildSubscriptionPayload } from "../vlessLink.js";
 import { subscriptionVlessLinksForUser } from "../subscriptionLinks.js";
@@ -95,6 +95,11 @@ router.post("/sync-stats", async (_req, res) => {
       await runAutoTrafficNotificationsOnce();
     } catch (e) {
       warns.push(`traffic-notify: ${e instanceof Error ? e.message : String(e)}`);
+    }
+    try {
+      await refreshSpeedLimitsOnAllDeployedServers();
+    } catch (e) {
+      warns.push(`speed-limit: ${e instanceof Error ? e.message : String(e)}`);
     }
     res.json({
       ok: errors.length === 0,

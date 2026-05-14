@@ -18,7 +18,7 @@ export type SshConfig = {
 };
 
 export type SshLog = (message: string) => void;
-/** maxIPs и uplinkSpeed/downlinkSpeed через policy.levels[level]; у клиента выставляется `level`. */
+/** maxIPs и bufferSize через policy.levels[level]; у клиента выставляется `level`. */
 export type ManagedClientInput = { id: string; deviceLimit?: number; speedLimitMbps?: number };
 
 const SPEED_POLICY_BASE = 10000;
@@ -52,9 +52,11 @@ export function clientPolicyLevel(entry: Pick<ManagedClientInput, "deviceLimit" 
   return combinedLimitPolicyLevel(Math.floor(dev), Math.floor(spd));
 }
 
-function xraySpeedMbpsTag(mbps: number): string {
-  return `${Math.max(1, Math.floor(mbps))}M`;
+function bufferSizeKbFromMbps(mbps: number): number {
+  const m = Math.max(1, Math.min(9999, Math.floor(mbps)));
+  return Math.max(4, Math.min(256, Math.ceil(m * 8)));
 }
+
 export const TZADMIN_XRAY_CONFIG_PATH = "/etc/tzadmin-xray/config.json";
 
 function exec(conn: Client, cmd: string): Promise<{ code: number | null; stdout: string; stderr: string }> {
@@ -396,7 +398,7 @@ export function ensureXrayStatsPolicyApi(config: Record<string, unknown>): void 
   config.routing = { ...prevRouting, rules };
 }
 
-/** Добавляет в config.policy.levels записи maxIPs и uplinkSpeed/downlinkSpeed. Вызывать до ensureXrayStatsPolicyApi. */
+/** Добавляет в config.policy.levels записи maxIPs и bufferSize. Вызывать до ensureXrayStatsPolicyApi. */
 export function ensureClientPolicyLevels(
   config: Record<string, unknown>,
   clientEntries: ManagedClientInput[],
@@ -425,12 +427,11 @@ export function ensureClientPolicyLevels(
     if (spec.maxIPs != null) lv.maxIPs = spec.maxIPs;
     else delete lv.maxIPs;
     if (spec.speedLimitMbps != null) {
-      const tag = xraySpeedMbpsTag(spec.speedLimitMbps);
-      lv.uplinkSpeed = tag;
-      lv.downlinkSpeed = tag;
+      lv.bufferSize = bufferSizeKbFromMbps(spec.speedLimitMbps);
+      lv.uplinkOnly = 0;
+      lv.downlinkOnly = 0;
     } else {
-      delete lv.uplinkSpeed;
-      delete lv.downlinkSpeed;
+      delete lv.bufferSize;
     }
     levels[k] = lv;
   }
