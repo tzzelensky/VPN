@@ -19,6 +19,7 @@ import DashboardLayout from "../components/DashboardLayout";
 import ImportUserModal from "../components/ImportUserModal";
 import Spinner from "../components/Spinner";
 import UserModal from "../components/UserModal";
+import { readUsersListCache, writeUsersListCache } from "../usersListCache";
 
 const BYTES_PER_GB = 1073741824;
 
@@ -139,13 +140,17 @@ function IconResetTraffic(p: SVGProps<SVGSVGElement>) {
 type UserModalState = { kind: "closed" } | { kind: "create" } | { kind: "edit"; user: UserDto };
 
 export default function UsersPage({ onLogout }: { onLogout: () => void }) {
-  const [users, setUsers] = useState<UserDto[]>([]);
+  const [users, setUsers] = useState<UserDto[]>(() => readUsersListCache()?.users ?? []);
   const [msg, setMsg] = useState<{ type: "ok" | "err"; text: string } | null>(null);
   const [refreshing, setRefreshing] = useState(false);
-  const [previews, setPreviews] = useState<Record<number, { count: number }>>({});
+  const [previews, setPreviews] = useState<Record<number, { count: number }>>(
+    () => readUsersListCache()?.previews ?? {},
+  );
   const [modal, setModal] = useState<UserModalState>({ kind: "closed" });
   const [importOpen, setImportOpen] = useState(false);
-  const [deployedServers, setDeployedServers] = useState<ServerDto[]>([]);
+  const [deployedServers, setDeployedServers] = useState<ServerDto[]>(
+    () => readUsersListCache()?.deployedServers ?? [],
+  );
   const [toggleBusyId, setToggleBusyId] = useState<number | null>(null);
   const [deleteBusyId, setDeleteBusyId] = useState<number | null>(null);
   const [copyBusyId, setCopyBusyId] = useState<number | null>(null);
@@ -218,12 +223,18 @@ export default function UsersPage({ onLogout }: { onLogout: () => void }) {
         }),
       );
       setPreviews(pv);
+      writeUsersListCache({
+        users: u,
+        previews: pv,
+        deployedServers: servers.filter((s) => s.vless_deployed),
+      });
     } finally {
       setRefreshing(false);
     }
   }, []);
 
   useEffect(() => {
+    if (readUsersListCache()) return;
     refresh().catch((e) => setMsg({ type: "err", text: String(e) }));
   }, [refresh]);
 
@@ -316,7 +327,7 @@ export default function UsersPage({ onLogout }: { onLogout: () => void }) {
                   <Spinner /> Обновление…
                 </>
               ) : (
-                "Обновление"
+                "Обновить"
               )}
             </button>
             {refreshing ? (

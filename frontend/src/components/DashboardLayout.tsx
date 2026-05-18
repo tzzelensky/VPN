@@ -1,6 +1,7 @@
 import { ReactNode } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
 import { logout } from "../api";
+import { clearUsersListCache } from "../usersListCache";
 
 export default function DashboardLayout({
   children,
@@ -13,6 +14,7 @@ export default function DashboardLayout({
 
   async function doLogout() {
     await logout();
+    clearUsersListCache();
     onLogout();
     nav("/login", { replace: true });
   }
