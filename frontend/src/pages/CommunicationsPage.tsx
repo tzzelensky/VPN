@@ -147,7 +147,7 @@ export default function CommunicationsPage({ onLogout }: { onLogout: () => void 
   async function reloadHistory() {
     setHistoryLoading(true);
     try {
-      const data = await listCommunicationHistory(200);
+      const data = await listCommunicationHistory(100);
       setHistory(data.items);
     } catch {
       setHistory([]);

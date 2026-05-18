@@ -2148,15 +2148,21 @@ th {
 }
 
 .comms-history-list {
+  --comms-history-gap: 0.65rem;
+  --comms-history-row: 7rem;
   display: flex;
   flex-direction: column;
-  gap: 0.65rem;
-  max-height: min(52vh, 520px);
+  gap: var(--comms-history-gap);
+  max-height: min(calc(10 * var(--comms-history-row) + 9 * var(--comms-history-gap)), 70dvh);
+  overflow-x: hidden;
   overflow-y: auto;
-  padding-right: 0.25rem;
+  overscroll-behavior: contain;
+  padding-right: 0.35rem;
+  scrollbar-gutter: stable;
 }
 
 .comms-history-item {
+  flex-shrink: 0;
   border: 1px solid var(--border);
   border-radius: 12px;
   padding: 0.75rem 0.85rem;
