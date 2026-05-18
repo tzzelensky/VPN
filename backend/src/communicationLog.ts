@@ -34,6 +34,11 @@ export function recipientFromChatId(chatId: number): LogRecipient | null {
 
 export function logCommunicationMessage(
   input: Omit<CommunicationMessageLogRow, "id" | "sent_at">,
-): CommunicationMessageLogRow {
-  return appendCommunicationMessageLog(input);
+): CommunicationMessageLogRow | null {
+  try {
+    return appendCommunicationMessageLog(input);
+  } catch (e) {
+    console.error("[communication-log]", e instanceof Error ? e.message : e);
+    return null;
+  }
 }

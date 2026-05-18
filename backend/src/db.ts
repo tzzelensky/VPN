@@ -13,6 +13,10 @@ import {
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const dataPath = process.env.DATA_PATH ?? path.join(__dirname, "..", "data.json");
 
+function communicationLogPath(): string {
+  return path.join(path.dirname(dataPath), "communication_message_log.json");
+}
+
 export type CreateUserInput = {
   name?: string;
   email?: string;
@@ -342,7 +346,6 @@ type FileStore = {
   promo_codes: PromoCodeRow[];
   promo_code_usages: PromoCodeUsageRow[];
   communication_segments: CommunicationSegmentRow[];
-  communication_message_log: CommunicationMessageLogRow[];
   dropper_game: DropperGameConfig;
   dropper_sessions: DropperSessionRow[];
   dropper_play_log: DropperPlayLogRow[];
@@ -485,7 +488,6 @@ function emptyStore(): FileStore {
     promo_codes: [],
     promo_code_usages: [],
     communication_segments: [],
-    communication_message_log: [],
     dropper_game: defaultDropperGame(),
     dropper_sessions: [],
     dropper_play_log: [],
@@ -983,12 +985,6 @@ function readStore(): FileStore {
     const communication_segments = commSegmentsRaw
       .map((x) => normalizeCommunicationSegment(x))
       .filter((x): x is CommunicationSegmentRow => x != null);
-    const commLogRaw = Array.isArray((parsed as { communication_message_log?: unknown }).communication_message_log)
-      ? (parsed as { communication_message_log: unknown[] }).communication_message_log
-      : [];
-    const communication_message_log = commLogRaw
-      .map((x) => normalizeCommunicationMessageLog(x))
-      .filter((x): x is CommunicationMessageLogRow => x != null);
     const dropperSessionsRaw = Array.isArray((parsed as { dropper_sessions?: unknown }).dropper_sessions)
       ? (parsed as { dropper_sessions: unknown[] }).dropper_sessions
       : [];
@@ -1018,7 +1014,6 @@ function readStore(): FileStore {
       promo_codes,
       promo_code_usages,
       communication_segments: communication_segments.length > 0 ? communication_segments : defaultCommunicationSegments(),
-      communication_message_log,
       dropper_game: normalizeDropperGame((parsed as { dropper_game?: unknown }).dropper_game),
       dropper_sessions,
       dropper_play_log,
@@ -2205,7 +2200,45 @@ export function getDropperAdminReport(): {
   };
 }
 
+function readCommunicationLogFile(): CommunicationMessageLogRow[] {
+  const p = communicationLogPath();
+  try {
+    const raw = JSON.parse(fs.readFileSync(p, "utf8")) as unknown;
+    if (!Array.isArray(raw)) return [];
+    return raw
+      .map((x) => normalizeCommunicationMessageLog(x))
+      .filter((x): x is CommunicationMessageLogRow => x != null);
+  } catch {
+    return [];
+  }
+}
+
+function writeCommunicationLogFile(rows: CommunicationMessageLogRow[]): void {
+  const p = communicationLogPath();
+  fs.mkdirSync(path.dirname(p), { recursive: true });
+  fs.writeFileSync(p, JSON.stringify(rows, null, 2), "utf8");
+}
+
+/** Однократно переносит журнал из data.json, если он был записан до выноса в отдельный файл. */
+function migrateEmbeddedCommunicationLog(): void {
+  if (readCommunicationLogFile().length > 0) return;
+  try {
+    if (!fs.existsSync(dataPath)) return;
+    const parsed = JSON.parse(fs.readFileSync(dataPath, "utf8")) as {
+      communication_message_log?: unknown;
+    };
+    const embedded = Array.isArray(parsed.communication_message_log) ? parsed.communication_message_log : [];
+    const rows = embedded
+      .map((x) => normalizeCommunicationMessageLog(x))
+      .filter((x): x is CommunicationMessageLogRow => x != null);
+    if (rows.length > 0) writeCommunicationLogFile(rows);
+  } catch {
+    /* ignore */
+  }
+}
+
 export function initDb(): void {
+  migrateEmbeddedCommunicationLog();
   if (!fs.existsSync(dataPath)) {
     writeStore(emptyStore());
     return;
@@ -2483,7 +2516,7 @@ const COMMUNICATION_LOG_MAX = 2000;
 
 export function listCommunicationMessageLog(limit = 200): CommunicationMessageLogRow[] {
   const cap = Math.max(1, Math.min(500, Math.floor(limit) || 200));
-  const rows = readStore().communication_message_log ?? [];
+  const rows = readCommunicationLogFile();
   return [...rows]
     .sort((a, b) => {
       const ta = Date.parse(a.sent_at);
@@ -2503,12 +2536,10 @@ export function appendCommunicationMessageLog(
     sent_at: now,
   });
   if (!row) throw new Error("communication_log_invalid");
-  const out = row;
-  mutate((store) => {
-    const prev = store.communication_message_log ?? [];
-    const next = [out, ...prev];
-    store.communication_message_log =
-      next.length > COMMUNICATION_LOG_MAX ? next.slice(0, COMMUNICATION_LOG_MAX) : next;
-  });
-  return out;
+  const prev = readCommunicationLogFile();
+  const next = [row, ...prev];
+  writeCommunicationLogFile(
+    next.length > COMMUNICATION_LOG_MAX ? next.slice(0, COMMUNICATION_LOG_MAX) : next,
+  );
+  return row;
 }
