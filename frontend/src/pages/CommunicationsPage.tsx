@@ -3,10 +3,12 @@ import DashboardLayout from "../components/DashboardLayout";
 import {
   createCommunicationSegment,
   deleteCommunicationSegment,
+  listCommunicationHistory,
   listCommunicationSegmentUsers,
   listCommunicationSegments,
   listCommunicationTargets,
   listPromoCodes,
+  type CommunicationMessageLogDto,
   patchCommunicationSegment,
   sendCommunication,
   type CommunicationSegmentDto,
@@ -138,6 +140,21 @@ export default function CommunicationsPage({ onLogout }: { onLogout: () => void 
   const [promoPickerOpen, setPromoPickerOpen] = useState(false);
   const [promoPickerBusy, setPromoPickerBusy] = useState(false);
   const [promoPickerRows, setPromoPickerRows] = useState<PromoCodeDto[]>([]);
+  const [history, setHistory] = useState<CommunicationMessageLogDto[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(true);
+  const [historyRecipients, setHistoryRecipients] = useState<CommunicationMessageLogDto | null>(null);
+
+  async function reloadHistory() {
+    setHistoryLoading(true);
+    try {
+      const data = await listCommunicationHistory(200);
+      setHistory(data.items);
+    } catch {
+      setHistory([]);
+    } finally {
+      setHistoryLoading(false);
+    }
+  }
 
   useEffect(() => {
     void (async () => {
@@ -150,6 +167,7 @@ export default function CommunicationsPage({ onLogout }: { onLogout: () => void 
         setMsg({ type: "err", text: String(e) });
       }
     })();
+    void reloadHistory();
   }, []);
 
   const reachable = useMemo(() => {
@@ -405,6 +423,7 @@ export default function CommunicationsPage({ onLogout }: { onLogout: () => void 
           : {}),
       });
       setLastResult(result);
+      await reloadHistory();
       if (result.ok) {
         setMsg({
           type: "ok",
@@ -908,6 +927,119 @@ export default function CommunicationsPage({ onLogout }: { onLogout: () => void 
               </button>
               <button type="button" className="primary" onClick={savePicker}>
                 Ок
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      <section className="panel comms-history-panel">
+        <h2 className="user-modal-section-title">История отправок</h2>
+        <p className="field-hint" style={{ marginTop: "0.25rem", marginBottom: "0.75rem" }}>
+          Все исходящие сообщения в Telegram: рассылки из панели и автоматические уведомления.
+        </p>
+        {historyLoading ? (
+          <p className="sub">Загрузка истории…</p>
+        ) : history.length === 0 ? (
+          <p className="sub">Пока нет записей — отправьте сообщение или дождитесь автоматического уведомления.</p>
+        ) : (
+          <div className="comms-history-list" role="log">
+            {history.map((item) => {
+              const when = new Date(item.sent_at);
+              const whenLabel = Number.isFinite(when.getTime())
+                ? when.toLocaleString("ru-RU", {
+                    day: "2-digit",
+                    month: "2-digit",
+                    year: "numeric",
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  })
+                : item.sent_at;
+              const many = item.recipients.length > 3;
+              return (
+                <article key={item.id} className="comms-history-item">
+                  <div className="comms-history-head">
+                    <time className="comms-history-time" dateTime={item.sent_at}>
+                      {whenLabel}
+                    </time>
+                    {item.automatic ? <span className="comms-history-badge">Авто</span> : null}
+                    <span className="comms-history-source">{item.source_label}</span>
+                    {item.segment_name ? (
+                      <span className="comms-history-segment" title={item.segment_id}>
+                        · {item.segment_name}
+                      </span>
+                    ) : null}
+                    {item.has_photo ? <span className="comms-history-photo" title="С фото">фото</span> : null}
+                    <span className="comms-history-stats">
+                      {item.sent}/{item.attempted}
+                      {item.failed > 0 ? ` · ошибок: ${item.failed}` : ""}
+                    </span>
+                  </div>
+                  <p className="comms-history-text">{item.text}</p>
+                  <div className="comms-history-recipients">
+                    {item.recipients.length === 0 ? (
+                      <span className="field-hint">Получатели не указаны</span>
+                    ) : many ? (
+                      <>
+                        <span className="comms-history-recipients-summary">
+                          {item.recipients.length} получателей
+                        </span>
+                        <button
+                          type="button"
+                          className="comms-recipients-eye"
+                          title="Показать список получателей"
+                          aria-label="Показать список получателей"
+                          onClick={() => setHistoryRecipients(item)}
+                        >
+                          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden>
+                            <path
+                              d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12Z"
+                              stroke="currentColor"
+                              strokeWidth="1.6"
+                            />
+                            <circle cx="12" cy="12" r="3" stroke="currentColor" strokeWidth="1.6" />
+                          </svg>
+                        </button>
+                      </>
+                    ) : (
+                      item.recipients.map((r) => (
+                        <span key={`${item.id}-${r.user_id}-${r.user_name}`} className="comms-chip">
+                          #{r.user_id} {r.user_name}
+                        </span>
+                      ))
+                    )}
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        )}
+      </section>
+
+      {historyRecipients ? (
+        <div className="modal-backdrop" onClick={() => setHistoryRecipients(null)}>
+          <div className="modal comms-recipients-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-head">
+              <h2>Получатели</h2>
+              <button type="button" className="ghost modal-close" onClick={() => setHistoryRecipients(null)}>
+                ×
+              </button>
+            </div>
+            <div className="modal-body">
+              <p className="field-hint" style={{ marginBottom: "0.65rem" }}>
+                {historyRecipients.source_label} · {historyRecipients.recipients.length} чел.
+              </p>
+              <div className="comms-recipients-modal-list">
+                {historyRecipients.recipients.map((r) => (
+                  <div key={`${historyRecipients.id}-${r.user_id}`} className="comms-recipients-modal-row">
+                    #{r.user_id} {r.user_name}
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div className="modal-footer">
+              <button type="button" className="primary" onClick={() => setHistoryRecipients(null)}>
+                Закрыть
               </button>
             </div>
           </div>

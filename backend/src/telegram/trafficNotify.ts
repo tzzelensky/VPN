@@ -1,3 +1,4 @@
+import { logCommunicationMessage, stripHtmlPreview } from "../communicationLog.js";
 import { listUsers, updateUserRow, type UserRow } from "../db.js";
 import { sendTelegramHtml } from "./api.js";
 import { getTelegramBotToken } from "./env.js";
@@ -41,6 +42,16 @@ async function sendLowTrafficReminder(u: UserRow, chatId: number): Promise<void>
     `У вас осталось примерно <b>${remainGbText(u)}</b> (меньше 30 ГБ).\n\n` +
     `Чтобы не потерять доступ, докупите пакет трафика.`;
   await sendTelegramHtml(chatId, body, buyGbReminderInline);
+  logCommunicationMessage({
+    automatic: true,
+    source_label: "Авто: мало трафика (<30 ГБ)",
+    text: stripHtmlPreview(body),
+    has_photo: false,
+    recipients: [{ user_id: u.id, user_name: u.name }],
+    sent: 1,
+    attempted: 1,
+    failed: 0,
+  });
 }
 
 async function sendEmptyTrafficReminder(u: UserRow, chatId: number): Promise<void> {
@@ -51,6 +62,16 @@ async function sendEmptyTrafficReminder(u: UserRow, chatId: number): Promise<voi
     `Лимит по подписке исчерпан, доступ может быть ограничен.\n\n` +
     `Нажмите «Докупить ГБ», чтобы сразу пополнить баланс.`;
   await sendTelegramHtml(chatId, body, buyGbReminderInline);
+  logCommunicationMessage({
+    automatic: true,
+    source_label: "Авто: трафик закончился",
+    text: stripHtmlPreview(body),
+    has_photo: false,
+    recipients: [{ user_id: u.id, user_name: u.name }],
+    sent: 1,
+    attempted: 1,
+    failed: 0,
+  });
 }
 
 export async function runAutoTrafficNotificationsOnce(): Promise<void> {

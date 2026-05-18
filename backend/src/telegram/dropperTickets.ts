@@ -1,3 +1,4 @@
+import { logCommunicationMessage, recipientFromChatId, stripHtmlPreview } from "../communicationLog.js";
 import { sendTelegramHtml } from "./api.js";
 import { getTelegramBotToken, getTelegramWebAppUrl } from "./env.js";
 import { escHtml } from "./format.js";
@@ -19,12 +20,23 @@ export async function notifyDropperTicketsAfterPurchase(chatId: number, ticketsA
       : ticketsAdded % 10 >= 2 && ticketsAdded % 10 <= 4 && (ticketsAdded % 100 < 10 || ticketsAdded % 100 >= 20)
         ? "билета"
         : "билетов";
-  await sendTelegramHtml(
-    chatId,
+  const body =
     `<b>+${ticketsAdded} ${word} на игру «Дроппер»!</b>\n\n` +
-      `Управляйте полётом пальцем, избегайте препятствий и приземлитесь на финиш — затем выберите подарок.`,
-    reply_markup,
-  );
+    `Управляйте полётом пальцем, избегайте препятствий и приземлитесь на финиш — затем выберите подарок.`;
+  await sendTelegramHtml(chatId, body, reply_markup);
+  const rec = recipientFromChatId(chatId);
+  if (rec) {
+    logCommunicationMessage({
+      automatic: true,
+      source_label: "Авто: билеты «Дроппер»",
+      text: stripHtmlPreview(body),
+      has_photo: false,
+      recipients: [rec],
+      sent: 1,
+      attempted: 1,
+      failed: 0,
+    });
+  }
 }
 
 /** Сообщение в чат после выбора приза в WebApp: на какую подписку начислено. */
@@ -41,8 +53,19 @@ export async function notifyDropperPrizeApplied(
     payload.kind === "gb"
       ? `+<b>${payload.amount}</b> ГБ трафика`
       : `+<b>${payload.amount}</b> дн. к сроку`;
-  await sendTelegramHtml(
-    chatId,
-    `🎮 <b>Приз «Дроппер» начислен</b>\n\n` + `${gift} на ${subLine}.`,
-  );
+  const body = `🎮 <b>Приз «Дроппер» начислен</b>\n\n` + `${gift} на ${subLine}.`;
+  await sendTelegramHtml(chatId, body);
+  const rec = recipientFromChatId(chatId);
+  if (rec) {
+    logCommunicationMessage({
+      automatic: true,
+      source_label: "Авто: приз «Дроппер»",
+      text: stripHtmlPreview(body),
+      has_photo: false,
+      recipients: [rec],
+      sent: 1,
+      attempted: 1,
+      failed: 0,
+    });
+  }
 }

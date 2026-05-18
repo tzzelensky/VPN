@@ -1,8 +1,10 @@
 import { Router } from "express";
+import { logCommunicationMessage, stripHtmlPreview } from "../communicationLog.js";
 import {
   createCommunicationSegment,
   deleteCommunicationSegment,
   getUser,
+  listCommunicationMessageLog,
   listCommunicationSegments,
   listUsers,
   updateCommunicationSegment,
@@ -145,6 +147,19 @@ function parseButtons(raw: unknown): CommInlineBtn[] {
 router.get("/segments", (_req, res) => {
   res.json({ segments: listCommunicationSegments() });
 });
+
+router.get("/history", (req, res) => {
+  const limit = Number(req.query.limit);
+  const rows = listCommunicationMessageLog(Number.isFinite(limit) ? limit : 200);
+  res.json({ items: rows });
+});
+
+const MODE_SOURCE_LABELS: Record<string, string> = {
+  global: "Рассылка: всем клиентам",
+  single: "Рассылка: одному клиенту",
+  selected: "Рассылка: выбранным клиентам",
+  segment: "Рассылка: по сегменту",
+};
 
 router.post("/segments", (req, res) => {
   try {
@@ -368,6 +383,26 @@ router.post("/send", async (req, res) => {
         error: e instanceof Error ? e.message : String(e),
       });
     }
+  }
+
+  const segment =
+    mode === "segment" ? listCommunicationSegments().find((s) => s.id === String(body.segment_id ?? "").trim()) : undefined;
+
+  try {
+    logCommunicationMessage({
+      automatic: false,
+      source_label: MODE_SOURCE_LABELS[mode] ?? "Рассылка из панели",
+      mode: mode as "global" | "single" | "selected" | "segment",
+      ...(segment ? { segment_id: segment.id, segment_name: segment.name } : {}),
+      text: stripHtmlPreview(caption),
+      has_photo: Boolean(photo),
+      recipients: targets.map((t) => ({ user_id: t.userId, user_name: t.userName })),
+      sent,
+      attempted: targets.length,
+      failed: failures.length,
+    });
+  } catch (e) {
+    console.error("[communications] log:", e);
   }
 
   res.json({

@@ -255,6 +255,28 @@ export type PromoCodeUsageRow = {
   session_id?: string;
 };
 
+export type CommunicationMessageRecipient = {
+  user_id: number;
+  user_name: string;
+};
+
+export type CommunicationMessageLogRow = {
+  id: string;
+  sent_at: string;
+  automatic: boolean;
+  /** Подпись в интерфейсе, напр. «Рассылка: всем» или «Авто: мало трафика». */
+  source_label: string;
+  mode?: "global" | "single" | "selected" | "segment";
+  segment_id?: string;
+  segment_name?: string;
+  text: string;
+  has_photo: boolean;
+  recipients: CommunicationMessageRecipient[];
+  sent: number;
+  attempted: number;
+  failed: number;
+};
+
 export type CommunicationSegmentRow = {
   id: string;
   name: string;
@@ -320,6 +342,7 @@ type FileStore = {
   promo_codes: PromoCodeRow[];
   promo_code_usages: PromoCodeUsageRow[];
   communication_segments: CommunicationSegmentRow[];
+  communication_message_log: CommunicationMessageLogRow[];
   dropper_game: DropperGameConfig;
   dropper_sessions: DropperSessionRow[];
   dropper_play_log: DropperPlayLogRow[];
@@ -462,6 +485,7 @@ function emptyStore(): FileStore {
     promo_codes: [],
     promo_code_usages: [],
     communication_segments: [],
+    communication_message_log: [],
     dropper_game: defaultDropperGame(),
     dropper_sessions: [],
     dropper_play_log: [],
@@ -535,6 +559,49 @@ function normalizeCommunicationSegment(raw: unknown): CommunicationSegmentRow | 
     preset_text: preset_enabled ? preset_text.slice(0, 4000) : "",
     created_at: String(o.created_at ?? new Date().toISOString()),
     updated_at: String(o.updated_at ?? o.created_at ?? new Date().toISOString()),
+  };
+}
+
+function normalizeCommunicationMessageLog(raw: unknown): CommunicationMessageLogRow | null {
+  if (!raw || typeof raw !== "object") return null;
+  const o = raw as Record<string, unknown>;
+  const id = String(o.id ?? "").trim();
+  const source_label = String(o.source_label ?? "").trim();
+  const text = String(o.text ?? "").trim();
+  if (!id || !source_label || !text) return null;
+  const recipientsRaw = Array.isArray(o.recipients) ? o.recipients : [];
+  const recipients: CommunicationMessageRecipient[] = [];
+  for (const r of recipientsRaw) {
+    if (!r || typeof r !== "object") continue;
+    const row = r as Record<string, unknown>;
+    const user_id = Math.floor(Number(row.user_id) || 0);
+    const user_name = String(row.user_name ?? "").trim();
+    if (!user_name) continue;
+    recipients.push({ user_id, user_name: user_name.slice(0, 200) });
+  }
+  const modeRaw = String(o.mode ?? "").trim();
+  const mode =
+    modeRaw === "global" || modeRaw === "single" || modeRaw === "selected" || modeRaw === "segment"
+      ? modeRaw
+      : undefined;
+  return {
+    id,
+    sent_at: String(o.sent_at ?? new Date().toISOString()),
+    automatic: o.automatic === true || o.automatic === 1 || o.automatic === "1",
+    source_label: source_label.slice(0, 160),
+    ...(mode ? { mode } : {}),
+    ...(o.segment_id != null && String(o.segment_id).trim()
+      ? { segment_id: String(o.segment_id).trim().slice(0, 64) }
+      : {}),
+    ...(o.segment_name != null && String(o.segment_name).trim()
+      ? { segment_name: String(o.segment_name).trim().slice(0, 120) }
+      : {}),
+    text: text.slice(0, 8000),
+    has_photo: o.has_photo === true || o.has_photo === 1 || o.has_photo === "1",
+    recipients,
+    sent: Math.max(0, Math.floor(Number(o.sent) || 0)),
+    attempted: Math.max(0, Math.floor(Number(o.attempted) || 0)),
+    failed: Math.max(0, Math.floor(Number(o.failed) || 0)),
   };
 }
 
@@ -916,6 +983,12 @@ function readStore(): FileStore {
     const communication_segments = commSegmentsRaw
       .map((x) => normalizeCommunicationSegment(x))
       .filter((x): x is CommunicationSegmentRow => x != null);
+    const commLogRaw = Array.isArray((parsed as { communication_message_log?: unknown }).communication_message_log)
+      ? (parsed as { communication_message_log: unknown[] }).communication_message_log
+      : [];
+    const communication_message_log = commLogRaw
+      .map((x) => normalizeCommunicationMessageLog(x))
+      .filter((x): x is CommunicationMessageLogRow => x != null);
     const dropperSessionsRaw = Array.isArray((parsed as { dropper_sessions?: unknown }).dropper_sessions)
       ? (parsed as { dropper_sessions: unknown[] }).dropper_sessions
       : [];
@@ -945,6 +1018,7 @@ function readStore(): FileStore {
       promo_codes,
       promo_code_usages,
       communication_segments: communication_segments.length > 0 ? communication_segments : defaultCommunicationSegments(),
+      communication_message_log,
       dropper_game: normalizeDropperGame((parsed as { dropper_game?: unknown }).dropper_game),
       dropper_sessions,
       dropper_play_log,
@@ -2403,4 +2477,38 @@ export function deleteCommunicationSegment(id: string): boolean {
     }
   });
   return removed;
+}
+
+const COMMUNICATION_LOG_MAX = 2000;
+
+export function listCommunicationMessageLog(limit = 200): CommunicationMessageLogRow[] {
+  const cap = Math.max(1, Math.min(500, Math.floor(limit) || 200));
+  const rows = readStore().communication_message_log ?? [];
+  return [...rows]
+    .sort((a, b) => {
+      const ta = Date.parse(a.sent_at);
+      const tb = Date.parse(b.sent_at);
+      return (Number.isFinite(tb) ? tb : 0) - (Number.isFinite(ta) ? ta : 0);
+    })
+    .slice(0, cap);
+}
+
+export function appendCommunicationMessageLog(
+  input: Omit<CommunicationMessageLogRow, "id" | "sent_at">,
+): CommunicationMessageLogRow {
+  const now = new Date().toISOString();
+  const row = normalizeCommunicationMessageLog({
+    ...input,
+    id: randomBytes(8).toString("hex"),
+    sent_at: now,
+  });
+  if (!row) throw new Error("communication_log_invalid");
+  const out = row;
+  mutate((store) => {
+    const prev = store.communication_message_log ?? [];
+    const next = [out, ...prev];
+    store.communication_message_log =
+      next.length > COMMUNICATION_LOG_MAX ? next.slice(0, COMMUNICATION_LOG_MAX) : next;
+  });
+  return out;
 }

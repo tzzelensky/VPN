@@ -28,6 +28,7 @@ import {
   type TopUpShopPlanRow,
   type UserRow,
 } from "../db.js";
+import { logCommunicationMessage, recipientFromChatId, stripHtmlPreview } from "../communicationLog.js";
 import { pushClientListToAllDeployedServers } from "../userSync.js";
 import { answerCallbackQuery, sendTelegramHtml, sendTelegramPhoto } from "./api.js";
 import { notifyDropperTicketsAfterPurchase } from "./dropperTickets.js";
@@ -807,6 +808,23 @@ export async function onAdminPaymentConfirm(
       (affectedList ? `\n<b>Обновлённые подписки:</b>\n${affectedList}\n` : "") +
       `Актуальные дата и трафик — в разделе «Статистика по подписке».`;
   await sendTelegramHtml(sess.tg_chat_id, body, replyKeyboardForPayer(sess.tg_chat_id));
+  const targetUser =
+    sess.target_user_id != null && sess.target_user_id > 0 ? getUser(sess.target_user_id) : findUsersByTelegramChatId(sess.tg_chat_id)[0];
+  const rec = targetUser
+    ? { user_id: targetUser.id, user_name: targetUser.name }
+    : recipientFromChatId(sess.tg_chat_id);
+  if (rec) {
+    logCommunicationMessage({
+      automatic: true,
+      source_label: "Авто: оплата подтверждена",
+      text: stripHtmlPreview(body),
+      has_photo: false,
+      recipients: [rec],
+      sent: 1,
+      attempted: 1,
+      failed: 0,
+    });
+  }
 }
 
 function escUrlForCode(url: string): string {
@@ -845,21 +863,35 @@ export async function onReferralRewardChosen(
     updateUserRow(inviter.id, { total_gb: inviter.total_gb + reward.reward_gb });
     claimReferralReward(reward.id, "gb");
     await answerCallbackQuery(callbackQueryId, { text: `Начислено +${reward.reward_gb} ГБ` });
-    await sendTelegramHtml(
-      tgFromId,
-      `🎁 Начислено <b>+${reward.reward_gb} ГБ</b> на вашу текущую подписку.`,
-      backHomeRow,
-    );
+    const refBody = `🎁 Начислено <b>+${reward.reward_gb} ГБ</b> на вашу текущую подписку.`;
+    await sendTelegramHtml(tgFromId, refBody, backHomeRow);
+    logCommunicationMessage({
+      automatic: true,
+      source_label: "Авто: реферальная награда (ГБ)",
+      text: stripHtmlPreview(refBody),
+      has_photo: false,
+      recipients: [{ user_id: inviter.id, user_name: inviter.name }],
+      sent: 1,
+      attempted: 1,
+      failed: 0,
+    });
   } else {
     const base = Math.max(Date.now(), inviter.expiry_time > 0 ? inviter.expiry_time : 0);
     updateUserRow(inviter.id, { expiry_time: snapExpiryTimeToNoonLocal(base + reward.reward_days * DAY_MS) });
     claimReferralReward(reward.id, "days");
     await answerCallbackQuery(callbackQueryId, { text: `Добавлено +${reward.reward_days} дней` });
-    await sendTelegramHtml(
-      tgFromId,
-      `🎁 Срок вашей подписки продлен на <b>${reward.reward_days} дней</b>.`,
-      backHomeRow,
-    );
+    const refBody = `🎁 Срок вашей подписки продлен на <b>${reward.reward_days} дней</b>.`;
+    await sendTelegramHtml(tgFromId, refBody, backHomeRow);
+    logCommunicationMessage({
+      automatic: true,
+      source_label: "Авто: реферальная награда (дни)",
+      text: stripHtmlPreview(refBody),
+      has_photo: false,
+      recipients: [{ user_id: inviter.id, user_name: inviter.name }],
+      sent: 1,
+      attempted: 1,
+      failed: 0,
+    });
   }
   try {
     await pushClientListToAllDeployedServers();
@@ -884,9 +916,24 @@ export async function onAdminPaymentReject(
   }
   await answerCallbackQuery(callbackQueryId, { text: "Отклонено." });
   deletePaymentSession(sessionId);
-  await sendTelegramHtml(
-    sess.tg_chat_id,
-    "<b>Платёж не подтверждён.</b>\n\nЕсли вы уже оплатили, напишите администратору и приложите чек ещё раз через «Оплата подписки», «Докупить ГБ» или «Купить подписку».",
-    replyKeyboardForPayer(sess.tg_chat_id),
-  );
+  const rejectBody =
+    "<b>Платёж не подтверждён.</b>\n\nЕсли вы уже оплатили, напишите администратору и приложите чек ещё раз через «Оплата подписки», «Докупить ГБ» или «Купить подписку».";
+  await sendTelegramHtml(sess.tg_chat_id, rejectBody, replyKeyboardForPayer(sess.tg_chat_id));
+  const targetUser =
+    sess.target_user_id != null && sess.target_user_id > 0 ? getUser(sess.target_user_id) : findUsersByTelegramChatId(sess.tg_chat_id)[0];
+  const rec = targetUser
+    ? { user_id: targetUser.id, user_name: targetUser.name }
+    : recipientFromChatId(sess.tg_chat_id);
+  if (rec) {
+    logCommunicationMessage({
+      automatic: true,
+      source_label: "Авто: платёж отклонён",
+      text: stripHtmlPreview(rejectBody),
+      has_photo: false,
+      recipients: [rec],
+      sent: 1,
+      attempted: 1,
+      failed: 0,
+    });
+  }
 }

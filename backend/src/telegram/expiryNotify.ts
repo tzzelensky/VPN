@@ -1,3 +1,4 @@
+import { logCommunicationMessage, stripHtmlPreview } from "../communicationLog.js";
 import type { UserRow } from "../db.js";
 import { sendTelegramHtml } from "./api.js";
 import { getTelegramBotToken } from "./env.js";
@@ -30,7 +31,7 @@ function throughDaysHtml(n: number): string {
   return `через <b>${n} дней</b>`;
 }
 
-export async function sendExpiryRenewalReminder(u: UserRow): Promise<void> {
+export async function sendExpiryRenewalReminder(u: UserRow, opts?: { manual?: boolean }): Promise<void> {
   if (!getTelegramBotToken()) {
     const e = new Error("telegram_not_configured");
     throw e;
@@ -43,4 +44,14 @@ export async function sendExpiryRenewalReminder(u: UserRow): Promise<void> {
     `<b>Подписка «${escHtml(String(u.name ?? "Без названия"))}» заканчивается</b> ${throughDaysHtml(g.daysShown)}.\n\n` +
     `Для продолжения пользования подпиской <b>оплатите</b> её.`;
   await sendTelegramHtml(g.chatId, body, payReminderInline);
+  logCommunicationMessage({
+    automatic: !opts?.manual,
+    source_label: opts?.manual ? "Напоминание о сроке (карточка клиента)" : "Авто: срок подписки (≤3 дня)",
+    text: stripHtmlPreview(body),
+    has_photo: false,
+    recipients: [{ user_id: u.id, user_name: u.name }],
+    sent: 1,
+    attempted: 1,
+    failed: 0,
+  });
 }

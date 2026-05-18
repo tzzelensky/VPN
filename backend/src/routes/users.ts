@@ -334,7 +334,7 @@ router.post("/:id(\\d+)/notify-expiry", async (req, res) => {
   if (b.tg_id !== undefined) effective.tg_id = String(b.tg_id ?? "").trim();
   if (b.expiry_time !== undefined) effective.expiry_time = coerceExpiryTimeMs(b.expiry_time);
   try {
-    await sendExpiryRenewalReminder(effective);
+    await sendExpiryRenewalReminder(effective, { manual: true });
     res.json({ ok: true });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);

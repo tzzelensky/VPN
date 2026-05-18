@@ -523,6 +523,29 @@ export async function deleteCommunicationSegment(id: string): Promise<{ ok: bool
   return handle(res);
 }
 
+export type CommunicationMessageLogDto = {
+  id: string;
+  sent_at: string;
+  automatic: boolean;
+  source_label: string;
+  mode?: "global" | "single" | "selected" | "segment";
+  segment_id?: string;
+  segment_name?: string;
+  text: string;
+  has_photo: boolean;
+  recipients: Array<{ user_id: number; user_name: string }>;
+  sent: number;
+  attempted: number;
+  failed: number;
+};
+
+export async function listCommunicationHistory(limit = 200): Promise<{ items: CommunicationMessageLogDto[] }> {
+  const res = await fetch(`/api/communications/history?limit=${encodeURIComponent(String(limit))}`, {
+    credentials: "include",
+  });
+  return handle(res);
+}
+
 export async function listCommunicationSegmentUsers(id: string): Promise<{ users: Array<{ id: number; name: string; tg_id: string }> }> {
   const res = await fetch(`/api/communications/segments/${encodeURIComponent(id)}/users`, { credentials: "include" });
   return handle(res);

@@ -9,6 +9,7 @@ import {
   setReferralInvite,
   updateUserRow,
 } from "../db.js";
+import { logCommunicationMessage, stripHtmlPreview } from "../communicationLog.js";
 import { answerCallbackQuery, sendTelegramHtml, sendTelegramPhoto } from "./api.js";
 import { escHtml, formatStatsHtml } from "./format.js";
 import {
@@ -379,13 +380,26 @@ export async function handleTelegramUpdate(body: unknown): Promise<void> {
       return;
     }
     try {
+      const outbound =
+        msg.photo?.length
+          ? `<b>Сообщение от администратора</b>\n\n${escHtml(payloadText)}`
+          : `<b>Сообщение от администратора</b>\n\n${escHtml(payloadText)}`;
       if (msg.photo?.length) {
         const fileId = msg.photo[msg.photo.length - 1]!.file_id;
-        const caption = `<b>Сообщение от администратора</b>\n\n${escHtml(payloadText)}`;
-        await sendTelegramPhoto(toChat, fileId, caption, { parse_mode: "HTML" });
+        await sendTelegramPhoto(toChat, fileId, outbound, { parse_mode: "HTML" });
       } else {
-        await sendTelegramHtml(toChat, `<b>Сообщение от администратора</b>\n\n${escHtml(payloadText)}`);
+        await sendTelegramHtml(toChat, outbound);
       }
+      logCommunicationMessage({
+        automatic: false,
+        source_label: "Сообщение из Telegram-бота",
+        text: stripHtmlPreview(outbound),
+        has_photo: Boolean(msg.photo?.length),
+        recipients: [{ user_id: target.id, user_name: target.name }],
+        sent: 1,
+        attempted: 1,
+        failed: 0,
+      });
       adminComposeTargetByChat.delete(chatId);
       await sendTelegramHtml(chatId, "Сообщение отправлено пользователю.", mainMenuInline(true));
     } catch (e) {
