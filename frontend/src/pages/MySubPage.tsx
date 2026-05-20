@@ -13,6 +13,21 @@ import {
 
 type Tab = "home" | "subscription" | "game" | "friends" | "profile";
 
+const MYSUB_THEME_KEY = "mysub_theme";
+type MySubTheme = "dark" | "light";
+
+function readMySubTheme(): MySubTheme {
+  try {
+    const s = localStorage.getItem(MYSUB_THEME_KEY);
+    if (s === "light" || s === "dark") return s;
+  } catch {
+    /* ignore */
+  }
+  const tg = (window as unknown as { Telegram?: { WebApp?: { colorScheme?: string } } }).Telegram?.WebApp;
+  if (tg?.colorScheme === "light") return "light";
+  return "dark";
+}
+
 /** Если название не ввели: имя последней подписки (max id) + порядковый номер (следующий по счёту). */
 function defaultNewSubscriptionName(subs: MySubProfileDto["subscriptions"]): string {
   const ord = subs.length + 1;
@@ -108,6 +123,50 @@ export default function MySubPage() {
   const [dropperPracticeSkipNextHint, setDropperPracticeSkipNextHint] = useState(false);
   const [dropperNoTickets, setDropperNoTickets] = useState(false);
   const [dropperStartBusy, setDropperStartBusy] = useState(false);
+  const [theme, setTheme] = useState<MySubTheme>(() => readMySubTheme());
+
+  function applyMySubTheme(next: MySubTheme) {
+    setTheme(next);
+    try {
+      localStorage.setItem(MYSUB_THEME_KEY, next);
+    } catch {
+      /* ignore */
+    }
+  }
+
+  useEffect(() => {
+    const root = document.documentElement;
+    const tg = (
+      window as unknown as {
+        Telegram?: {
+          WebApp?: {
+            setHeaderColor?: (c: string) => void;
+            setBackgroundColor?: (c: string) => void;
+          };
+        };
+      }
+    ).Telegram?.WebApp;
+    if (theme === "light") {
+      root.classList.add("mysub-app-light");
+      try {
+        tg?.setHeaderColor?.("#f8fafc");
+        tg?.setBackgroundColor?.("#f1f5f9");
+      } catch {
+        /* ignore */
+      }
+    } else {
+      root.classList.remove("mysub-app-light");
+      try {
+        tg?.setHeaderColor?.("#0c0f14");
+        tg?.setBackgroundColor?.("#050913");
+      } catch {
+        /* ignore */
+      }
+    }
+    return () => {
+      root.classList.remove("mysub-app-light");
+    };
+  }, [theme]);
 
   function getInitData(): string {
     const tgWebApp = (window as unknown as {
@@ -517,7 +576,7 @@ export default function MySubPage() {
 
   return (
     <div
-      className={`mysub-wrap ${dropperPlaying ? "mysub-wrap--dropper-play" : ""} ${isGameTab ? "mysub-wrap--game-tab" : ""}`.trim()}
+      className={`mysub-wrap ${theme === "light" ? "mysub-wrap--light" : ""} ${dropperPlaying ? "mysub-wrap--dropper-play" : ""} ${isGameTab ? "mysub-wrap--game-tab" : ""}`.trim()}
     >
       {!err && !data ? (
         <div className="mysub-loading-screen" aria-live="polite">
@@ -1024,6 +1083,28 @@ export default function MySubPage() {
                         </button>
                       ))
                     )}
+                  </div>
+                </div>
+                <div className="mysub-sub-box" style={{ marginTop: "0.65rem" }}>
+                  <p style={{ margin: 0, fontWeight: 600 }}>Оформление</p>
+                  <p className="sub" style={{ marginTop: "0.35rem", marginBottom: "0.5rem" }}>
+                    Тема интерфейса мини-приложения
+                  </p>
+                  <div className="mysub-theme-toggle" role="group" aria-label="Выбор темы">
+                    <button
+                      type="button"
+                      className={theme === "dark" ? "primary" : "ghost"}
+                      onClick={() => applyMySubTheme("dark")}
+                    >
+                      Тёмная
+                    </button>
+                    <button
+                      type="button"
+                      className={theme === "light" ? "primary" : "ghost"}
+                      onClick={() => applyMySubTheme("light")}
+                    >
+                      Светлая
+                    </button>
                   </div>
                 </div>
                 <div className="row-actions" style={{ marginTop: "0.75rem" }}>

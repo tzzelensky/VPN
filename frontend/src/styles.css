@@ -3035,6 +3035,335 @@ th {
   }
 }
 
+/* --- MySub: светлая тема (переключатель в «Профиль») --- */
+html.mysub-app-light {
+  color-scheme: light;
+  --bg: #f1f5f9;
+  --panel: #ffffff;
+  --border: #e2e8f0;
+  --text: #0f172a;
+  --muted: #64748b;
+  --accent: #2563eb;
+  --accent-dim: #1d4ed8;
+}
+
+html.mysub-app-light body {
+  background: linear-gradient(180deg, #f8fafc 0%, #e2e8f0 100%);
+  color: var(--text);
+}
+
+html.mysub-app-light .flash.err {
+  color: #b91c1c;
+  background: rgba(254, 242, 242, 0.95);
+}
+
+html.mysub-app-light .flash.ok {
+  color: #166534;
+  background: rgba(240, 253, 244, 0.95);
+}
+
+html.mysub-app-light .modal-backdrop {
+  background: rgba(15, 23, 42, 0.35);
+}
+
+html.mysub-app-light .modal {
+  box-shadow: 0 24px 60px rgba(15, 23, 42, 0.12);
+}
+
+.mysub-theme-toggle {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.5rem;
+}
+
+.mysub-wrap--light {
+  color: var(--text);
+  background:
+    radial-gradient(720px 360px at -10% -12%, rgba(59, 130, 246, 0.14) 0%, transparent 60%),
+    radial-gradient(640px 300px at 110% 14%, rgba(139, 92, 246, 0.1) 0%, transparent 58%),
+    linear-gradient(180deg, #f8fafc 0%, #e8edf3 100%);
+}
+
+.mysub-wrap--light .mysub-card {
+  background: linear-gradient(160deg, rgba(255, 255, 255, 0.96), rgba(248, 250, 252, 0.98));
+  border-color: rgba(15, 23, 42, 0.08);
+  box-shadow:
+    0 22px 50px rgba(15, 23, 42, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.85),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.5);
+}
+
+.mysub-wrap--light .mysub-card::before {
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.12), transparent 32%, transparent 72%, rgba(139, 92, 246, 0.08));
+  opacity: 0.95;
+}
+
+.mysub-wrap--light .mysub-name {
+  color: var(--text);
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.9);
+}
+
+.mysub-wrap--light .mysub-avatar,
+.mysub-wrap--light .mysub-avatar-fallback {
+  border-color: rgba(15, 23, 42, 0.12);
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.08);
+}
+
+.mysub-wrap--light .mysub-avatar-fallback {
+  background: rgba(59, 130, 246, 0.12);
+  color: var(--text);
+}
+
+.mysub-wrap--light .mysub-section {
+  border-color: rgba(15, 23, 42, 0.08);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(248, 250, 252, 0.94));
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.65),
+    0 10px 24px rgba(15, 23, 42, 0.06);
+}
+
+.mysub-wrap--light .mysub-section:hover {
+  border-color: rgba(59, 130, 246, 0.2);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.8),
+    0 14px 28px rgba(15, 23, 42, 0.08);
+}
+
+.mysub-wrap--light .mysub-sub-box {
+  border-color: rgba(15, 23, 42, 0.08);
+  background: rgba(255, 255, 255, 0.88);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.75),
+    0 6px 16px rgba(15, 23, 42, 0.04);
+}
+
+.mysub-wrap--light .mysub-url {
+  border-color: rgba(15, 23, 42, 0.1);
+  background: rgba(241, 245, 249, 0.95);
+  color: var(--text);
+  box-shadow: inset 0 0 0 1px rgba(59, 130, 246, 0.06);
+}
+
+.mysub-wrap--light .mysub-hero-badge {
+  color: #1e40af;
+  border-color: rgba(59, 130, 246, 0.35);
+  background: linear-gradient(180deg, rgba(59, 130, 246, 0.12), rgba(59, 130, 246, 0.04));
+}
+
+.mysub-wrap--light .mysub-hero-badge.muted {
+  color: var(--muted);
+  border-color: rgba(15, 23, 42, 0.12);
+  background: rgba(241, 245, 249, 0.9);
+}
+
+.mysub-wrap--light .mysub-stat-list > div {
+  border-color: rgba(15, 23, 42, 0.08);
+  background: rgba(248, 250, 252, 0.95);
+  color: var(--muted);
+}
+
+.mysub-wrap--light .mysub-bottom-actions {
+  border-color: rgba(15, 23, 42, 0.1);
+  background: rgba(255, 255, 255, 0.92);
+  backdrop-filter: blur(14px);
+}
+
+.mysub-wrap--light .mysub-nav-btn {
+  color: var(--muted);
+}
+
+.mysub-wrap--light .mysub-nav-btn.active {
+  color: #1e3a5f;
+  border-color: rgba(59, 130, 246, 0.35);
+  background: linear-gradient(180deg, rgba(59, 130, 246, 0.14), rgba(59, 130, 246, 0.05));
+  box-shadow: inset 0 0 0 1px rgba(59, 130, 246, 0.12);
+}
+
+.mysub-wrap--light .mysub-nav-btn:hover {
+  color: var(--text);
+  border-color: rgba(15, 23, 42, 0.12);
+}
+
+.mysub-wrap--light .mysub-card .primary {
+  box-shadow: 0 10px 22px rgba(37, 99, 235, 0.22);
+}
+
+.mysub-wrap--light .mysub-card .ghost {
+  background: rgba(255, 255, 255, 0.85);
+  border-color: rgba(15, 23, 42, 0.1);
+}
+
+.mysub-wrap--light .mysub-card .ghost:hover {
+  background: #f8fafc;
+  border-color: rgba(15, 23, 42, 0.16);
+}
+
+.mysub-wrap--light .mysub-card select,
+.mysub-wrap--light .mysub-card input:not([type="checkbox"]):not([type="radio"]),
+.mysub-wrap--light .mysub-card input[type="file"] {
+  border-color: rgba(15, 23, 42, 0.12);
+  background: rgba(255, 255, 255, 0.95);
+  color: var(--text);
+}
+
+.mysub-wrap--light .mysub-pay-link-btn {
+  border-color: rgba(59, 130, 246, 0.35);
+  background: rgba(59, 130, 246, 0.08);
+  color: #1d4ed8;
+}
+
+.mysub-wrap--light .mysub-pay-step-badge {
+  color: #1e40af;
+  background: linear-gradient(180deg, rgba(59, 130, 246, 0.2), rgba(59, 130, 246, 0.08));
+  border-color: rgba(59, 130, 246, 0.28);
+}
+
+.mysub-wrap--light .mysub-promo-feedback.ok {
+  color: #15803d;
+}
+
+.mysub-wrap--light .mysub-promo-feedback.err {
+  color: #dc2626;
+}
+
+.mysub-wrap--light .mysub-plan-card {
+  border-color: rgba(15, 23, 42, 0.1);
+  background: rgba(248, 250, 252, 0.95);
+  color: var(--text);
+}
+
+.mysub-wrap--light .mysub-plan-card:hover {
+  border-color: rgba(59, 130, 246, 0.28);
+  background: #ffffff;
+}
+
+.mysub-wrap--light .mysub-plan-card.is-selected {
+  border-color: rgba(59, 130, 246, 0.45);
+  background: linear-gradient(180deg, rgba(59, 130, 246, 0.1), rgba(59, 130, 246, 0.03));
+  box-shadow: inset 0 0 0 1px rgba(59, 130, 246, 0.15);
+}
+
+.mysub-wrap--light .mysub-highlight-box {
+  border-color: rgba(59, 130, 246, 0.2);
+  background: linear-gradient(180deg, rgba(239, 246, 255, 0.95), rgba(219, 234, 254, 0.5));
+  color: var(--text);
+}
+
+.mysub-wrap--light .mysub-highlight-box b {
+  color: #1e3a8a;
+}
+
+.mysub-wrap--light .mysub-highlight-box span {
+  color: var(--muted);
+}
+
+.mysub-wrap--light .mysub-file-btn {
+  border-color: rgba(15, 23, 42, 0.12);
+  background: rgba(248, 250, 252, 0.95);
+  color: var(--text);
+}
+
+.mysub-wrap--light .mysub-modal {
+  border-color: rgba(15, 23, 42, 0.1);
+  box-shadow: 0 22px 50px rgba(15, 23, 42, 0.12);
+}
+
+.mysub-wrap--light .mysub-modal .modal-footer {
+  border-top-color: rgba(15, 23, 42, 0.08);
+}
+
+.mysub-wrap--light .mysub-loading-screen {
+  background: rgba(248, 250, 252, 0.72);
+  backdrop-filter: blur(4px);
+}
+
+.mysub-wrap--light .mysub-loading-screen .sub {
+  color: var(--muted);
+}
+
+.mysub-wrap--light .mysub-loader-ring {
+  border-color: rgba(15, 23, 42, 0.12);
+  border-top-color: #3b82f6;
+  border-right-color: #34d399;
+}
+
+.mysub-wrap--light .mysub-friend-row {
+  border-color: rgba(15, 23, 42, 0.06);
+}
+
+.mysub-wrap--light .mysub-gift-btn {
+  border-color: rgba(15, 23, 42, 0.1);
+  background: rgba(255, 255, 255, 0.9);
+}
+
+/* Вкладка «Игра»: светлее, но пиксель-стиль кнопок сохраняем */
+.mysub-wrap--light.mysub-wrap--game-tab {
+  background-color: #e8f5e9;
+  background-image:
+    repeating-linear-gradient(
+      95deg,
+      transparent 0 52px,
+      rgba(46, 125, 50, 0.12) 52px 54px,
+      transparent 54px 104px
+    ),
+    repeating-linear-gradient(
+      88deg,
+      transparent 0 78px,
+      rgba(56, 142, 60, 0.1) 78px 80px,
+      transparent 80px 160px
+    ),
+    radial-gradient(ellipse 120% 80% at 50% -10%, rgba(102, 187, 106, 0.35) 0%, transparent 55%),
+    linear-gradient(180deg, #f1f8e9 0%, #e8f5e9 38%, #c8e6c9 100%);
+}
+
+.mysub-wrap--light.mysub-wrap--game-tab::before {
+  opacity: 0.25;
+}
+
+.mysub-wrap--light .mysub-nav-btn--game:not(.active) {
+  border-color: rgba(46, 125, 50, 0.35);
+  background: linear-gradient(180deg, rgba(200, 230, 201, 0.65), rgba(165, 214, 167, 0.35));
+  color: #1b5e20;
+}
+
+.mysub-wrap--light .mysub-nav-btn--game.active {
+  color: #0d3d12;
+  border-color: rgba(46, 125, 50, 0.5);
+  background: linear-gradient(180deg, rgba(165, 214, 167, 0.85), rgba(129, 199, 132, 0.45));
+}
+
+.mysub-wrap--light .mysub-nav-btn--game-muted {
+  color: rgba(15, 23, 42, 0.35) !important;
+  border-color: rgba(15, 23, 42, 0.08) !important;
+  background: rgba(255, 255, 255, 0.45) !important;
+}
+
+.mysub-wrap--light .mysub-nav-btn--game-muted.active {
+  color: rgba(30, 58, 95, 0.75) !important;
+  border-color: rgba(15, 23, 42, 0.12) !important;
+  background: rgba(255, 255, 255, 0.62) !important;
+}
+
+.mysub-wrap--light .mysub-no-sub-text {
+  color: #2e7d32;
+}
+
+.mysub-wrap--light .mysub-dropper-hero-title {
+  color: #1b5e20;
+  text-shadow:
+    0 0 1px rgba(255, 255, 255, 0.8),
+    2px 2px 0 #c8e6c9,
+    -1px -1px 0 #a5d6a7;
+}
+
+.mysub-wrap--light .mysub-dropper-tickets {
+  color: #2e7d32;
+}
+
+.mysub-wrap--light .mysub-dropper-pixel-hint {
+  color: #37474f;
+}
+
 /* --- MySub: Дроппер (WebApp) --- */
 .mysub-wrap--game-tab {
   width: 100%;
