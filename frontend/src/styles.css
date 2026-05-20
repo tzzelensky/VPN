@@ -3243,6 +3243,15 @@ html.mysub-app-light .modal {
   box-shadow: inset 0 0 0 1px rgba(59, 130, 246, 0.15);
 }
 
+.mysub-wrap--light .mysub-plan-card-price {
+  color: #0f172a !important;
+}
+
+.mysub-wrap--light .mysub-plan-card-price s {
+  color: var(--muted);
+  opacity: 0.85;
+}
+
 .mysub-wrap--light .mysub-highlight-box {
   border-color: rgba(59, 130, 246, 0.2);
   background: linear-gradient(180deg, rgba(239, 246, 255, 0.95), rgba(219, 234, 254, 0.5));
@@ -3321,15 +3330,21 @@ html.mysub-app-light .modal {
 }
 
 .mysub-wrap--light .mysub-nav-btn--game:not(.active) {
-  border-color: rgba(46, 125, 50, 0.35);
-  background: linear-gradient(180deg, rgba(200, 230, 201, 0.65), rgba(165, 214, 167, 0.35));
-  color: #1b5e20;
+  animation: none !important;
+  border-color: rgba(27, 94, 32, 0.45);
+  background: linear-gradient(180deg, rgba(200, 230, 201, 0.9), rgba(165, 214, 167, 0.55));
+  color: #0d4714 !important;
+  box-shadow: 0 0 0 1px rgba(46, 125, 50, 0.15);
 }
 
 .mysub-wrap--light .mysub-nav-btn--game.active {
-  color: #0d3d12;
-  border-color: rgba(46, 125, 50, 0.5);
-  background: linear-gradient(180deg, rgba(165, 214, 167, 0.85), rgba(129, 199, 132, 0.45));
+  animation: none !important;
+  color: #052e09 !important;
+  border-color: rgba(27, 94, 32, 0.55);
+  background: linear-gradient(180deg, rgba(129, 199, 132, 0.75), rgba(102, 187, 106, 0.5));
+  box-shadow:
+    0 0 0 1px rgba(46, 125, 50, 0.22),
+    0 4px 14px rgba(46, 125, 50, 0.18);
 }
 
 .mysub-wrap--light .mysub-nav-btn--game-muted {
