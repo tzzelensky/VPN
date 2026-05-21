@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Базовые отступы (телефоны ~360–430 dp, в т.ч. Pixel 9 ~412 dp) -->
+    <dimen name="screen_horizontal_padding">20dp</dimen>
+    <dimen name="toolbar_height">56dp</dimen>
+    <dimen name="progress_height">3dp</dimen>
+    <dimen name="touch_target_min">48dp</dimen>
+    <dimen name="setup_content_max_width">520dp</dimen>
+    <dimen name="setup_top_padding">32dp</dimen>
+    <dimen name="setup_bottom_padding">32dp</dimen>
+    <dimen name="spacing_sm">8dp</dimen>
+    <dimen name="spacing_md">16dp</dimen>
+    <dimen name="spacing_lg">24dp</dimen>
+</resources>

@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Pixel 9, Pixel 8, Galaxy S24 и др. (~400–430 dp ширины) -->
+<resources>
+    <dimen name="screen_horizontal_padding">24dp</dimen>
+    <dimen name="toolbar_height">64dp</dimen>
+    <dimen name="setup_top_padding">48dp</dimen>
+    <dimen name="setup_bottom_padding">40dp</dimen>
+    <dimen name="spacing_lg">28dp</dimen>
+</resources>

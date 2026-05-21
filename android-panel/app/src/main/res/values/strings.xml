@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">VPN Панель</string>
+    <!-- URL веб-панели (обязательно HTTPS в проде). Без слэша в конце. -->
+    <string name="panel_url">https://ВАШ_ДОМЕН_ПАНЕЛИ</string>
+    <string name="panel_url_hint">https://vpn.example.com</string>
+    <string name="save_and_open">Открыть панель</string>
+    <string name="url_required">Укажите адрес панели</string>
+    <string name="url_invalid">Адрес должен начинаться с http:// или https://</string>
+    <string name="setup_subtitle">Адрес HTTPS вашей панели. Оптимизировано под экраны 20:9 (Pixel 9).</string>
+    <string name="setup_pixel_hint">Жестовая навигация и вырез камеры учитываются автоматически.</string>
+</resources>
