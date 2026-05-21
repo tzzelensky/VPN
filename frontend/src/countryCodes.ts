@@ -1,4 +1,4 @@
-/** ISO 3166-1 alpha-2 для выбора флага в подписке (частые регионы). */
+/** ISO 3166-1 alpha-2 для выбора флага в подписке (частые регионы). EU — флаг Евросоюза (🇪🇺). */
 export const COUNTRY_CODES_ALPHA2: string[] = [
   "AE",
   "AT",
@@ -15,6 +15,7 @@ export const COUNTRY_CODES_ALPHA2: string[] = [
   "DK",
   "EE",
   "ES",
+  "EU",
   "FI",
   "FR",
   "GB",
@@ -53,3 +54,8 @@ export const COUNTRY_CODES_ALPHA2: string[] = [
   "US",
   "VN",
 ].sort((a, b) => a.localeCompare(b));
+
+export function countryCodeLabel(code: string): string {
+  if (code === "EU") return "Евросоюз";
+  return code;
+}

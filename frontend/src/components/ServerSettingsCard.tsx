@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
 import type { ServerDto } from "../api";
-import { COUNTRY_CODES_ALPHA2 } from "../countryCodes";
+import { COUNTRY_CODES_ALPHA2, countryCodeLabel } from "../countryCodes";
 import { countryFlagEmoji } from "../flagEmoji";
 import Spinner from "./Spinner";
 
@@ -57,7 +57,7 @@ export default function ServerSettingsCard({ server: s, disabled, onSave, childr
             <option value="">Без флага</option>
             {COUNTRY_CODES_ALPHA2.map((code) => (
               <option key={code} value={code}>
-                {countryFlagEmoji(code)} {code}
+                {countryFlagEmoji(code)} {countryCodeLabel(code)}
               </option>
             ))}
           </select>

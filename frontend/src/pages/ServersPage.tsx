@@ -13,7 +13,7 @@ import {
 import DashboardLayout from "../components/DashboardLayout";
 import LiveLogPanel, { type LogLine } from "../components/LiveLogPanel";
 import ServerSettingsCard from "../components/ServerSettingsCard";
-import { COUNTRY_CODES_ALPHA2 } from "../countryCodes";
+import { COUNTRY_CODES_ALPHA2, countryCodeLabel } from "../countryCodes";
 import { countryFlagEmoji } from "../flagEmoji";
 
 export default function ServersPage({ onLogout }: { onLogout: () => void }) {
@@ -143,7 +143,7 @@ export default function ServersPage({ onLogout }: { onLogout: () => void }) {
                 <option value="">Без флага</option>
                 {COUNTRY_CODES_ALPHA2.map((code) => (
                   <option key={code} value={code}>
-                    {countryFlagEmoji(code)} {code}
+                    {countryFlagEmoji(code)} {countryCodeLabel(code)}
                   </option>
                 ))}
               </select>
