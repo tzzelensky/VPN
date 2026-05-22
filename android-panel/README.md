@@ -17,14 +17,35 @@
 
 ## Ошибка Sync: `Unable to load class org.slf4j.LoggerFactory`
 
-1. **File → Settings → Build, Execution, Deployment → Build Tools → Gradle**
-2. **Gradle JDK** → выберите **jbr-17** или **Embedded JDK 17** (не Java 25).
-3. Нажмите **Apply → OK**.
-4. В панели Sync нажмите **Re-download dependencies and sync project** (ссылка в ошибке).
-5. Если не помогло: **File → Invalidate Caches → Invalidate and Restart**.
-6. После перезапуска: **File → Sync Project with Gradle Files**.
+**Gradle JDK:** **ms-17** / **JDK 17** (как на вашем скрине) — правильно.
 
-Проект должен открываться из папки **`android-panel`**, не из корня `VPN`.
+### Порядок действий
+
+1. Закройте Android Studio.
+2. В PowerShell:
+
+```powershell
+cd C:\git_clone\VPN\android-panel
+.\gradlew.bat --stop
+Remove-Item -Recurse -Force .\.gradle -ErrorAction SilentlyContinue
+Remove-Item -Recurse -Force .\app\build -ErrorAction SilentlyContinue
+```
+
+3. Откройте Studio → папка **`android-panel`** (не корень VPN).
+4. **Gradle JDK** = **ms-17** → **Apply → OK**.
+5. **File → Sync Project with Gradle Files** (или *Re-download dependencies…*).
+6. Если снова ошибка — один раз очистите кэш Gradle:
+
+```powershell
+Remove-Item -Recurse -Force "$env:USERPROFILE\.gradle\caches\8.6" -ErrorAction SilentlyContinue
+Remove-Item -Recurse -Force "$env:USERPROFILE\.gradle\caches\modules-2" -ErrorAction SilentlyContinue
+```
+
+   Снова Sync в Studio.
+
+7. **Build → Build APK(s)**.
+
+Проект использует **Gradle 8.6 + AGP 8.4.2** (стабильная связка для JDK 17).
 
 ## Быстрая сборка debug APK
 
