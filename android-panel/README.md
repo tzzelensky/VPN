@@ -11,8 +11,20 @@
 
 ## Требования
 
-- [Android Studio](https://developer.android.com/studio) (или JDK 17 + Android SDK)
+- [Android Studio](https://developer.android.com/studio) Ladybug / Koala или новее
+- **JDK 17** для Gradle (не Java 21/25 — иначе Sync падает)
 - Панель доступна по **HTTPS** с телефона (домен + валидный сертификат, либо Let's Encrypt)
+
+## Ошибка Sync: `Unable to load class org.slf4j.LoggerFactory`
+
+1. **File → Settings → Build, Execution, Deployment → Build Tools → Gradle**
+2. **Gradle JDK** → выберите **jbr-17** или **Embedded JDK 17** (не Java 25).
+3. Нажмите **Apply → OK**.
+4. В панели Sync нажмите **Re-download dependencies and sync project** (ссылка в ошибке).
+5. Если не помогло: **File → Invalidate Caches → Invalidate and Restart**.
+6. После перезапуска: **File → Sync Project with Gradle Files**.
+
+Проект должен открываться из папки **`android-panel`**, не из корня `VPN`.
 
 ## Быстрая сборка debug APK
 
