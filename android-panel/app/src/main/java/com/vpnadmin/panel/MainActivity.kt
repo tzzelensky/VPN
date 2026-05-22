@@ -74,11 +74,13 @@ class MainActivity : AppCompatActivity() {
 
             override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
                 progress.visibility = View.VISIBLE
+                PanelWebViewHelper.injectMobileShell(webView)
             }
 
             override fun onPageFinished(view: WebView?, url: String?) {
                 progress.visibility = View.GONE
-                PanelWebViewHelper.injectMobileViewport(webView)
+                PanelWebViewHelper.injectMobileShell(webView)
+                CookieManager.getInstance().flush()
             }
         }
 
@@ -91,10 +93,16 @@ class MainActivity : AppCompatActivity() {
             },
         )
 
-        if (savedInstanceState == null) {
-            webView.loadUrl(panelUrl)
-        } else {
+        if (savedInstanceState != null) {
             webView.restoreState(savedInstanceState)
+        } else {
+            val start =
+                if (PanelWebViewHelper.hasSessionCookie(panelUrl)) {
+                    "$panelUrl/servers"
+                } else {
+                    panelUrl
+                }
+            webView.loadUrl(start)
         }
     }
 
@@ -104,9 +112,29 @@ class MainActivity : AppCompatActivity() {
         if (::webView.isInitialized) {
             PanelUrlStore.get(this)?.let {
                 panelUrl = it
-                webView.loadUrl(it)
+                val start =
+                    if (PanelWebViewHelper.hasSessionCookie(panelUrl)) "$panelUrl/servers" else panelUrl
+                webView.loadUrl(start)
             }
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        if (::webView.isInitialized) {
+            webView.onResume()
+            webView.resumeTimers()
+        }
+        CookieManager.getInstance().flush()
+    }
+
+    override fun onPause() {
+        if (::webView.isInitialized) {
+            webView.onPause()
+            webView.pauseTimers()
+        }
+        CookieManager.getInstance().flush()
+        super.onPause()
     }
 
     override fun onSaveInstanceState(outState: Bundle) {

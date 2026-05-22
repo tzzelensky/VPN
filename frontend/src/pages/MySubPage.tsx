@@ -182,6 +182,16 @@ export default function MySubPage() {
   }
 
   useEffect(() => {
+    if (!document.getElementById("tg-webapp-script")) {
+      const s = document.createElement("script");
+      s.id = "tg-webapp-script";
+      s.src = "https://telegram.org/js/telegram-web-app.js";
+      s.async = true;
+      document.head.appendChild(s);
+    }
+  }, []);
+
+  useEffect(() => {
     void (async () => {
       setErr("");
       const tgWebApp = (window as unknown as { Telegram?: { WebApp?: { ready?: () => void; expand?: () => void } } }).Telegram?.WebApp;
