@@ -9,4 +9,9 @@
     <string name="url_invalid">Адрес должен начинаться с http:// или https://</string>
     <string name="setup_subtitle">Адрес HTTPS вашей панели. Оптимизировано под экраны 20:9 (Pixel 9).</string>
     <string name="setup_pixel_hint">Жестовая навигация и вырез камеры учитываются автоматически.</string>
+    <string name="appeal_notify_channel">Обращения</string>
+    <string name="appeal_notify_channel_desc">Новые обращения пользователей в поддержку</string>
+    <string name="appeal_notify_title">Новое обращение</string>
+    <string name="appeal_notify_one">Поступило новое обращение в поддержку</string>
+    <string name="appeal_notify_many">Новых обращений: %1$d</string>
 </resources>

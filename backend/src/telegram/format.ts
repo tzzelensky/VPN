@@ -5,6 +5,33 @@ export function escHtml(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
+/** Текст для Telegram HTML: убирает теги редактора, переносы — через \\n (не &lt;br&gt;). */
+export function plainTextForTelegramHtml(raw: string): string {
+  return String(raw ?? "")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/p>\s*/gi, "\n\n")
+    .replace(/<[^>]+>/g, "")
+    .replace(/\r\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+export function subscriptionPublicName(u: { name?: string | null; email?: string | null }): string {
+  const name = String(u.name ?? u.email ?? "").trim();
+  return name || "Подписка";
+}
+
+/** «1 день», «2 дня», «5 дней» и т.д. */
+export function formatDaysRu(count: number): string {
+  const n = Math.max(0, Math.floor(Number(count) || 0));
+  const mod10 = n % 10;
+  const mod100 = n % 100;
+  if (mod100 >= 11 && mod100 <= 14) return `${n} дней`;
+  if (mod10 === 1) return `${n} день`;
+  if (mod10 >= 2 && mod10 <= 4) return `${n} дня`;
+  return `${n} дней`;
+}
+
 export function fmtBytes(n: number): string {
   const v = Number(n) || 0;
   if (v < 1024) return `${v.toFixed(0)} B`;
@@ -43,7 +70,7 @@ export function formatStatsHtml(users: UserRow[]): string {
         `🔼 <b>Исходящий:</b> ↑ ${up}`,
         `🔽 <b>Входящий:</b> ↓ ${down}`,
         `📊 <b>Всего:</b> ↑↓ ${totUsed} из ${escHtml(total)}`,
-        `🆔 <b>Профиль:</b> <code>${u.id}</code> · ${escHtml(u.name)}`,
+        `👤 <b>Подписка:</b> ${escHtml(u.name || u.email || "—")}`,
       ].join("\n"),
     );
     if (users.length > 1) parts.push("");

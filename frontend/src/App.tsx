@@ -1,6 +1,9 @@
 import { Navigate, Route, Routes } from "react-router-dom";
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { authMe } from "./api";
+import { PanelSettingsProvider } from "./panelSettingsContext";
+import SectionGuard from "./components/SectionGuard";
+import HomeRedirect from "./components/HomeRedirect";
 import LoginPage from "./pages/LoginPage";
 import ServersPage from "./pages/ServersPage";
 import UsersPage from "./pages/UsersPage";
@@ -8,7 +11,12 @@ import SubscriptionShopPage from "./pages/SubscriptionShopPage";
 import CommunicationsPage from "./pages/CommunicationsPage";
 import ReferralProgramPage from "./pages/ReferralProgramPage";
 import PromoCodesPage from "./pages/PromoCodesPage";
+import ConfigVaultPage from "./pages/ConfigVaultPage";
+import WhitelistVaultPage from "./pages/WhitelistVaultPage";
 import DropperGamePage from "./pages/DropperGamePage";
+import SupportAppealsPage from "./pages/SupportAppealsPage";
+import LogsPage from "./pages/LogsPage";
+import ExperimentsPage from "./pages/ExperimentsPage";
 import MySubPage from "./pages/MySubPage";
 
 function useSession() {
@@ -35,6 +43,21 @@ function useSession() {
   return { ready, loggedIn, setLoggedIn };
 }
 
+function AuthRoute({
+  loggedIn,
+  path,
+  children,
+}: {
+  loggedIn: boolean;
+  path: string;
+  children: ReactNode;
+}) {
+  if (!loggedIn) {
+    return <Navigate to="/login" replace />;
+  }
+  return <SectionGuard path={path}>{children}</SectionGuard>;
+}
+
 export default function App() {
   const path = typeof window !== "undefined" ? window.location.pathname : "";
   if (path.startsWith("/mysub")) {
@@ -57,43 +80,113 @@ export default function App() {
     );
   }
 
+  const logout = () => setLoggedIn(false);
+
   return (
-    <Routes>
-      <Route path="/login" element={<LoginPage onSuccess={() => setLoggedIn(true)} />} />
-      <Route
-        path="/servers"
-        element={loggedIn ? <ServersPage onLogout={() => setLoggedIn(false)} /> : <Navigate to="/login" replace />}
-      />
-      <Route
-        path="/users"
-        element={loggedIn ? <UsersPage onLogout={() => setLoggedIn(false)} /> : <Navigate to="/login" replace />}
-      />
-      <Route
-        path="/subscription-shop"
-        element={
-          loggedIn ? <SubscriptionShopPage onLogout={() => setLoggedIn(false)} /> : <Navigate to="/login" replace />
-        }
-      />
-      <Route
-        path="/communications"
-        element={loggedIn ? <CommunicationsPage onLogout={() => setLoggedIn(false)} /> : <Navigate to="/login" replace />}
-      />
-      <Route
-        path="/referral-program"
-        element={loggedIn ? <ReferralProgramPage onLogout={() => setLoggedIn(false)} /> : <Navigate to="/login" replace />}
-      />
-      <Route
-        path="/promo-codes"
-        element={loggedIn ? <PromoCodesPage onLogout={() => setLoggedIn(false)} /> : <Navigate to="/login" replace />}
-      />
-      <Route
-        path="/dropper-game"
-        element={loggedIn ? <DropperGamePage onLogout={() => setLoggedIn(false)} /> : <Navigate to="/login" replace />}
-      />
-      <Route path="/mysub" element={<MySubPage />} />
-      <Route path="/mysub/:tgId" element={<MySubPage />} />
-      <Route path="/" element={<Navigate to={loggedIn ? "/servers" : "/login"} replace />} />
-      <Route path="*" element={<Navigate to="/" replace />} />
-    </Routes>
+    <PanelSettingsProvider enabled={loggedIn}>
+      <Routes>
+        <Route path="/login" element={<LoginPage onSuccess={() => setLoggedIn(true)} />} />
+        <Route
+          path="/servers"
+          element={
+            <AuthRoute loggedIn={loggedIn} path="/servers">
+              <ServersPage onLogout={logout} />
+            </AuthRoute>
+          }
+        />
+        <Route
+          path="/users"
+          element={
+            <AuthRoute loggedIn={loggedIn} path="/users">
+              <UsersPage onLogout={logout} />
+            </AuthRoute>
+          }
+        />
+        <Route
+          path="/subscription-shop"
+          element={
+            <AuthRoute loggedIn={loggedIn} path="/subscription-shop">
+              <SubscriptionShopPage onLogout={logout} />
+            </AuthRoute>
+          }
+        />
+        <Route
+          path="/communications"
+          element={
+            <AuthRoute loggedIn={loggedIn} path="/communications">
+              <CommunicationsPage onLogout={logout} />
+            </AuthRoute>
+          }
+        />
+        <Route
+          path="/support-appeals"
+          element={
+            <AuthRoute loggedIn={loggedIn} path="/support-appeals">
+              <SupportAppealsPage onLogout={logout} />
+            </AuthRoute>
+          }
+        />
+        <Route
+          path="/referral-program"
+          element={
+            <AuthRoute loggedIn={loggedIn} path="/referral-program">
+              <ReferralProgramPage onLogout={logout} />
+            </AuthRoute>
+          }
+        />
+        <Route
+          path="/promo-codes"
+          element={
+            <AuthRoute loggedIn={loggedIn} path="/promo-codes">
+              <PromoCodesPage onLogout={logout} />
+            </AuthRoute>
+          }
+        />
+        <Route
+          path="/config-vault"
+          element={
+            <AuthRoute loggedIn={loggedIn} path="/config-vault">
+              <ConfigVaultPage onLogout={logout} />
+            </AuthRoute>
+          }
+        />
+        <Route
+          path="/whitelist-vault"
+          element={
+            <AuthRoute loggedIn={loggedIn} path="/whitelist-vault">
+              <WhitelistVaultPage onLogout={logout} />
+            </AuthRoute>
+          }
+        />
+        <Route
+          path="/logs"
+          element={
+            <AuthRoute loggedIn={loggedIn} path="/logs">
+              <LogsPage onLogout={logout} />
+            </AuthRoute>
+          }
+        />
+        <Route
+          path="/experiments"
+          element={
+            <AuthRoute loggedIn={loggedIn} path="/experiments">
+              <ExperimentsPage onLogout={logout} />
+            </AuthRoute>
+          }
+        />
+        <Route
+          path="/dropper-game"
+          element={
+            <AuthRoute loggedIn={loggedIn} path="/dropper-game">
+              <DropperGamePage onLogout={logout} />
+            </AuthRoute>
+          }
+        />
+        <Route path="/mysub" element={<MySubPage />} />
+        <Route path="/mysub/:tgId" element={<MySubPage />} />
+        <Route path="/" element={<HomeRedirect loggedIn={loggedIn} />} />
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    </PanelSettingsProvider>
   );
 }

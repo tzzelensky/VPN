@@ -48,7 +48,7 @@ export function startDropperAmbient(): () => void {
     arpFilter.connect(arpGain);
     arpOsc.start();
 
-    let arpTimer: ReturnType<typeof setInterval> | undefined;
+    let arpTimer: number | undefined;
     const tick = () => {
       const t = actx.currentTime;
       if (t < nextAt - 0.02) return;

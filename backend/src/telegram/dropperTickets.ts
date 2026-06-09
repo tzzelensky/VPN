@@ -1,34 +1,51 @@
 import { logCommunicationMessage, recipientFromChatId, stripHtmlPreview } from "../communicationLog.js";
 import { sendTelegramHtml } from "./api.js";
 import { getTelegramBotToken, getTelegramWebAppUrl } from "./env.js";
-import { escHtml } from "./format.js";
-import { getDropperGameConfig } from "../db.js";
+import { escHtml, subscriptionPublicName } from "./format.js";
+import { getWebAppActiveGame } from "../db.js";
 
-/** Уведомление после покупки: начислены билеты на «Дроппер» + кнопка WebApp. */
-export async function notifyDropperTicketsAfterPurchase(chatId: number, ticketsAdded: number): Promise<void> {
-  const cfg = getDropperGameConfig();
-  if (!cfg.enabled || ticketsAdded <= 0) return;
+function ticketsWord(n: number): string {
+  const mod10 = n % 10;
+  const mod100 = n % 100;
+  if (mod10 === 1 && mod100 !== 11) return "билет";
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 10 || mod100 >= 20)) return "билета";
+  return "билетов";
+}
+
+/** Уведомление о начислении билетов (покупка или ручная выдача в админке). */
+export async function notifyDropperTicketsAfterPurchase(
+  chatId: number,
+  ticketsAdded: number,
+  opts?: { adminGrant?: boolean },
+): Promise<void> {
+  if (ticketsAdded <= 0) return;
+  const activeGame = getWebAppActiveGame();
+  if (activeGame === "none" && !opts?.adminGrant) return;
   const url = getTelegramWebAppUrl().trim();
   const reply_markup = url
     ? {
         inline_keyboard: [[{ text: "Открыть приложение", web_app: { url } }]],
       }
     : undefined;
-  const word =
-    ticketsAdded % 10 === 1 && ticketsAdded % 100 !== 11
-      ? "билет"
-      : ticketsAdded % 10 >= 2 && ticketsAdded % 10 <= 4 && (ticketsAdded % 100 < 10 || ticketsAdded % 100 >= 20)
-        ? "билета"
-        : "билетов";
+  const word = ticketsWord(ticketsAdded);
+  const game = activeGame === "none" ? "dropper" : activeGame;
   const body =
-    `<b>+${ticketsAdded} ${word} на игру «Дроппер»!</b>\n\n` +
-    `Управляйте полётом пальцем, избегайте препятствий и приземлитесь на финиш — затем выберите подарок.`;
+    game === "roulette"
+      ? `<b>+${ticketsAdded} ${word} на рулетку!</b>\n\n` +
+        `Откройте Mini App и крутите рулетку — 1 билет = 1 прокрут.`
+      : `<b>+${ticketsAdded} ${word} на игру «Дроппер»!</b>\n\n` +
+        `Управляйте полётом пальцем, избегайте препятствий и приземлитесь на финиш — затем выберите подарок.`;
   await sendTelegramHtml(chatId, body, reply_markup);
   const rec = recipientFromChatId(chatId);
   if (rec) {
     logCommunicationMessage({
       automatic: true,
-      source_label: "Авто: билеты «Дроппер»",
+      source_label:
+        opts?.adminGrant
+          ? "Авто: выдача билетов (админ)"
+          : game === "roulette"
+            ? "Авто: билеты рулетки"
+            : "Авто: билеты «Дроппер»",
       text: stripHtmlPreview(body),
       has_photo: false,
       recipients: [rec],
@@ -47,8 +64,8 @@ export async function notifyDropperPrizeApplied(
   if (!getTelegramBotToken()) return;
   const name = String(payload.userName ?? "").trim();
   const subLine = name
-    ? `подписку <b>#${payload.userId}</b> «${escHtml(name)}»`
-    : `подписку <b>#${payload.userId}</b>`;
+    ? `подписку <b>${escHtml(name)}</b>`
+    : `подписку <b>${escHtml(subscriptionPublicName({ name: payload.userName }))}</b>`;
   const gift =
     payload.kind === "gb"
       ? `+<b>${payload.amount}</b> ГБ трафика`

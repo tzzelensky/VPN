@@ -1,18 +1,19 @@
 import { useEffect, useMemo, useState } from "react";
+import { subscriptionLabel } from "../subscriptionLabel";
 import DashboardLayout from "../components/DashboardLayout";
+import SurveysPanel from "../components/SurveysPanel";
 import {
   createCommunicationSegment,
   deleteCommunicationSegment,
+  refreshTestSubscriptionSegment,
   listCommunicationHistory,
   listCommunicationSegmentUsers,
   listCommunicationSegments,
   listCommunicationTargets,
-  listPromoCodes,
   type CommunicationMessageLogDto,
   patchCommunicationSegment,
   sendCommunication,
   type CommunicationSegmentDto,
-  type PromoCodeDto,
   type CommunicationTargetDto,
   type SendCommunicationResult,
 } from "../api";
@@ -21,6 +22,10 @@ type Mode = "global" | "single" | "selected" | "segment";
 const MAX_REQUEST_IMAGE_BYTES = 750_000;
 const LS_KEY_MARK_ENABLED = "comms_mark_enabled";
 const LS_KEY_MARK_TEXT = "comms_mark_text";
+
+function isTestSubscriptionSystemSegment(s: Pick<CommunicationSegmentDto, "id" | "system_key">): boolean {
+  return s.system_key === "test_subscriptions" || s.id === "sys_test_subscriptions";
+}
 
 async function fileToDataUrl(file: File): Promise<string> {
   return await new Promise<string>((resolve, reject) => {
@@ -93,7 +98,10 @@ async function prepareCompressedPhoto(file: File): Promise<{ base64: string; mim
   };
 }
 
+type CommsTab = "broadcasts" | "surveys";
+
 export default function CommunicationsPage({ onLogout }: { onLogout: () => void }) {
+  const [commsTab, setCommsTab] = useState<CommsTab>("broadcasts");
   const [targets, setTargets] = useState<CommunicationTargetDto[]>([]);
   const [segments, setSegments] = useState<CommunicationSegmentDto[]>([]);
   const [mode, setMode] = useState<Mode>("global");
@@ -137,9 +145,6 @@ export default function CommunicationsPage({ onLogout }: { onLogout: () => void 
   const [segmentPreviewUsers, setSegmentPreviewUsers] = useState<Array<{ id: number; name: string; tg_id: string }>>([]);
   const [segmentPreviewLoading, setSegmentPreviewLoading] = useState(false);
   const [autoTextMenuOpen, setAutoTextMenuOpen] = useState(false);
-  const [promoPickerOpen, setPromoPickerOpen] = useState(false);
-  const [promoPickerBusy, setPromoPickerBusy] = useState(false);
-  const [promoPickerRows, setPromoPickerRows] = useState<PromoCodeDto[]>([]);
   const [history, setHistory] = useState<CommunicationMessageLogDto[]>([]);
   const [historyLoading, setHistoryLoading] = useState(true);
   const [historyRecipients, setHistoryRecipients] = useState<CommunicationMessageLogDto | null>(null);
@@ -271,6 +276,11 @@ export default function CommunicationsPage({ onLogout }: { onLogout: () => void 
   }
 
   async function removeSegment(id: string) {
+    const seg = segments.find((s) => s.id === id);
+    if (seg && isTestSubscriptionSystemSegment(seg)) {
+      setMsg({ type: "err", text: "Системный сегмент нельзя удалить." });
+      return;
+    }
     setSegmentBusy(true);
     try {
       await deleteCommunicationSegment(id);
@@ -285,28 +295,31 @@ export default function CommunicationsPage({ onLogout }: { onLogout: () => void 
     }
   }
 
-  async function openPromoPickerForPreset() {
-    setAutoTextMenuOpen(false);
-    setPromoPickerBusy(true);
-    setPromoPickerOpen(true);
+  async function refreshTestSubSegment(id: string) {
+    setSegmentBusy(true);
+    setMsg(null);
     try {
-      const data = await listPromoCodes();
-      setPromoPickerRows(data.promos.filter((p) => p.active !== false));
-    } catch {
-      setPromoPickerRows([]);
+      const updated = await refreshTestSubscriptionSegment(id);
+      await reloadSegments();
+      if (editingSegmentId === id) {
+        setSegmentUserIds(updated.user_ids ?? []);
+      }
+      setMsg({ type: "ok", text: `Сегмент обновлён. В списке ${updated.user_ids?.length ?? 0} пользователей.` });
+    } catch (e) {
+      setMsg({ type: "err", text: String(e) });
     } finally {
-      setPromoPickerBusy(false);
+      setSegmentBusy(false);
     }
   }
 
-  function applyPromoToPreset(promo: PromoCodeDto) {
+  function insertAutoTextToken(token: string) {
     setSegmentPresetEnabled(true);
     setSegmentPresetText((prev) => {
       const next = prev.trim();
-      if (!next) return promo.code;
-      return `${next} ${promo.code}`.trim();
+      if (!next) return token;
+      return `${next} ${token}`.trim();
     });
-    setPromoPickerOpen(false);
+    setAutoTextMenuOpen(false);
   }
 
   useEffect(() => {
@@ -450,12 +463,40 @@ export default function CommunicationsPage({ onLogout }: { onLogout: () => void 
       <section className="panel users-hero-panel">
         <h1>Коммуникации</h1>
         <p className="sub users-hero-sub">
-          Рассылка в Telegram: глобально всем клиентам или точечно выбранному клиенту. Можно прикрепить фото.
+          Рассылки и опросы в Telegram: глобально, выборочно или по сегменту.
         </p>
-        {msg ? <div className={`flash ${msg.type === "ok" ? "ok" : "err"}`}>{msg.text}</div> : null}
-        {photoNotice ? <div className="flash ok">{photoNotice}</div> : null}
+        <div className="comms-tabs" role="tablist">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={commsTab === "broadcasts"}
+            className={commsTab === "broadcasts" ? "primary" : "ghost"}
+            onClick={() => setCommsTab("broadcasts")}
+          >
+            Рассылки
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={commsTab === "surveys"}
+            className={commsTab === "surveys" ? "primary" : "ghost"}
+            onClick={() => setCommsTab("surveys")}
+          >
+            Опросы
+          </button>
+        </div>
+        {commsTab === "broadcasts" && msg ? <div className={`flash ${msg.type === "ok" ? "ok" : "err"}`}>{msg.text}</div> : null}
+        {commsTab === "broadcasts" && photoNotice ? <div className="flash ok">{photoNotice}</div> : null}
       </section>
 
+      {commsTab === "surveys" ? (
+        <section className="panel comms-panel">
+          <SurveysPanel />
+        </section>
+      ) : null}
+
+      {commsTab === "broadcasts" ? (
+      <>
       <section className="panel comms-panel">
         <div className="comms-layout">
           <div className="comms-left">
@@ -531,7 +572,7 @@ export default function CommunicationsPage({ onLogout }: { onLogout: () => void 
                   <option value="">Выберите клиента</option>
                   {reachable.map((u) => (
                     <option key={u.id} value={u.id}>
-                      #{u.id} {u.name} ({u.enable ? "вкл" : "выкл"})
+                      {subscriptionLabel(u)} ({u.enable ? "вкл" : "выкл"})
                     </option>
                   ))}
                 </select>
@@ -549,7 +590,7 @@ export default function CommunicationsPage({ onLogout }: { onLogout: () => void 
                   <div className="comms-selected-chips">
                     {selectedUsers.slice(0, 8).map((u) => (
                       <span key={u.id} className="comms-chip">
-                        #{u.id} {u.name}
+                        {subscriptionLabel(u)}
                       </span>
                     ))}
                     {selectedUsers.length > 8 ? <span className="comms-chip">+{selectedUsers.length - 8}</span> : null}
@@ -586,7 +627,7 @@ export default function CommunicationsPage({ onLogout }: { onLogout: () => void 
                     ) : (
                       segmentPreviewUsers.map((u) => (
                         <span key={u.id} className="comms-chip">
-                          #{u.id} {u.name}
+                          {subscriptionLabel(u)}
                         </span>
                       ))
                     )}
@@ -669,7 +710,7 @@ export default function CommunicationsPage({ onLogout }: { onLogout: () => void 
                 <ul>
                   {lastResult.failures.map((f) => (
                     <li key={`${f.user_id}:${f.error}`}>
-                      #{f.user_id} {f.user_name}: {f.error}
+                      {f.user_name}: {f.error}
                     </li>
                   ))}
                 </ul>
@@ -701,7 +742,7 @@ export default function CommunicationsPage({ onLogout }: { onLogout: () => void 
                     >
                       {chatReachable.map((u) => (
                         <option key={u.id} value={u.id}>
-                          #{u.id} {u.name}
+                          {subscriptionLabel(u)}
                         </option>
                       ))}
                     </select>
@@ -770,8 +811,11 @@ export default function CommunicationsPage({ onLogout }: { onLogout: () => void 
                       disabled={!segmentPresetEnabled}
                       value={segmentPresetText}
                       onChange={(e) => setSegmentPresetText(e.target.value)}
-                      placeholder="Текст для сегмента..."
+                      placeholder="Например: Пользователь, ваша подписка заканчивается через {days_before_end}. Остаток: {gb_before_end}."
                     />
+                    <p className="field-hint">
+                      Поддерживаются персональные плейсхолдеры: <code>{"{days_before_end}"}</code> и <code>{"{gb_before_end}"}</code>.
+                    </p>
                     <div className="comms-autotext-wrap">
                       <button
                         type="button"
@@ -783,8 +827,11 @@ export default function CommunicationsPage({ onLogout }: { onLogout: () => void 
                       </button>
                       {autoTextMenuOpen ? (
                         <div className="comms-autotext-menu">
-                          <button type="button" className="ghost" onClick={() => void openPromoPickerForPreset()}>
-                            {"{promocode}"}
+                          <button type="button" className="ghost" onClick={() => insertAutoTextToken("{days_before_end}")}>
+                            {"{days_before_end}"}
+                          </button>
+                          <button type="button" className="ghost" onClick={() => insertAutoTextToken("{gb_before_end}")}>
+                            {"{gb_before_end}"}
                           </button>
                         </div>
                       ) : null}
@@ -812,9 +859,20 @@ export default function CommunicationsPage({ onLogout }: { onLogout: () => void 
                           <button type="button" className="ghost" onClick={() => editSegment(s)}>
                             Редактировать
                           </button>
-                          <button type="button" className="ghost" disabled={segmentBusy} onClick={() => void removeSegment(s.id)}>
-                            Удалить
-                          </button>
+                          {isTestSubscriptionSystemSegment(s) ? (
+                            <button
+                              type="button"
+                              className="ghost"
+                              disabled={segmentBusy}
+                              onClick={() => void refreshTestSubSegment(s.id)}
+                            >
+                              Обновить
+                            </button>
+                          ) : (
+                            <button type="button" className="ghost" disabled={segmentBusy} onClick={() => void removeSegment(s.id)}>
+                              Удалить
+                            </button>
+                          )}
                         </div>
                       </div>
                     ))}
@@ -842,7 +900,7 @@ export default function CommunicationsPage({ onLogout }: { onLogout: () => void 
                     return (
                       <div key={u.id} className="ref-ios-row">
                         <span className="ref-ios-line">
-                          #{u.id} {u.name}
+                          {subscriptionLabel(u)}
                         </span>
                         <span className="ref-ios-date comms-chat-meta">
                           <span className={`comms-chat-dot ${hasChat ? "ok" : "no"}`} aria-hidden />
@@ -888,7 +946,7 @@ export default function CommunicationsPage({ onLogout }: { onLogout: () => void 
                   >
                     {pickerLeftList.map((u) => (
                       <option key={u.id} value={u.id}>
-                        #{u.id} {u.name}
+                        {subscriptionLabel(u)}
                       </option>
                     ))}
                   </select>
@@ -914,7 +972,7 @@ export default function CommunicationsPage({ onLogout }: { onLogout: () => void 
                   >
                     {pickerRightList.map((u) => (
                       <option key={u.id} value={u.id}>
-                        #{u.id} {u.name}
+                        {subscriptionLabel(u)}
                       </option>
                     ))}
                   </select>
@@ -1004,7 +1062,7 @@ export default function CommunicationsPage({ onLogout }: { onLogout: () => void 
                     ) : (
                       item.recipients.map((r) => (
                         <span key={`${item.id}-${r.user_id}-${r.user_name}`} className="comms-chip">
-                          #{r.user_id} {r.user_name}
+                          {r.user_name}
                         </span>
                       ))
                     )}
@@ -1032,7 +1090,7 @@ export default function CommunicationsPage({ onLogout }: { onLogout: () => void 
               <div className="comms-recipients-modal-list">
                 {historyRecipients.recipients.map((r) => (
                   <div key={`${historyRecipients.id}-${r.user_id}`} className="comms-recipients-modal-row">
-                    #{r.user_id} {r.user_name}
+                    {r.user_name}
                   </div>
                 ))}
               </div>
@@ -1045,39 +1103,9 @@ export default function CommunicationsPage({ onLogout }: { onLogout: () => void 
           </div>
         </div>
       ) : null}
-
-      {promoPickerOpen ? (
-        <div className="modal-backdrop" onClick={() => setPromoPickerOpen(false)}>
-          <div className="modal promo-modal" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-head">
-              <h2>Выбор промокода для автотекста</h2>
-              <button type="button" className="ghost modal-close" onClick={() => setPromoPickerOpen(false)}>
-                ×
-              </button>
-            </div>
-            <div className="modal-body">
-              {promoPickerBusy ? (
-                <p className="sub">Загрузка промокодов...</p>
-              ) : promoPickerRows.length === 0 ? (
-                <p className="sub">Нет активных промокодов для выбора.</p>
-              ) : (
-                <div className="mysub-stat-list">
-                  {promoPickerRows.map((p) => (
-                    <button key={p.id} type="button" className="ghost" onClick={() => applyPromoToPreset(p)}>
-                      {p.name} ({p.code}) • {p.discount_percent}%
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-            <div className="modal-footer">
-              <button type="button" className="primary" onClick={() => setPromoPickerOpen(false)}>
-                Закрыть
-              </button>
-            </div>
-          </div>
-        </div>
+      </>
       ) : null}
+
     </DashboardLayout>
   );
 }

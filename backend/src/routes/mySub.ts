@@ -7,9 +7,15 @@ import {
   findUsersByTelegramChatId,
   getDropperGameConfig,
   getDropperStatsForTgUser,
+  getGameTicketsPerPurchase,
   getReferralReward,
   getReferralProgram,
   getSubscriptionShop,
+  getWebAppActiveGame,
+  createSupportAppeal,
+  getSupportAppeal,
+  getSupportAppealsConfig,
+  patchSupportAppealPhotoPaths,
   getUser,
   listReferralRewardsForInviterUsers,
   markPaymentSessionPendingAdmin,
@@ -17,14 +23,40 @@ import {
   startDropperPlaySession,
   startPaymentAwaitingProof,
   sumDropperTicketsForTgUser,
+  exchangeRouletteGbPiggyForTicket,
+  getRouletteGbPiggy,
+  getRoulettePurchaseDiscount,
+  listRouletteSpinsForTgUser,
+  listRouletteTicketPurchasesForTgUser,
+  ROULETTE_GB_PIGGY_EXCHANGE_THRESHOLD,
+  userHasUnlimitedTrafficForRoulette,
   updateUserRow,
   userAllowedOnServers,
+  userHasActiveSubscription,
+  type UserRow,
 } from "../db.js";
-import { formatStatsHtml, fmtBytes } from "../telegram/format.js";
+import { formatStatsHtml, fmtBytes, subscriptionPublicName } from "../telegram/format.js";
 import { notifyDropperPrizeApplied } from "../telegram/dropperTickets.js";
+import { getRoulettePublicConfig, notifyRouletteSpinToUser, spinRouletteForUser } from "../rouletteGame.js";
+import { buyRouletteTicketsForUser, getRouletteTicketShopPublicForUser } from "../rouletteTicketShop.js";
 import { getTelegramBotToken, getTelegramPaymentNotifyChatIds, getTelegramPaymentUrl } from "../telegram/env.js";
-import { sendTelegramPhotoBinary } from "../telegram/api.js";
+import { sendTelegramHtml, sendTelegramPhotoBinary } from "../telegram/api.js";
+import { escHtml } from "../telegram/format.js";
 import { pushClientListToAllDeployedServers } from "../userSync.js";
+import { saveAppealUserPhoto } from "../supportAppealFiles.js";
+import { notifyAdminsNewSupportAppeal } from "../supportAppealsNotify.js";
+import { getTestPlanRuntimeMeta, isTestSubscriptionEligible } from "../testSubscription.js";
+import { formatAdminPaymentAmountLine, resolvePurchasePrice } from "../purchaseDiscount.js";
+import {
+  buildWhitelistOfferForMiniApp,
+  checkWhitelistPurchaseAllowed,
+  createPendingWhitelistPurchase,
+  findActiveSubscriptionForTg,
+  findWhitelistPurchaseTarget,
+  getWhitelistPurchasePriceRub,
+  logWhitelistPurchaseOpened,
+} from "../whitelistPurchaseService.js";
+import { getWhitelistVaultSettings } from "../whitelistVaultDb.js";
 
 const router = Router();
 
@@ -62,6 +94,53 @@ function adminDecisionKeyboard(sessionId: string) {
         { text: "Платёж не поступил", callback_data: `pnx:${sessionId}` },
       ],
     ],
+  };
+}
+
+function subscriptionProfileStats(u: UserRow) {
+  const now = Date.now();
+  const active = userHasActiveSubscription(u);
+  const allowed = userAllowedOnServers(u);
+  const unlimitedTime = u.expiry_time <= 0;
+  const unlimitedTraffic = u.total_gb <= 0;
+  let remaining_ms: number | null = null;
+  let remaining_days: number | null = null;
+  if (u.expiry_time > 0) {
+    remaining_ms = Math.max(0, u.expiry_time - now);
+    remaining_days = remaining_ms > 0 ? Math.max(1, Math.ceil(remaining_ms / 86400000)) : 0;
+  }
+  let traffic_percent: number | null = null;
+  let remaining_gb: number | null = null;
+  if (u.total_gb > 0) {
+    const limit = u.total_gb * 1073741824;
+    const used = u.traffic_up + u.traffic_down;
+    traffic_percent = limit > 0 ? Math.min(100, Math.round((used / limit) * 100)) : 0;
+    remaining_gb = Math.max(0, Math.round((u.total_gb - used / (1024 * 1024 * 1024)) * 100) / 100);
+  }
+  const time_progress =
+    unlimitedTime || remaining_ms == null
+      ? null
+      : remaining_ms <= 0
+        ? 0
+        : Math.min(100, Math.round((remaining_ms / (30 * 86400000)) * 100));
+  return {
+    subscription_active: active,
+    access_ok: allowed,
+    unlimited_time: unlimitedTime,
+    unlimited_traffic: unlimitedTraffic,
+    remaining_ms,
+    remaining_days,
+    remaining_gb,
+    time_progress,
+    traffic_percent,
+    expiry_label:
+      u.expiry_time > 0
+        ? new Date(u.expiry_time).toLocaleDateString("ru-RU", {
+            day: "2-digit",
+            month: "long",
+            year: "numeric",
+          })
+        : null,
   };
 }
 
@@ -201,6 +280,16 @@ router.post("/webapp/profile", async (req, res) => {
     used_text: fmtBytes(u.traffic_up + u.traffic_down),
     total_text: u.total_gb > 0 ? fmtBytes(u.total_gb * 1073741824) : "∞",
     expiry_time: u.expiry_time,
+    stats: subscriptionProfileStats(u),
+    tickets: u.dropper_tickets,
+    gb_piggy:
+      u.total_gb <= 0
+        ? {
+            accumulated_gb: getRouletteGbPiggy(u.id),
+            exchange_threshold: ROULETTE_GB_PIGGY_EXCHANGE_THRESHOLD,
+            can_exchange: getRouletteGbPiggy(u.id) >= ROULETTE_GB_PIGGY_EXCHANGE_THRESHOLD,
+          }
+        : null,
   }));
   const referralCfg = getReferralProgram();
   const inviterIds = linked.map((u) => u.id);
@@ -212,8 +301,21 @@ router.post("/webapp/profile", async (req, res) => {
   const botName = String(process.env.TELEGRAM_BOT_USERNAME ?? "").trim().replace(/^@/, "");
   const inviteLink = linked[0] && botName ? `https://t.me/${botName}?start=ref_${linked[0].id}` : "";
   const shop = getSubscriptionShop();
+  const testPlan = shop.test_plan;
+  const testAvailable = isTestSubscriptionEligible(tgId);
   const dg = getDropperGameConfig();
+  const activeGame = getWebAppActiveGame();
   const dgStats = getDropperStatsForTgUser(tgId);
+  const tickets = sumDropperTicketsForTgUser(tgId);
+  const ticketsPerPurchase = getGameTicketsPerPurchase();
+  const wlTarget = findWhitelistPurchaseTarget(tgId, linked);
+  const whitelist = buildWhitelistOfferForMiniApp(linked, tgId);
+  const instrPhotoPath = getWhitelistVaultSettings().instruction.photo_path;
+  const base = String(process.env.PUBLIC_API_URL ?? "").replace(/\/$/, "");
+  const whitelist_instruction_photo_url =
+    instrPhotoPath && base
+      ? `${base}/api/whitelist-vault/instruction/photo/${encodeURIComponent(instrPhotoPath)}`
+      : null;
   res.json({
     tg_id: tgId,
     name: displayName,
@@ -223,9 +325,25 @@ router.post("/webapp/profile", async (req, res) => {
     payment_url: shop.payment_url.trim() || getTelegramPaymentUrl(),
     plans: shop.plans,
     topup_plans: shop.topup_plans,
+    test_plan: {
+      enabled: testPlan.enabled,
+      available: testAvailable,
+      title: testPlan.title,
+      total_gb: testPlan.total_gb,
+      days: testPlan.days,
+      price_rub: testPlan.price_rub,
+    },
+    sales_disabled_for_new: linked.length === 0 && shop.sales_disabled,
+    roulette_purchase_discount: (() => {
+      const d = getRoulettePurchaseDiscount(tgId);
+      return d ? { discount_percent: d.discount_percent } : null;
+    })(),
+    active_game: activeGame,
+    game_tab_visible: activeGame !== "none",
+    tickets_per_purchase: ticketsPerPurchase,
     dropper: {
-      enabled: dg.enabled,
-      tickets: sumDropperTicketsForTgUser(tgId),
+      enabled: activeGame === "dropper",
+      tickets,
       reward_gb: dg.reward_gb,
       reward_days: dg.reward_days,
       flight_duration_sec: dg.flight_duration_sec,
@@ -235,6 +353,30 @@ router.post("/webapp/profile", async (req, res) => {
       wins: dgStats.wins,
       won_gb: dgStats.won_gb,
       won_days: dgStats.won_days,
+    },
+    roulette: {
+      ...getRoulettePublicConfig(),
+      tickets,
+      ticket_shop: getRouletteTicketShopPublicForUser(tgId),
+      history: listRouletteSpinsForTgUser(tgId, 20).map((s) => ({
+        kind: "spin" as const,
+        id: s.id,
+        date: s.created_at,
+        prize: s.prize_title,
+        status: s.status,
+        error_message: s.error_message,
+      })),
+      ticket_purchase_history: listRouletteTicketPurchasesForTgUser(tgId, 20).map((t) => ({
+        kind: "ticket_purchase" as const,
+        id: t.id,
+        date: t.created_at,
+        tickets: t.amount,
+        payment_type: t.source === "purchase_for_days" ? ("subscription_days" as const) : ("traffic_gb" as const),
+        cost: t.spent_resource_amount ?? 0,
+      })),
+    },
+    support_appeals: {
+      enabled: getSupportAppealsConfig().enabled,
     },
     referral: {
       enabled: referralCfg.enabled,
@@ -249,6 +391,13 @@ router.post("/webapp/profile", async (req, res) => {
         reward_gb: r.reward_gb,
         reward_days: r.reward_days,
       })),
+    },
+    whitelist: {
+      ...whitelist,
+      instruction: {
+        ...whitelist.instruction,
+        photo_url: whitelist_instruction_photo_url,
+      },
     },
   });
 });
@@ -333,6 +482,110 @@ router.post("/webapp/promo/preview", async (req, res) => {
   }
 });
 
+type SupportAppealBody = {
+  init_data?: unknown;
+  text?: unknown;
+  photos?: unknown;
+};
+
+router.post("/webapp/support-appeal", async (req, res) => {
+  const body = (req.body ?? {}) as SupportAppealBody;
+  const initData = String(body.init_data ?? "").trim();
+  const ver = verifyTelegramWebAppInitData(initData);
+  if (!ver.ok) {
+    res.status(401).json({ error: "tg_webapp_auth_required", reason: ver.reason });
+    return;
+  }
+  if (!getSupportAppealsConfig().enabled) {
+    res.status(403).json({ error: "support_disabled" });
+    return;
+  }
+  const tgId = parseTgId(String(ver.user.id ?? ""));
+  if (!tgId) {
+    res.status(400).json({ error: "bad_payload" });
+    return;
+  }
+  const text = String(body.text ?? "").trim().slice(0, 8000);
+  const photosRaw = Array.isArray(body.photos) ? body.photos : [];
+  const photoParts: { mime: string; bytes: Uint8Array; name: string }[] = [];
+  for (const item of photosRaw.slice(0, 5)) {
+    if (!item || typeof item !== "object") continue;
+    const o = item as { base64?: unknown; mime?: unknown; name?: unknown };
+    const b64 = String(o.base64 ?? "").trim();
+    const parsed = parseDataUrl(b64.startsWith("data:") ? b64 : `data:image/jpeg;base64,${b64}`);
+    if (!parsed) continue;
+    photoParts.push({
+      mime: String(o.mime ?? parsed.mime) || parsed.mime,
+      bytes: parsed.bytes,
+      name: String(o.name ?? "photo.jpg").trim() || "photo.jpg",
+    });
+  }
+  if (!text && photoParts.length === 0) {
+    res.status(400).json({ error: "empty_appeal" });
+    return;
+  }
+  try {
+    const linkedAppeal = findUsersByTelegramChatId(tgId);
+    const row = createSupportAppeal({
+      tg_chat_id: tgId,
+      tg_user_id: tgId,
+      tg_username: String(ver.user.username ?? "").trim() || undefined,
+      tg_first_name: String(ver.user.first_name ?? "").trim() || undefined,
+      user_id: linkedAppeal[0]?.id,
+      text: text || "(без текста)",
+      photo_file_ids: [],
+      photo_paths: [],
+      source: "webapp",
+    });
+    const photoPaths: string[] = [];
+    for (let i = 0; i < photoParts.length; i++) {
+      const p = photoParts[i]!;
+      photoPaths.push(saveAppealUserPhoto(row.id, i, Buffer.from(p.bytes), p.mime));
+    }
+    if (photoPaths.length > 0) {
+      patchSupportAppealPhotoPaths(row.id, photoPaths);
+    }
+    const appealForNotify = getSupportAppeal(row.id) ?? row;
+    await notifyAdminsNewSupportAppeal(appealForNotify);
+    const tag =
+      ver.user.username && String(ver.user.username).trim()
+        ? `@${escHtml(String(ver.user.username).replace(/^@/, ""))}`
+        : escHtml(String(ver.user.first_name ?? "").trim() || `id ${tgId}`);
+    const panelBase = (process.env.PUBLIC_API_URL ?? "").replace(/\/$/, "");
+    const captionBase =
+      `📩 <b>Обращение из WebApp</b>\n` +
+      `Пользователь: <b>${tag}</b> (chat <code>${tgId}</code>)\n\n` +
+      `${text ? escHtml(text.slice(0, 500)) : "<i>без текста</i>"}\n\n` +
+      (panelBase
+        ? `Перейдите в панель «Обращения»: <a href="${escHtml(panelBase)}/support-appeals">${escHtml(panelBase)}/support-appeals</a>`
+        : "");
+    const admins = getTelegramPaymentNotifyChatIds();
+    for (const adminChat of admins) {
+      try {
+        if (photoParts.length === 0) {
+          await sendTelegramHtml(adminChat, captionBase);
+        } else {
+          for (let i = 0; i < photoParts.length; i++) {
+            const p = photoParts[i]!;
+            await sendTelegramPhotoBinary(adminChat, p.bytes, {
+              caption: i === 0 ? captionBase : undefined,
+              filename: p.name,
+              mimeType: p.mime,
+              parse_mode: "HTML",
+            });
+          }
+        }
+      } catch {
+        // skip admin
+      }
+    }
+    res.json({ ok: true, appeal_id: row.id });
+  } catch (e) {
+    console.error("[mysub] support-appeal:", e);
+    res.status(500).json({ error: "submit_failed" });
+  }
+});
+
 function parseDataUrl(input: string): { mime: string; bytes: Uint8Array } | null {
   const m = /^data:([^;,]+);base64,(.+)$/i.exec(input.trim());
   if (!m) return null;
@@ -359,12 +612,23 @@ router.post("/webapp/payment-proof", async (req, res) => {
   const rawUserId = Number(body.user_id);
   const userId = Number.isFinite(rawUserId) && rawUserId > 0 ? Math.floor(rawUserId) : 0;
   const planId = Number(body.plan_id);
-  if (!tgId || !Number.isFinite(planId) || ![1, 2, 3].includes(planId)) {
+  const payKindRaw = String(body.pay_kind ?? "subscription").trim().toLowerCase();
+  const payKind =
+    payKindRaw === "topup"
+      ? "topup"
+      : payKindRaw === "test"
+        ? "test"
+        : payKindRaw === "white_lists"
+          ? "white_lists"
+          : "subscription";
+  if (!tgId) {
     res.status(400).json({ error: "bad_payload" });
     return;
   }
-  const payKindRaw = String(body.pay_kind ?? "subscription").trim().toLowerCase();
-  const payKind = payKindRaw === "topup" ? "topup" : "subscription";
+  if (payKind !== "test" && payKind !== "white_lists" && (!Number.isFinite(planId) || ![1, 2, 3].includes(planId))) {
+    res.status(400).json({ error: "bad_payload" });
+    return;
+  }
   const newSubscriptionName = String(body.new_subscription_name ?? "").trim().slice(0, 25);
   const promoCode = String(body.promo_code ?? "").trim().replace(/\s+/g, "");
   const linked = findUsersByTelegramChatId(tgId);
@@ -381,6 +645,129 @@ router.post("/webapp/payment-proof", async (req, res) => {
   }
   const shop = getSubscriptionShop();
 
+  if (linked.length === 0 && shop.sales_disabled) {
+    res.status(403).json({ error: "sales_disabled" });
+    return;
+  }
+
+  if (linked.length === 0 && shop.sales_disabled) {
+    res.status(403).json({ error: "sales_disabled" });
+    return;
+  }
+
+  if (payKind === "white_lists") {
+    logWhitelistPurchaseOpened("webapp", tgId);
+    if (promoCode) {
+      res.status(400).json({ error: "promo_not_allowed_for_whitelist" });
+      return;
+    }
+    const wlUser = target ?? findActiveSubscriptionForTg(tgId, linked);
+    if (!wlUser) {
+      res.status(403).json({ error: "no_active_subscription" });
+      return;
+    }
+    const check = checkWhitelistPurchaseAllowed(wlUser);
+    if (!check.ok) {
+      res.status(403).json({ error: check.code, message: check.message });
+      return;
+    }
+    const price = getWhitelistPurchasePriceRub();
+    const caption =
+      `<b>Оплата из WebApp (белые списки)</b>\n` +
+      `Пользователь: <b>${String(ver.user.first_name ?? "").trim() || wlUser.name || "Пользователь"}</b> (chat <code>${tgId}</code>)\n` +
+      `Подписка: <b>${escHtml(subscriptionPublicName(wlUser))}</b>\n` +
+      `Сумма: <b>${price} ₽</b>`;
+    const sessionId = startPaymentAwaitingProof(
+      tgId,
+      tgId,
+      1,
+      "white_lists",
+      wlUser.id,
+      undefined,
+      {
+        username: String(ver.user.username ?? "").trim() || undefined,
+        first_name: String(ver.user.first_name ?? "").trim() || undefined,
+      },
+    );
+    createPendingWhitelistPurchase({ user: wlUser, payment_id: sessionId, amount: price });
+    markPaymentSessionPendingAdmin(sessionId, "webapp");
+    let sent = 0;
+    const admins = getTelegramPaymentNotifyChatIds();
+    for (const chatId of admins) {
+      try {
+        await sendTelegramPhotoBinary(chatId, parsed.bytes, {
+          caption,
+          filename: String(body.photo_name ?? "proof.jpg").trim() || "proof.jpg",
+          mimeType: String(body.photo_mime ?? parsed.mime) || parsed.mime,
+          parse_mode: "HTML",
+          reply_markup: adminDecisionKeyboard(sessionId),
+        });
+        sent++;
+      } catch {
+        // skip
+      }
+    }
+    if (sent === 0) {
+      res.status(502).json({ error: "send_failed" });
+      return;
+    }
+    res.json({ ok: true });
+    return;
+  }
+
+  if (payKind === "test") {
+    if (promoCode) {
+      res.status(400).json({ error: "promo_not_allowed_for_test" });
+      return;
+    }
+    if (linked.length > 0 || !isTestSubscriptionEligible(tgId)) {
+      res.status(403).json({ error: "test_not_available" });
+      return;
+    }
+    const meta = getTestPlanRuntimeMeta();
+    const caption =
+      `<b>Оплата из WebApp (тестовая подписка)</b>\n` +
+      `Пользователь: <b>${String(ver.user.first_name ?? "").trim() || "Пользователь"}</b> (chat <code>${tgId}</code>)\n` +
+      `Тест: ${meta.total_gb > 0 ? `${meta.total_gb} ГБ` : "безлимит"} / ${meta.days} дн.\n` +
+      `Сумма: <b>${meta.priceRub} ₽</b>`;
+    const sessionId = startPaymentAwaitingProof(
+      tgId,
+      tgId,
+      1,
+      "test",
+      undefined,
+      undefined,
+      {
+        username: String(ver.user.username ?? "").trim() || undefined,
+        first_name: String(ver.user.first_name ?? "").trim() || undefined,
+      },
+    );
+    markPaymentSessionPendingAdmin(sessionId, "webapp");
+
+    let sent = 0;
+    const admins = getTelegramPaymentNotifyChatIds();
+    for (const chatId of admins) {
+      try {
+        await sendTelegramPhotoBinary(chatId, parsed.bytes, {
+          caption,
+          filename: String(body.photo_name ?? "proof.jpg").trim() || "proof.jpg",
+          mimeType: String(body.photo_mime ?? parsed.mime) || parsed.mime,
+          parse_mode: "HTML",
+          reply_markup: adminDecisionKeyboard(sessionId),
+        });
+        sent++;
+      } catch {
+        // skip
+      }
+    }
+    if (sent === 0) {
+      res.status(502).json({ error: "send_failed" });
+      return;
+    }
+    res.json({ ok: true });
+    return;
+  }
+
   if (payKind === "topup") {
     if (userId <= 0 || !target) {
       res.status(400).json({ error: "topup_target_required" });
@@ -391,46 +778,48 @@ router.post("/webapp/payment-proof", async (req, res) => {
       res.status(400).json({ error: "bad_plan" });
       return;
     }
-    let finalPrice = top.price_rub;
-    let discountLine = "";
-    if (promoCode) {
-      try {
-        const calc = applyPromoCodeForUser({
-          code: promoCode,
-          tg_user_id: tgId,
-          original_price_rub: top.price_rub,
-        });
-        finalPrice = calc.final_price_rub;
-        discountLine = `\nПромокод: <b>${calc.promo.code}</b> (скидка ${calc.discount_percent}%)`;
-      } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
-        if (msg === "promo_not_found") {
-          res.status(404).json({ error: msg });
-          return;
-        }
-        if (msg === "promo_already_used") {
-          res.status(409).json({ error: msg });
-          return;
-        }
-        if (msg === "promo_inactive") {
-          res.status(400).json({ error: msg });
-          return;
-        }
-        if (msg === "promo_expired") {
-          res.status(400).json({ error: msg });
-          return;
-        }
+    let priceRes;
+    try {
+      priceRes = resolvePurchasePrice({
+        tg_user_id: tgId,
+        original_price_rub: top.price_rub,
+        promo_code: promoCode || undefined,
+        allow_referral: false,
+      });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (msg === "promo_not_found") {
+        res.status(404).json({ error: msg });
+        return;
+      }
+      if (msg === "promo_already_used") {
+        res.status(409).json({ error: msg });
+        return;
+      }
+      if (msg === "promo_inactive") {
         res.status(400).json({ error: msg });
         return;
       }
+      if (msg === "promo_expired") {
+        res.status(400).json({ error: msg });
+        return;
+      }
+      res.status(400).json({ error: msg });
+      return;
     }
+    const promoLine = priceRes.promo_calc
+      ? `\nПромокод: <b>${escHtml(priceRes.promo_calc.promo.code)}</b> (скидка ${priceRes.discount_percent}%)`
+      : "";
     const caption =
       `<b>Оплата из WebApp (докупка ГБ)</b>\n` +
       `Пользователь: <b>${String(ver.user.first_name ?? "").trim() || target.name || "Пользователь"}</b> (chat <code>${tgId}</code>)\n` +
-      `Подписка: <b>#${target.id} ${target.name}</b>\n` +
+      `Подписка: <b>${escHtml(subscriptionPublicName(target))}</b>\n` +
       `Пакет докупки: <b>${top.id}</b> — +${top.add_gb} ГБ\n` +
-      (promoCode ? `Сумма: <s>${top.price_rub} ₽</s> <b>${finalPrice} ₽</b>` : `Сумма: <b>${top.price_rub} ₽</b>`) +
-      discountLine;
+      formatAdminPaymentAmountLine(top.price_rub, {
+        roulette_discount_percent: priceRes.roulette_discount?.percent,
+        referral_discount_percent: priceRes.referral_discount_percent,
+      }) +
+      promoLine;
     const sessionId = startPaymentAwaitingProof(
       tgId,
       tgId,
@@ -439,11 +828,15 @@ router.post("/webapp/payment-proof", async (req, res) => {
       target.id,
       undefined,
       { username: String(ver.user.username ?? "").trim() || undefined, first_name: String(ver.user.first_name ?? "").trim() || undefined },
+      {
+        roulette_discount_percent: priceRes.roulette_discount?.percent,
+        roulette_discount_spin_id: priceRes.roulette_discount?.spin_id,
+      },
     );
-    if (promoCode) {
+    if (priceRes.promo_calc) {
       try {
         registerPromoCodeUsage({
-          code: promoCode,
+          code: priceRes.promo_calc.promo.code,
           tg_user_id: tgId,
           tg_username: String(ver.user.username ?? "").trim() || undefined,
           tg_first_name: String(ver.user.first_name ?? "").trim() || undefined,
@@ -484,49 +877,52 @@ router.post("/webapp/payment-proof", async (req, res) => {
     res.status(400).json({ error: "bad_plan" });
     return;
   }
-  let finalPrice = plan.price_rub;
-  let discountLine = "";
-  if (promoCode) {
-    try {
-      const calc = applyPromoCodeForUser({
-        code: promoCode,
-        tg_user_id: tgId,
-        original_price_rub: plan.price_rub,
-      });
-      finalPrice = calc.final_price_rub;
-      discountLine = `\nПромокод: <b>${calc.promo.code}</b> (скидка ${calc.discount_percent}%)`;
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      if (msg === "promo_not_found") {
-        res.status(404).json({ error: msg });
-        return;
-      }
-      if (msg === "promo_already_used") {
-        res.status(409).json({ error: msg });
-        return;
-      }
-      if (msg === "promo_inactive") {
-        res.status(400).json({ error: msg });
-        return;
-      }
-      if (msg === "promo_expired") {
-        res.status(400).json({ error: msg });
-        return;
-      }
+  let priceRes;
+  try {
+    priceRes = resolvePurchasePrice({
+      tg_user_id: tgId,
+      original_price_rub: plan.price_rub,
+      promo_code: promoCode || undefined,
+      target_user_id: target?.id,
+      new_subscription_name: target ? undefined : newSubscriptionName || "Новая подписка",
+    });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    if (msg === "promo_not_found") {
+      res.status(404).json({ error: msg });
+      return;
+    }
+    if (msg === "promo_already_used") {
+      res.status(409).json({ error: msg });
+      return;
+    }
+    if (msg === "promo_inactive") {
       res.status(400).json({ error: msg });
       return;
     }
+    if (msg === "promo_expired") {
+      res.status(400).json({ error: msg });
+      return;
+    }
+    res.status(400).json({ error: msg });
+    return;
   }
+  const promoLine = priceRes.promo_calc
+    ? `\nПромокод: <b>${escHtml(priceRes.promo_calc.promo.code)}</b> (скидка ${priceRes.discount_percent}%)`
+    : "";
 
   const caption =
     `<b>Оплата из WebApp</b>\n` +
     `Пользователь: <b>${String(ver.user.first_name ?? "").trim() || target?.name || "Пользователь"}</b> (chat <code>${tgId}</code>)\n` +
     (target
-      ? `Подписка: <b>#${target.id} ${target.name}</b>\n`
+      ? `Подписка: <b>${escHtml(subscriptionPublicName(target))}</b>\n`
       : `Новая подписка: <b>${newSubscriptionName || "Без названия"}</b>\n`) +
     `Тариф: <b>${plan.id}</b> — ${plan.total_gb > 0 ? `${plan.total_gb} ГБ` : "безлимит"} / ${plan.days} дн.\n` +
-    (promoCode ? `Сумма: <s>${plan.price_rub} ₽</s> <b>${finalPrice} ₽</b>` : `Сумма: <b>${plan.price_rub} ₽</b>`) +
-    discountLine;
+    formatAdminPaymentAmountLine(plan.price_rub, {
+      roulette_discount_percent: priceRes.roulette_discount?.percent,
+      referral_discount_percent: priceRes.referral_discount_percent,
+    }) +
+    promoLine;
   const sessionId = startPaymentAwaitingProof(
     tgId,
     tgId,
@@ -535,11 +931,17 @@ router.post("/webapp/payment-proof", async (req, res) => {
     target?.id,
     target ? undefined : newSubscriptionName || "Новая подписка",
     { username: String(ver.user.username ?? "").trim() || undefined, first_name: String(ver.user.first_name ?? "").trim() || undefined },
+    {
+      inviter_user_id: priceRes.referral_inviter_user_id,
+      discount_percent: priceRes.referral_discount_percent,
+      roulette_discount_percent: priceRes.roulette_discount?.percent,
+      roulette_discount_spin_id: priceRes.roulette_discount?.spin_id,
+    },
   );
-  if (promoCode) {
+  if (priceRes.promo_calc) {
     try {
       registerPromoCodeUsage({
-        code: promoCode,
+        code: priceRes.promo_calc.promo.code,
         tg_user_id: tgId,
         tg_username: String(ver.user.username ?? "").trim() || undefined,
         tg_first_name: String(ver.user.first_name ?? "").trim() || undefined,
@@ -680,6 +1082,186 @@ router.post("/webapp/dropper/finish", async (req, res) => {
     }
   }
   res.json({ ok: true });
+});
+
+router.post("/webapp/roulette/spin", async (req, res) => {
+  const body = (req.body ?? {}) as { init_data?: unknown; user_id?: unknown };
+  const initData = String(body.init_data ?? "").trim();
+  const ver = verifyTelegramWebAppInitData(initData);
+  if (!ver.ok) {
+    res.status(401).json({ error: "tg_webapp_auth_required", reason: ver.reason });
+    return;
+  }
+  const tgId = parseTgId(String(ver.user.id ?? ""));
+  if (!tgId) {
+    res.status(400).json({ error: "bad_payload" });
+    return;
+  }
+  const userId = Math.floor(Number(body.user_id));
+  const result = await spinRouletteForUser(tgId, {
+    user_id: Number.isFinite(userId) && userId > 0 ? userId : undefined,
+  });
+  if (!result.ok) {
+    const err = result.error ?? "spin_failed";
+    if (err.includes("билет") || err.includes("ticket") || err === "no_tickets") {
+      res.status(409).json({ error: err });
+      return;
+    }
+    if (err.includes("выключ") || err.includes("disabled")) {
+      res.status(403).json({ error: err });
+      return;
+    }
+    res.status(400).json({ error: err });
+    return;
+  }
+  try {
+    await pushClientListToAllDeployedServers();
+  } catch {
+    // ignore
+  }
+  const piggyUserId = result.spin?.user_id;
+  const piggyGb =
+    piggyUserId && userHasUnlimitedTrafficForRoulette(piggyUserId) ? getRouletteGbPiggy(piggyUserId) : null;
+  res.json({
+    ok: true,
+    prize: result.prize,
+    prize_index: result.prize_index,
+    tickets_remaining: result.tickets_remaining,
+    user_id: piggyUserId,
+    spin: result.spin,
+    ...(piggyGb != null
+      ? {
+          gb_piggy: {
+            accumulated_gb: piggyGb,
+            exchange_threshold: ROULETTE_GB_PIGGY_EXCHANGE_THRESHOLD,
+            can_exchange: piggyGb >= ROULETTE_GB_PIGGY_EXCHANGE_THRESHOLD,
+          },
+        }
+      : {}),
+  });
+});
+
+router.post("/webapp/roulette/exchange-piggy", async (req, res) => {
+  const body = (req.body ?? {}) as { init_data?: unknown; user_id?: unknown };
+  const initData = String(body.init_data ?? "").trim();
+  const ver = verifyTelegramWebAppInitData(initData);
+  if (!ver.ok) {
+    res.status(401).json({ error: "tg_webapp_auth_required", reason: ver.reason });
+    return;
+  }
+  const tgId = parseTgId(String(ver.user.id ?? ""));
+  const userId = Math.floor(Number(body.user_id));
+  if (!tgId || !Number.isFinite(userId) || userId <= 0) {
+    res.status(400).json({ error: "bad_payload" });
+    return;
+  }
+  const result = exchangeRouletteGbPiggyForTicket(tgId, userId);
+  if (!result.ok) {
+    const code = result.error;
+    if (code === "not_enough_gb") {
+      res.status(409).json({ error: code });
+      return;
+    }
+    if (code === "piggy_not_available") {
+      res.status(403).json({ error: code });
+      return;
+    }
+    res.status(400).json({ error: code });
+    return;
+  }
+  res.json({
+    ok: true,
+    tickets_remaining: result.tickets_remaining,
+    gb_piggy: {
+      accumulated_gb: result.accumulated_gb,
+      exchange_threshold: ROULETTE_GB_PIGGY_EXCHANGE_THRESHOLD,
+      can_exchange: result.accumulated_gb >= ROULETTE_GB_PIGGY_EXCHANGE_THRESHOLD,
+    },
+  });
+});
+
+router.post("/webapp/roulette/notify", async (req, res) => {
+  const body = (req.body ?? {}) as { init_data?: unknown; spin_id?: unknown };
+  const initData = String(body.init_data ?? "").trim();
+  const ver = verifyTelegramWebAppInitData(initData);
+  if (!ver.ok) {
+    res.status(401).json({ error: "tg_webapp_auth_required", reason: ver.reason });
+    return;
+  }
+  const tgId = parseTgId(String(ver.user.id ?? ""));
+  const spinId = Math.floor(Number(body.spin_id));
+  if (!tgId || !Number.isFinite(spinId) || spinId <= 0) {
+    res.status(400).json({ error: "bad_payload" });
+    return;
+  }
+  const result = await notifyRouletteSpinToUser(tgId, spinId);
+  if (!result.ok) {
+    res.status(404).json({ error: result.error });
+    return;
+  }
+  res.json({ ok: true });
+});
+
+router.post("/webapp/roulette/buy-tickets", async (req, res) => {
+  const body = (req.body ?? {}) as { init_data?: unknown; paymentType?: unknown; tickets?: unknown; user_id?: unknown };
+  const initData = String(body.init_data ?? "").trim();
+  const ver = verifyTelegramWebAppInitData(initData);
+  if (!ver.ok) {
+    res.status(401).json({ error: "tg_webapp_auth_required", reason: ver.reason });
+    return;
+  }
+  const tgId = parseTgId(String(ver.user.id ?? ""));
+  if (!tgId) {
+    res.status(400).json({ error: "bad_payload" });
+    return;
+  }
+  const paymentRaw = String(body.paymentType ?? "").trim();
+  if (paymentRaw !== "subscription_days" && paymentRaw !== "traffic_gb") {
+    res.status(400).json({ error: "Некорректный способ оплаты." });
+    return;
+  }
+  const tickets = Math.floor(Number(body.tickets) || 0);
+  if (tickets <= 0) {
+    res.status(400).json({ error: "Укажите количество билетов." });
+    return;
+  }
+
+  const userId = Math.floor(Number(body.user_id));
+  const result = await buyRouletteTicketsForUser(
+    tgId,
+    paymentRaw,
+    tickets,
+    Number.isFinite(userId) && userId > 0 ? userId : undefined,
+  );
+  if (!result.ok) {
+    const err = result.error;
+    if (err.includes("выключ") || err.includes("отключен")) {
+      res.status(403).json({ error: err });
+      return;
+    }
+    if (err.includes("Недостаточно") || err.includes("безлимит") || err.includes("Минималь") || err.includes("Максималь")) {
+      res.status(409).json({ error: err });
+      return;
+    }
+    res.status(400).json({ error: err });
+    return;
+  }
+
+  try {
+    await pushClientListToAllDeployedServers();
+  } catch {
+    // ignore
+  }
+
+  res.json({
+    ok: true,
+    tickets_count: result.tickets_count,
+    tickets_added: result.tickets_added,
+    cost: result.cost,
+    payment_type: result.payment_type,
+    remaining_days: result.remaining_days,
+    remaining_gb: result.remaining_gb,
+  });
 });
 
 export default router;

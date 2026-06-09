@@ -1,9 +1,11 @@
-import { useCallback, useEffect, useMemo, useState, type SVGProps } from "react";
+import { useCallback, useEffect, useMemo, useState, type CSSProperties, type SVGProps } from "react";
 import {
+  bulkDeleteInactiveUsers,
   createUser,
   deleteUser,
   listServers,
   listUsers,
+  notifyUserExpired,
   notifyUserExpiring,
   patchUser,
   pushAllUserClients,
@@ -14,14 +16,29 @@ import {
   type UserDto,
   userPreview,
 } from "../api";
-import { formatNotifyExpiryError, userExpiryNotifyEligible } from "../expiryNotify";
+import {
+  formatNotifyExpiredError,
+  formatNotifyExpiryError,
+  userExpiredNotifyEligible,
+  userExpiryBellEligible,
+} from "../expiryNotify";
+import { isAdminMobileShell } from "../adminMobile";
+import { subscriptionLabel } from "../subscriptionLabel";
 import DashboardLayout from "../components/DashboardLayout";
-import ImportUserModal from "../components/ImportUserModal";
 import Spinner from "../components/Spinner";
 import UserModal from "../components/UserModal";
+import { USERS_CHANGED_EVENT } from "../usersEvents";
 import { readUsersListCache, writeUsersListCache } from "../usersListCache";
+import { hideUserId, pruneHiddenUserIds, readHiddenUserIds, unhideUserId } from "../usersHidden";
 
 const BYTES_PER_GB = 1073741824;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+function startOfLocalDay(ts: number): number {
+  const d = new Date(ts);
+  d.setHours(0, 0, 0, 0);
+  return d.getTime();
+}
 
 function usedBytes(u: UserDto): number {
   return (Number(u.traffic_up) || 0) + (Number(u.traffic_down) || 0);
@@ -43,9 +60,10 @@ function isBotAutoEmail(email: string): boolean {
 
 function expiryPill(u: UserDto): { text: string; variant: "ok" | "bad" | "muted" } {
   if (!u.expiry_time) return { text: "без срока", variant: "muted" };
-  const days = Math.ceil((u.expiry_time - Date.now()) / (24 * 60 * 60 * 1000));
-  if (days < 0) return { text: "истёк", variant: "bad" };
-  if (days === 0) return { text: "сегодня", variant: "ok" };
+  const now = Date.now();
+  if (u.expiry_time <= now) return { text: "истёк", variant: "bad" };
+  const days = Math.floor((startOfLocalDay(u.expiry_time) - startOfLocalDay(now)) / DAY_MS);
+  if (days <= 0) return { text: "сегодня", variant: "ok" };
   if (days === 1) return { text: "1 день", variant: "ok" };
   if (days >= 2 && days <= 4) return { text: `через ${days} дня`, variant: "ok" };
   return { text: `через ${days} дней`, variant: "ok" };
@@ -85,6 +103,12 @@ function clientAlive(u: UserDto): boolean {
   return true;
 }
 
+function matchesUserSearch(u: UserDto, query: string): boolean {
+  const q = query.trim().toLowerCase();
+  if (!q) return true;
+  return String(u.id).includes(q) || String(u.name ?? "").toLowerCase().includes(q);
+}
+
 function IconPencil(p: SVGProps<SVGSVGElement>) {
   return (
     <svg width={18} height={18} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden {...p}>
@@ -106,7 +130,11 @@ function IconCopy(p: SVGProps<SVGSVGElement>) {
 function IconTrash(p: SVGProps<SVGSVGElement>) {
   return (
     <svg width={18} height={18} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden {...p}>
-      <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6h14zM10 11v6M14 11v6" />
+      <path d="M3 6h18" />
+      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" />
+      <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+      <path d="M10 11v6" />
+      <path d="M14 11v6" />
     </svg>
   );
 }
@@ -137,7 +165,26 @@ function IconResetTraffic(p: SVGProps<SVGSVGElement>) {
   );
 }
 
+function IconEye(p: SVGProps<SVGSVGElement>) {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden {...p}>
+      <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" strokeLinecap="round" strokeLinejoin="round" />
+      <circle cx="12" cy="12" r="3" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function IconPower(p: SVGProps<SVGSVGElement>) {
+  return (
+    <svg width={18} height={18} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden {...p}>
+      <path d="M12 2v10" />
+      <path d="M18.36 6.64a9 9 0 1 1-12.72 0" />
+    </svg>
+  );
+}
+
 type UserModalState = { kind: "closed" } | { kind: "create" } | { kind: "edit"; user: UserDto };
+type UsersTab = "active" | "inactive";
 
 export default function UsersPage({ onLogout }: { onLogout: () => void }) {
   const [users, setUsers] = useState<UserDto[]>(() => readUsersListCache()?.users ?? []);
@@ -147,7 +194,6 @@ export default function UsersPage({ onLogout }: { onLogout: () => void }) {
     () => readUsersListCache()?.previews ?? {},
   );
   const [modal, setModal] = useState<UserModalState>({ kind: "closed" });
-  const [importOpen, setImportOpen] = useState(false);
   const [deployedServers, setDeployedServers] = useState<ServerDto[]>(
     () => readUsersListCache()?.deployedServers ?? [],
   );
@@ -161,6 +207,19 @@ export default function UsersPage({ onLogout }: { onLogout: () => void }) {
   const [expirySort, setExpirySort] = useState<SortTri>(0);
   const [trafficSort, setTrafficSort] = useState<SortTri>(0);
   const [expiryTipUserId, setExpiryTipUserId] = useState<number | null>(null);
+  const [activeTab, setActiveTab] = useState<UsersTab>("active");
+  const [inactiveDeleteOpen, setInactiveDeleteOpen] = useState(false);
+  const [inactiveDeleteBusy, setInactiveDeleteBusy] = useState(false);
+  const [inactiveSelectedIds, setInactiveSelectedIds] = useState<number[]>([]);
+  const [inactiveDeleteSendMessage, setInactiveDeleteSendMessage] = useState(false);
+  const [inactiveDeleteMessage, setInactiveDeleteMessage] = useState("");
+  const [inactiveDeleteWarnOpen, setInactiveDeleteWarnOpen] = useState(false);
+  const [inactiveDeletePendingIds, setInactiveDeletePendingIds] = useState<number[]>([]);
+  const [mobileShell, setMobileShell] = useState(() => isAdminMobileShell());
+  const [statsRefreshing, setStatsRefreshing] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [hiddenUserIds, setHiddenUserIds] = useState<number[]>(() => readHiddenUserIds());
+  const [showHiddenUsers, setShowHiddenUsers] = useState(false);
 
   const sortedUsers = useMemo(() => {
     const arr = [...users];
@@ -176,67 +235,194 @@ export default function UsersPage({ onLogout }: { onLogout: () => void }) {
     return arr;
   }, [users, expirySort, trafficSort]);
 
+  const inactiveUsers = useMemo(
+    () => sortedUsers.filter((u) => u.expiry_time > 0 && u.expiry_time <= Date.now()),
+    [sortedUsers],
+  );
+  const activeUsers = useMemo(
+    () => sortedUsers.filter((u) => !(u.expiry_time > 0 && u.expiry_time <= Date.now())),
+    [sortedUsers],
+  );
+  const hiddenUserIdSet = useMemo(() => new Set(hiddenUserIds), [hiddenUserIds]);
+  const activeUsersListed = useMemo(
+    () => (showHiddenUsers ? activeUsers : activeUsers.filter((u) => !hiddenUserIdSet.has(u.id))),
+    [activeUsers, showHiddenUsers, hiddenUserIdSet],
+  );
+  const inactiveUsersListed = useMemo(
+    () => (showHiddenUsers ? inactiveUsers : inactiveUsers.filter((u) => !hiddenUserIdSet.has(u.id))),
+    [inactiveUsers, showHiddenUsers, hiddenUserIdSet],
+  );
+  const visibleUsers = activeTab === "inactive" ? inactiveUsersListed : activeUsersListed;
+  const filteredUsers = useMemo(
+    () => visibleUsers.filter((u) => matchesUserSearch(u, searchQuery)),
+    [visibleUsers, searchQuery],
+  );
+  const inactiveSelectedUsers = useMemo(
+    () => inactiveUsers.filter((u) => inactiveSelectedIds.includes(u.id)),
+    [inactiveUsers, inactiveSelectedIds],
+  );
+  const inactiveMissingTgUsers = useMemo(
+    () => inactiveSelectedUsers.filter((u) => !String(u.tg_id ?? "").trim()),
+    [inactiveSelectedUsers],
+  );
+
   useEffect(() => {
     if (expiryTipUserId == null) return;
+    const closeTip = () => setExpiryTipUserId(null);
     const onDocDown = (e: MouseEvent) => {
       const el = document.getElementById(`ud-expiry-host-${expiryTipUserId}`);
       if (el && e.target instanceof Node && el.contains(e.target)) return;
-      setExpiryTipUserId(null);
+      closeTip();
     };
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setExpiryTipUserId(null);
+      if (e.key === "Escape") closeTip();
     };
     document.addEventListener("mousedown", onDocDown);
     document.addEventListener("keydown", onKey);
+    window.addEventListener("resize", closeTip);
+    window.addEventListener("scroll", closeTip, true);
     return () => {
       document.removeEventListener("mousedown", onDocDown);
       document.removeEventListener("keydown", onKey);
+      window.removeEventListener("resize", closeTip);
+      window.removeEventListener("scroll", closeTip, true);
     };
   }, [expiryTipUserId]);
 
-  const tableLocked =
-    refreshing || deleteBusyId !== null || notifyBusyId !== null || resetBusyId !== null || syncBusy;
-
-  const refresh = useCallback(async () => {
-    setRefreshing(true);
-    try {
-      try {
-        const st = await syncUserStatsFromServers();
-        if (st.errors?.length) {
-          setMsg({ type: "err", text: `Статистика с узлов: ${st.errors.join("; ")}` });
-        }
-      } catch {
-        /* список всё равно подтянем из БД */
-      }
-      const [u, servers] = await Promise.all([listUsers(), listServers()]);
-      setUsers(u);
-      setDeployedServers(servers.filter((s) => s.vless_deployed));
-      const pv: Record<number, { count: number }> = {};
-      await Promise.all(
-        u.map(async (x) => {
-          try {
-            const p = await userPreview(x.id);
-            pv[x.id] = { count: p.count };
-          } catch {
-            pv[x.id] = { count: 0 };
-          }
-        }),
-      );
-      setPreviews(pv);
-      writeUsersListCache({
-        users: u,
-        previews: pv,
-        deployedServers: servers.filter((s) => s.vless_deployed),
-      });
-    } finally {
-      setRefreshing(false);
-    }
+  useEffect(() => {
+    setMobileShell(isAdminMobileShell());
+    const mq = window.matchMedia("(max-width: 960px)");
+    const onMq = () => setMobileShell(isAdminMobileShell());
+    mq.addEventListener("change", onMq);
+    return () => mq.removeEventListener("change", onMq);
   }, []);
 
+  const tableLocked =
+    refreshing || deleteBusyId !== null || notifyBusyId !== null || resetBusyId !== null || syncBusy || inactiveDeleteBusy;
+
+  function onHideUserToggle(u: UserDto) {
+    if (hiddenUserIdSet.has(u.id)) {
+      setHiddenUserIds(unhideUserId(u.id));
+    } else {
+      setHiddenUserIds(hideUserId(u.id));
+    }
+  }
+
+  function renderHideUserButton(u: UserDto, className?: string) {
+    const isHidden = hiddenUserIdSet.has(u.id);
+    return (
+      <button
+        type="button"
+        className={`ud-hide-user-btn ${isHidden && showHiddenUsers ? "ud-hide-user-btn--revealed" : ""} ${className ?? ""}`.trim()}
+        title={isHidden ? "Вернуть в список" : "Скрыть из списка"}
+        aria-label={isHidden ? "Вернуть в список" : "Скрыть из списка"}
+        onClick={() => onHideUserToggle(u)}
+      >
+        <IconEye />
+      </button>
+    );
+  }
+
+  const loadUsersSnapshot = useCallback(async () => {
+    const [u, servers] = await Promise.all([listUsers(), listServers()]);
+    const deployed = servers.filter((s) => s.vless_deployed);
+    setUsers(u);
+    setDeployedServers(deployed);
+    writeUsersListCache({
+      users: u,
+      previews: readUsersListCache()?.previews ?? {},
+      deployedServers: deployed,
+    });
+    return { users: u, deployedServers: deployed };
+  }, []);
+
+  const loadPreviewCounts = useCallback(async (nextUsers: UserDto[], nextDeployedServers: ServerDto[]) => {
+    const pv: Record<number, { count: number }> = {};
+    await Promise.all(
+      nextUsers.map(async (x) => {
+        try {
+          const p = await userPreview(x.id);
+          pv[x.id] = { count: p.count };
+        } catch {
+          pv[x.id] = { count: 0 };
+        }
+      }),
+    );
+    setPreviews(pv);
+    writeUsersListCache({
+      users: nextUsers,
+      previews: pv,
+      deployedServers: nextDeployedServers,
+    });
+  }, []);
+
+  const refresh = useCallback(
+    async (opts?: { silent?: boolean; skipSync?: boolean }) => {
+      if (!opts?.silent) setRefreshing(true);
+      try {
+        const snapshot = await loadUsersSnapshot();
+        void loadPreviewCounts(snapshot.users, snapshot.deployedServers);
+        if (!opts?.skipSync) {
+          void (async () => {
+            setStatsRefreshing(true);
+            try {
+              const st = await syncUserStatsFromServers();
+              if (st.errors?.length) {
+                setMsg({ type: "err", text: `Статистика с узлов: ${st.errors.join("; ")}` });
+              }
+            } catch {
+              /* базовый список уже показан */
+            } finally {
+              try {
+                const synced = await loadUsersSnapshot();
+                void loadPreviewCounts(synced.users, synced.deployedServers);
+              } finally {
+                setStatsRefreshing(false);
+              }
+            }
+          })();
+        }
+      } finally {
+        if (!opts?.silent) setRefreshing(false);
+      }
+    },
+    [loadPreviewCounts, loadUsersSnapshot],
+  );
+
   useEffect(() => {
-    if (readUsersListCache()) return;
-    refresh().catch((e) => setMsg({ type: "err", text: String(e) }));
+    const hasCache = Boolean(readUsersListCache());
+    refresh({ silent: hasCache }).catch((e) => setMsg({ type: "err", text: String(e) }));
   }, [refresh]);
+
+  useEffect(() => {
+    const onUsersChanged = () => {
+      void refresh().catch((e) => setMsg({ type: "err", text: String(e) }));
+    };
+    window.addEventListener(USERS_CHANGED_EVENT, onUsersChanged);
+    return () => window.removeEventListener(USERS_CHANGED_EVENT, onUsersChanged);
+  }, [refresh]);
+
+  useEffect(() => {
+    if (users.length === 0) return;
+    setHiddenUserIds((cur) => {
+      const pruned = pruneHiddenUserIds(users.map((u) => u.id));
+      if (pruned.length === cur.length && pruned.every((id, i) => id === cur[i])) return cur;
+      return pruned;
+    });
+  }, [users]);
+
+  useEffect(() => {
+    if (hiddenUserIds.length === 0) setShowHiddenUsers(false);
+  }, [hiddenUserIds.length]);
+
+  useEffect(() => {
+    setInactiveSelectedIds((cur) => cur.filter((id) => inactiveUsers.some((u) => u.id === id)));
+  }, [inactiveUsers]);
+
+  useEffect(() => {
+    if (!inactiveDeleteOpen) return;
+    setInactiveSelectedIds(inactiveUsers.map((u) => u.id));
+  }, [inactiveDeleteOpen, inactiveUsers]);
 
   async function onSubmitEdit(id: number, payload: CreateUserPayload) {
     const { user } = await patchUser(id, payload);
@@ -264,6 +450,308 @@ export default function UsersPage({ onLogout }: { onLogout: () => void }) {
     }
   }
 
+  async function performDeleteInactiveSelected(ids: number[]) {
+    const selected = inactiveUsers.filter((u) => ids.includes(u.id));
+    if (selected.length === 0) {
+      setMsg({ type: "err", text: "Выберите хотя бы одну неактивную подписку." });
+      return;
+    }
+
+    const rollbackUsers = users;
+    const rollbackPreviews = previews;
+    const selectedSet = new Set(selected.map((u) => u.id));
+    setUsers((cur) => cur.filter((u) => !selectedSet.has(u.id)));
+    setPreviews((cur) => {
+      const next = { ...cur };
+      for (const id of selectedSet) delete next[id];
+      return next;
+    });
+    writeUsersListCache({
+      users: rollbackUsers.filter((u) => !selectedSet.has(u.id)),
+      previews: Object.fromEntries(Object.entries(rollbackPreviews).filter(([k]) => !selectedSet.has(Number(k)))),
+      deployedServers,
+    });
+    setInactiveDeleteOpen(false);
+    setInactiveDeleteWarnOpen(false);
+    setInactiveDeletePendingIds([]);
+    setInactiveDeleteSendMessage(false);
+    setInactiveDeleteMessage("");
+    setInactiveSelectedIds([]);
+    setInactiveDeleteBusy(true);
+    setMsg({ type: "ok", text: `Удаляем ${selected.length} неактивных подписок…` });
+    try {
+      const result = await bulkDeleteInactiveUsers({
+        user_ids: selected.map((u) => u.id),
+        send_message: inactiveDeleteSendMessage,
+        message: inactiveDeleteSendMessage ? inactiveDeleteMessage.trim() : "",
+      });
+      await refresh();
+
+      const parts = [`Удалено ${result.deleted} из ${result.attempted} истёкших подписок.`];
+      if (inactiveDeleteSendMessage) {
+        parts.push(`Сообщение отправлено: ${result.notified}.`);
+        if (result.notify_failures.length > 0) {
+          parts.push(`Не удалось отправить: ${result.notify_failures.map((x) => x.user_name).join(", ")}.`);
+        }
+      }
+      if (result.delete_failures.length > 0) {
+        parts.push(`Не удалены: ${result.delete_failures.map((x) => x.user_name).join(", ")}.`);
+      }
+      setMsg({ type: result.delete_failures.length > 0 ? "err" : "ok", text: parts.join(" ") });
+    } catch (e) {
+      setUsers(rollbackUsers);
+      setPreviews(rollbackPreviews);
+      writeUsersListCache({
+        users: rollbackUsers,
+        previews: rollbackPreviews,
+        deployedServers,
+      });
+      await refresh().catch(() => undefined);
+      setMsg({ type: "err", text: String(e) });
+    } finally {
+      setInactiveDeleteBusy(false);
+    }
+  }
+
+  async function onDeleteInactiveSelected() {
+    if (inactiveSelectedUsers.length === 0) {
+      setMsg({ type: "err", text: "Выберите хотя бы одну неактивную подписку." });
+      return;
+    }
+    if (inactiveDeleteSendMessage && !inactiveDeleteMessage.trim()) {
+      setMsg({ type: "err", text: "Введите текст сообщения перед удалением." });
+      return;
+    }
+    if (inactiveDeleteSendMessage && inactiveMissingTgUsers.length > 0) {
+      setInactiveDeletePendingIds(inactiveSelectedUsers.map((u) => u.id));
+      setInactiveDeleteWarnOpen(true);
+      return;
+    }
+    await performDeleteInactiveSelected(inactiveSelectedUsers.map((u) => u.id));
+  }
+
+  function expiryTooltipStyle(userId: number): CSSProperties {
+    if (typeof window === "undefined" || typeof document === "undefined") {
+      return { position: "fixed", top: 72, left: 12 };
+    }
+    const host = document.getElementById(`ud-expiry-host-${userId}`);
+    if (!host) return { position: "fixed", top: 72, left: 12 };
+    const rect = host.getBoundingClientRect();
+    const maxWidth = Math.min(320, window.innerWidth - 24);
+    const left = Math.max(12, Math.min(rect.left, window.innerWidth - maxWidth - 12));
+    const top = Math.max(12, Math.min(rect.bottom + 8, window.innerHeight - 140));
+    return {
+      position: "fixed",
+      left,
+      top,
+      maxWidth,
+      zIndex: 9999,
+    };
+  }
+
+  function renderExpiryControl(u: UserDto, ex: { text: string; variant: "ok" | "bad" | "muted" }, className?: string) {
+    return (
+      <div className={`ud-expiry-wrap ${className ?? ""}`.trim()} id={`ud-expiry-host-${u.id}`}>
+        <button
+          type="button"
+          className={`ud-pill ud-pill-expiry ud-expiry-${ex.variant} ud-expiry-pill-btn`}
+          title="Нажмите, чтобы показать дату и время окончания"
+          aria-expanded={expiryTipUserId === u.id}
+          onClick={(e) => {
+            e.stopPropagation();
+            setExpiryTipUserId((id) => (id === u.id ? null : u.id));
+          }}
+        >
+          {ex.text}
+        </button>
+        {expiryTipUserId === u.id ? (
+          <div className="ud-expiry-tooltip" role="tooltip" style={expiryTooltipStyle(u.id)}>
+            {formatExpiryDetailText(u)}
+          </div>
+        ) : null}
+      </div>
+    );
+  }
+
+  function toggleUser(u: UserDto) {
+    void (async () => {
+      setToggleBusyId(u.id);
+      setMsg(null);
+      try {
+        await patchUser(u.id, { enable: !u.enable });
+        await refresh();
+      } catch (err) {
+        setMsg({ type: "err", text: String(err) });
+      } finally {
+        setToggleBusyId(null);
+      }
+    })();
+  }
+
+  function renderUserToolbar(u: UserDto, opts?: { mobile?: boolean }) {
+    const mobile = opts?.mobile === true;
+    return (
+      <div className="ud-toolbar" role="group" aria-label="Действия по клиенту">
+        <button
+          type="button"
+          className="ud-tool"
+          title="Изменить"
+          aria-label="Изменить"
+          disabled={tableLocked}
+          onClick={() => setModal({ kind: "edit", user: u })}
+        >
+          <IconPencil />
+        </button>
+        {mobile ? (
+          <button
+            type="button"
+            className={`ud-tool ${u.enable ? "ud-tool-success" : "ud-tool-danger"}`}
+            title={u.enable ? "Выключить" : "Включить"}
+            aria-label={u.enable ? "Выключить" : "Включить"}
+            disabled={toggleBusyId === u.id || tableLocked}
+            onClick={() => toggleUser(u)}
+          >
+            {toggleBusyId === u.id ? <Spinner /> : <IconPower />}
+          </button>
+        ) : null}
+        <button
+          type="button"
+          className="ud-tool"
+          title="Отправить список UUID клиентов на все развёрнутые серверы"
+          aria-label="Отправить UUID на серверы"
+          disabled={syncBusy}
+          onClick={() => void onPushAll()}
+        >
+          <IconSync />
+        </button>
+        <button
+          type="button"
+          className="ud-tool"
+          title="Обнулить трафик"
+          aria-label="Обнулить трафик"
+          disabled={resetBusyId === u.id || tableLocked}
+          onClick={() => {
+            if (!confirm(`Обнулить трафик у «${u.name}»?`)) return;
+            void (async () => {
+              setResetBusyId(u.id);
+              setMsg(null);
+              try {
+                await resetUserTraffic(u.id);
+                setMsg({ type: "ok", text: `Трафик «${u.name}» обнулён.` });
+                await refresh();
+              } catch (err) {
+                setMsg({ type: "err", text: String(err) });
+              } finally {
+                setResetBusyId(null);
+              }
+            })();
+          }}
+        >
+          {resetBusyId === u.id ? <Spinner /> : <IconResetTraffic />}
+        </button>
+        <button
+          type="button"
+          className="ud-tool"
+          title="Копировать URL подписки"
+          aria-label="Копировать URL подписки"
+          disabled={copyBusyId === u.id}
+          onClick={() => {
+            setCopyBusyId(u.id);
+            void navigator.clipboard.writeText(u.subscription_url).finally(() => {
+              window.setTimeout(() => setCopyBusyId((id) => (id === u.id ? null : id)), 500);
+            });
+          }}
+        >
+          <IconCopy />
+        </button>
+        {userExpiryBellEligible(u) ? (
+          <button
+            type="button"
+            className={`ud-tool${userExpiredNotifyEligible(u) ? " ud-tool-warn" : ""}`}
+            title={
+              userExpiredNotifyEligible(u)
+                ? "Подписка истекла — отправить в Telegram"
+                : "Напоминание в Telegram (истекает ≤ 3 суток)"
+            }
+            aria-label={
+              userExpiredNotifyEligible(u) ? "Уведомить об истечении подписки" : "Напоминание в Telegram"
+            }
+            disabled={notifyBusyId === u.id || tableLocked}
+            onClick={() => {
+              void (async () => {
+                setNotifyBusyId(u.id);
+                setMsg(null);
+                const expired = userExpiredNotifyEligible(u);
+                try {
+                  if (expired) {
+                    await notifyUserExpired(u.id);
+                    setMsg({ type: "ok", text: `Telegram: подписка «${u.name}» истекла.` });
+                  } else {
+                    await notifyUserExpiring(u.id);
+                    setMsg({ type: "ok", text: `Telegram: напоминание «${u.name}».` });
+                  }
+                } catch (err) {
+                  setMsg({
+                    type: "err",
+                    text: expired ? formatNotifyExpiredError(String(err)) : formatNotifyExpiryError(String(err)),
+                  });
+                } finally {
+                  setNotifyBusyId(null);
+                }
+              })();
+            }}
+          >
+            {notifyBusyId === u.id ? <Spinner /> : <IconBell />}
+          </button>
+        ) : null}
+        <button
+          type="button"
+          className="ud-tool ud-tool-danger"
+          title="Удалить клиента"
+          aria-label="Удалить"
+          disabled={tableLocked || deleteBusyId === u.id}
+          onClick={async () => {
+            if (!confirm(`Удалить «${u.name}»?`)) return;
+            setDeleteBusyId(u.id);
+            setMsg(null);
+            try {
+              await deleteUser(u.id);
+              await refresh();
+            } catch (err) {
+              setMsg({ type: "err", text: String(err) });
+            } finally {
+              setDeleteBusyId(null);
+            }
+          }}
+        >
+          {deleteBusyId === u.id ? <Spinner /> : <IconTrash />}
+        </button>
+      </div>
+    );
+  }
+
+  function renderUserOnlineStatus(u: UserDto) {
+    if (u.stats_synced_at) {
+      return (
+        <span
+          className={`ud-pill ${u.online ? "ud-pill-online" : "ud-pill-offline"}`}
+          title={
+            u.online
+              ? "По данным Xray есть активные соединения для этого клиента"
+              : "Нет активных соединений по последнему опросу узлов"
+          }
+        >
+          {u.online ? "Онлайн" : "Офлайн"}
+        </span>
+      );
+    }
+    return (
+      <span className="ud-pill ud-pill-stats-unknown" title="Ещё не было успешного опроса узлов">
+        —
+      </span>
+    );
+  }
+
   return (
     <DashboardLayout onLogout={onLogout}>
       <section className="panel users-hero-panel">
@@ -271,14 +759,11 @@ export default function UsersPage({ onLogout }: { onLogout: () => void }) {
           <div>
             <h1>Пользователи</h1>
             <p className="sub users-hero-sub">
-              Карточки в стиле панели: трафик, срок, действия. Импорт из x-ui — отдельным окном. Напоминание в Telegram
-              за 3 суток до окончания — при указанном Chat ID.
+              Карточки в стиле панели: трафик, срок, действия. Напоминание в Telegram за 3 суток до окончания — при
+              указанном Chat ID.
             </p>
           </div>
           <div className="users-hero-actions">
-            <button type="button" className="ghost" disabled={refreshing} onClick={() => setImportOpen(true)}>
-              Импорт из x-ui
-            </button>
             <button
               type="button"
               className="primary"
@@ -304,45 +789,350 @@ export default function UsersPage({ onLogout }: { onLogout: () => void }) {
         onUpdate={onSubmitEdit}
       />
 
-      <ImportUserModal
-        open={importOpen}
-        onClose={() => setImportOpen(false)}
-        onSuccess={refresh}
-        onMessage={setMsg}
-      />
+      {inactiveDeleteOpen ? (
+        <div
+          className="modal-backdrop"
+          onClick={(e) => {
+            if (e.target === e.currentTarget && !inactiveDeleteBusy) {
+              setInactiveDeleteOpen(false);
+            }
+          }}
+        >
+          <div className="modal users-inactive-delete-modal">
+            <div className="modal-head">
+              <h2>Удаление неактивных подписок</h2>
+              <button
+                type="button"
+                className="ghost modal-close"
+                onClick={() => setInactiveDeleteOpen(false)}
+                disabled={inactiveDeleteBusy}
+                aria-label="Закрыть"
+              >
+                ×
+              </button>
+            </div>
+            <div className="modal-body users-inactive-delete-body">
+              <p className="sub" style={{ marginTop: 0, marginBottom: "0.8rem" }}>
+                Выберите истёкшие подписки для удаления. При желании можно отправить Telegram-сообщение перед удалением.
+              </p>
+              <div className="users-inactive-delete-tools">
+                <button
+                  type="button"
+                  className="ghost"
+                  disabled={inactiveDeleteBusy || inactiveUsers.length === 0}
+                  onClick={() => setInactiveSelectedIds(inactiveUsers.map((u) => u.id))}
+                >
+                  Выбрать все
+                </button>
+                <button
+                  type="button"
+                  className="ghost"
+                  disabled={inactiveDeleteBusy || inactiveSelectedIds.length === 0}
+                  onClick={() => setInactiveSelectedIds([])}
+                >
+                  Снять выбор
+                </button>
+                <span className="field-hint">
+                  Выбрано: {inactiveSelectedIds.length} из {inactiveUsers.length}
+                </span>
+              </div>
+              <div className="users-inactive-delete-list">
+                {inactiveUsers.map((u) => {
+                  const checked = inactiveSelectedIds.includes(u.id);
+                  return (
+                    <label key={u.id} className="users-inactive-delete-item">
+                      <span className="users-inactive-delete-check">
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          disabled={inactiveDeleteBusy}
+                          onChange={() =>
+                            setInactiveSelectedIds((cur) =>
+                              checked ? cur.filter((id) => id !== u.id) : [...cur, u.id].sort((a, b) => a - b),
+                            )
+                          }
+                        />
+                      </span>
+                      <span className="users-inactive-delete-item-main">
+                        <span className="users-inactive-delete-item-name">
+                          {subscriptionLabel(u)}
+                        </span>
+                        <span className="users-inactive-delete-item-meta">
+                          {u.expiry_time > 0 ? new Date(u.expiry_time).toLocaleString("ru-RU") : "Без даты"}
+                          {u.tg_id ? ` · TG ${u.tg_id}` : " · без Telegram"}
+                        </span>
+                      </span>
+                    </label>
+                  );
+                })}
+              </div>
+              <div className="users-inactive-delete-message-row">
+                <div className="users-inactive-delete-message-copy">
+                  <span className="users-inactive-delete-message-title">Отправить сообщение</span>
+                  <span className="field-hint">Telegram перед удалением</span>
+                </div>
+                <button
+                  type="button"
+                  className={`toggle ${inactiveDeleteSendMessage ? "on" : ""}`}
+                  disabled={inactiveDeleteBusy}
+                  aria-pressed={inactiveDeleteSendMessage}
+                  aria-label="Отправить сообщение перед удалением"
+                  onClick={() => setInactiveDeleteSendMessage((v) => !v)}
+                />
+              </div>
+              {inactiveDeleteSendMessage ? (
+                <div className="form-field users-inactive-delete-message-field">
+                  <label htmlFor="inactive-delete-message">Текст сообщения</label>
+                  <textarea
+                    id="inactive-delete-message"
+                    className="users-inactive-delete-message-input"
+                    value={inactiveDeleteMessage}
+                    disabled={inactiveDeleteBusy}
+                    onChange={(e) => setInactiveDeleteMessage(e.target.value)}
+                    placeholder="Например: Ваша подписка истекла и была удалена. При необходимости оформите новую."
+                    rows={4}
+                  />
+                </div>
+              ) : null}
+            </div>
+            <div className="modal-footer users-inactive-modal-footer">
+              <button
+                type="button"
+                className="ghost"
+                onClick={() => setInactiveDeleteOpen(false)}
+                disabled={inactiveDeleteBusy}
+              >
+                Отмена
+              </button>
+              <button
+                type="button"
+                className="danger"
+                disabled={
+                  inactiveDeleteBusy ||
+                  inactiveSelectedIds.length === 0 ||
+                  (inactiveDeleteSendMessage && !inactiveDeleteMessage.trim())
+                }
+                onClick={() => void onDeleteInactiveSelected()}
+              >
+                {inactiveDeleteBusy ? (
+                  <>
+                    <Spinner /> Удаление…
+                  </>
+                ) : inactiveDeleteSendMessage ? (
+                  "Отправить и удалить"
+                ) : (
+                  "Удалить"
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
-      <section className="panel">
-        <div className="section-title-row users-dash-head">
-          <h1 style={{ fontSize: "1.1rem", margin: 0 }}>Список</h1>
-          <div className="users-dash-head-right">
-            <button
-              type="button"
-              className="ghost ud-sync-all"
-              disabled={refreshing}
-              onClick={() => void refresh()}
-              title="Обновить список и статистику трафика/онлайн с узлов"
-            >
-              {refreshing ? (
-                <>
-                  <Spinner /> Обновление…
-                </>
+      {inactiveDeleteWarnOpen ? (
+        <div
+          className="modal-backdrop"
+          onClick={(e) => {
+            if (e.target === e.currentTarget && !inactiveDeleteBusy) {
+              setInactiveDeleteWarnOpen(false);
+              setInactiveDeletePendingIds([]);
+            }
+          }}
+        >
+          <div className="modal users-inactive-warn-modal">
+            <div className="modal-head">
+              <h2>Не у всех есть Telegram ID</h2>
+              <button
+                type="button"
+                className="ghost modal-close"
+                onClick={() => {
+                  setInactiveDeleteWarnOpen(false);
+                  setInactiveDeletePendingIds([]);
+                }}
+                disabled={inactiveDeleteBusy}
+                aria-label="Закрыть"
+              >
+                ×
+              </button>
+            </div>
+            <div className="modal-body">
+              <p className="sub" style={{ marginTop: 0, marginBottom: "0.8rem" }}>
+                У этих пользователей нет `tg_id`, поэтому сообщение им не отправится. Подписки всё равно можно удалить.
+              </p>
+              <div className="users-inactive-warn-list">
+                {inactiveMissingTgUsers.map((u) => (
+                  <div key={u.id} className="users-inactive-warn-item">
+                    {subscriptionLabel(u)}
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div className="modal-footer users-inactive-modal-footer">
+              <button
+                type="button"
+                className="ghost"
+                disabled={inactiveDeleteBusy}
+                onClick={() => {
+                  setInactiveDeleteWarnOpen(false);
+                  setInactiveDeletePendingIds([]);
+                }}
+              >
+                Отмена
+              </button>
+              <button
+                type="button"
+                className="danger"
+                disabled={inactiveDeleteBusy}
+                onClick={() => void performDeleteInactiveSelected(inactiveDeletePendingIds)}
+              >
+                Продолжить удаление
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      <section className="panel users-dash-panel">
+        <div className="users-dash-top">
+          <h1 className="users-dash-title">Список</h1>
+          <div className="users-dash-actions">
+            <div className="users-dash-refresh-col">
+              {hiddenUserIds.length > 0 ? (
+                <button
+                  type="button"
+                  className={`ud-show-hidden-btn ${showHiddenUsers ? "active" : ""}`}
+                  title={showHiddenUsers ? "Снова скрыть" : `Показать скрытых (${hiddenUserIds.length})`}
+                  aria-label={showHiddenUsers ? "Снова скрыть" : "Показать скрытых пользователей"}
+                  aria-pressed={showHiddenUsers}
+                  onClick={() => setShowHiddenUsers((v) => !v)}
+                >
+                  <IconEye />
+                </button>
               ) : (
-                "Обновить"
+                <span className="ud-show-hidden-btn ud-show-hidden-btn--placeholder" aria-hidden="true" />
               )}
-            </button>
+              <button
+                type="button"
+                className="ghost ud-sync-all"
+                disabled={refreshing}
+                onClick={() => void refresh()}
+                title="Обновить список и статистику трафика/онлайн с узлов"
+              >
+                {refreshing ? (
+                  <>
+                    <Spinner /> Обновление…
+                  </>
+                ) : (
+                  "Обновить"
+                )}
+              </button>
+            </div>
             {refreshing ? (
               <span className="section-loading" title="Обновление…">
                 <Spinner /> Обновление…
               </span>
             ) : null}
+            {!refreshing && statsRefreshing ? (
+              <span className="section-loading" title="Фоновое обновление данных">
+                <Spinner /> Обновление данных…
+              </span>
+            ) : null}
           </div>
         </div>
-        {users.length === 0 ? (
+        <div className="users-dash-filters">
+          <div className="users-tabs" role="tablist" aria-label="Фильтр подписок">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeTab === "active"}
+              className={`users-tab-button ${activeTab === "active" ? "active" : ""}`}
+              onClick={() => setActiveTab("active")}
+            >
+              Активные
+              <span className="users-tab-count">{activeUsersListed.length}</span>
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeTab === "inactive"}
+              className={`users-tab-button ${activeTab === "inactive" ? "active" : ""}`}
+              onClick={() => setActiveTab("inactive")}
+            >
+              Неактивные
+              <span className="users-tab-count">{inactiveUsersListed.length}</span>
+            </button>
+          </div>
+          <div className="users-dash-filters-right">
+            {activeTab === "inactive" ? (
+              <button
+                type="button"
+                className="users-inline-danger"
+                disabled={inactiveUsersListed.length === 0 || tableLocked}
+                onClick={() => setInactiveDeleteOpen(true)}
+              >
+                Удалить неактивные
+              </button>
+            ) : null}
+            <input
+              type="search"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Поиск по названию"
+              className="users-search-input"
+              autoComplete="off"
+            />
+          </div>
+        </div>
+        {filteredUsers.length === 0 ? (
           <p className="sub" style={{ marginBottom: 0 }}>
-            Пока нет клиентов — нажмите «Новый клиент» или «Импорт из x-ui».
+            {searchQuery.trim()
+              ? "Ничего не найдено."
+              : activeTab === "inactive"
+                ? "Нет истёкших подписок."
+                : "Пока нет активных подписок — нажмите «Новый клиент» или «+» в шапке панели."}
           </p>
+        ) : mobileShell ? (
+          <div className="users-mobile-list">
+            {filteredUsers.map((u) => {
+              const pct = trafficPercent(u);
+              const ex = expiryPill(u);
+              const alive = clientAlive(u);
+              return (
+                <article
+                  key={u.id}
+                  className={`users-mobile-card ${hiddenUserIdSet.has(u.id) && showHiddenUsers ? "users-mobile-card--hidden-preview" : ""}`}
+                >
+                  <div className="users-mobile-card-head">
+                    <div className="users-mobile-card-title-wrap">
+                      <div className="ud-client-line users-mobile-card-title">
+                        <span className={`ud-client-dot ${alive ? "ud-client-dot-on" : "ud-client-dot-off"}`} aria-hidden />
+                        <span className="ud-client-name">{u.name}</span>
+                      </div>
+                      {renderHideUserButton(u, "ud-hide-user-btn--mobile")}
+                    </div>
+                    {renderExpiryControl(u, ex, "users-mobile-card-expiry")}
+                    <div className="users-mobile-card-online">{renderUserOnlineStatus(u)}</div>
+                  </div>
+
+                  <div className="users-mobile-traffic">
+                    <div className="users-mobile-stat-label">Трафик</div>
+                    <div className="users-mobile-traffic-value">{formatUsedGb(u)}</div>
+                    <div
+                      className="ud-traffic-bar-wrap users-mobile-traffic-bar"
+                      title={u.total_gb > 0 ? `Лимит ${u.total_gb} GB` : "Без лимита"}
+                    >
+                      <div className="ud-traffic-bar-fill" style={{ width: `${u.total_gb > 0 ? pct : 0}%` }} />
+                    </div>
+                    <div className="ud-traffic-cap muted">{u.total_gb > 0 ? `${u.total_gb} GB` : "∞"}</div>
+                  </div>
+
+                  {renderUserToolbar(u, { mobile: true })}
+                </article>
+              );
+            })}
+          </div>
         ) : (
-          <div className="table-wrap users-dash-wrap">
+          <div className="table-wrap admin-mobile-scroll-x users-dash-wrap">
             <table className="users-dash-table">
               <thead>
                 <tr>
@@ -418,7 +1208,7 @@ export default function UsersPage({ onLogout }: { onLogout: () => void }) {
                 </tr>
               </thead>
               <tbody>
-                {sortedUsers.map((u) => {
+                {filteredUsers.map((u) => {
                   const pct = trafficPercent(u);
                   const ex = expiryPill(u);
                   const alive = clientAlive(u);
@@ -428,7 +1218,10 @@ export default function UsersPage({ onLogout }: { onLogout: () => void }) {
                     ) : null;
                   const infoOpen = expandedInfoId === u.id && Boolean((u.comment || "").trim());
                   return (
-                    <tr key={u.id} className="ud-row">
+                    <tr
+                      key={u.id}
+                      className={`ud-row ${hiddenUserIdSet.has(u.id) && showHiddenUsers ? "ud-row--hidden-preview" : ""}`}
+                    >
                       <td className="ud-td-actions">
                         <div className="ud-toolbar" role="group" aria-label="Действия по клиенту">
                           <button
@@ -491,22 +1284,41 @@ export default function UsersPage({ onLogout }: { onLogout: () => void }) {
                           >
                             <IconCopy />
                           </button>
-                          {userExpiryNotifyEligible(u) ? (
+                          {userExpiryBellEligible(u) ? (
                             <button
                               type="button"
-                              className="ud-tool"
-                              title="Напоминание в Telegram"
-                              aria-label="Напоминание в Telegram"
+                              className={`ud-tool${userExpiredNotifyEligible(u) ? " ud-tool-warn" : ""}`}
+                              title={
+                                userExpiredNotifyEligible(u)
+                                  ? "Подписка истекла — отправить в Telegram"
+                                  : "Напоминание в Telegram (истекает ≤ 3 суток)"
+                              }
+                              aria-label={
+                                userExpiredNotifyEligible(u)
+                                  ? "Уведомить об истечении подписки"
+                                  : "Напоминание в Telegram"
+                              }
                               disabled={notifyBusyId === u.id || tableLocked}
                               onClick={() => {
                                 void (async () => {
                                   setNotifyBusyId(u.id);
                                   setMsg(null);
+                                  const expired = userExpiredNotifyEligible(u);
                                   try {
-                                    await notifyUserExpiring(u.id);
-                                    setMsg({ type: "ok", text: `Telegram: напоминание «${u.name}».` });
+                                    if (expired) {
+                                      await notifyUserExpired(u.id);
+                                      setMsg({ type: "ok", text: `Telegram: подписка «${u.name}» истекла.` });
+                                    } else {
+                                      await notifyUserExpiring(u.id);
+                                      setMsg({ type: "ok", text: `Telegram: напоминание «${u.name}».` });
+                                    }
                                   } catch (err) {
-                                    setMsg({ type: "err", text: formatNotifyExpiryError(String(err)) });
+                                    setMsg({
+                                      type: "err",
+                                      text: expired
+                                        ? formatNotifyExpiredError(String(err))
+                                        : formatNotifyExpiryError(String(err)),
+                                    });
                                   } finally {
                                     setNotifyBusyId(null);
                                   }
@@ -619,27 +1431,7 @@ export default function UsersPage({ onLogout }: { onLogout: () => void }) {
                       <td>
                         <span className="ud-pill ud-pill-total">{formatUsedGb(u)}</span>
                       </td>
-                      <td className="ud-td-expiry" id={`ud-expiry-host-${u.id}`}>
-                        <div className="ud-expiry-wrap">
-                          <button
-                            type="button"
-                            className={`ud-pill ud-pill-expiry ud-expiry-${ex.variant} ud-expiry-pill-btn`}
-                            title="Нажмите, чтобы показать дату и время окончания"
-                            aria-expanded={expiryTipUserId === u.id}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setExpiryTipUserId((id) => (id === u.id ? null : u.id));
-                            }}
-                          >
-                            {ex.text}
-                          </button>
-                          {expiryTipUserId === u.id ? (
-                            <div className="ud-expiry-tooltip" role="tooltip">
-                              {formatExpiryDetailText(u)}
-                            </div>
-                          ) : null}
-                        </div>
-                      </td>
+                      <td className="ud-td-expiry">{renderExpiryControl(u, ex)}</td>
                       <td>
                         <span className="ud-pill ud-pill-total" title={u.device_limit_enabled ? `Лимит: ${u.device_limit_count}` : "Лимит устройств выключен"}>
                           {u.online_devices}
@@ -647,8 +1439,21 @@ export default function UsersPage({ onLogout }: { onLogout: () => void }) {
                         </span>
                       </td>
                       <td className="ud-td-nodes">
-                        <div className="ud-nodes-main">{previews[u.id]?.count ?? "—"}</div>
-                        <div className="muted ud-nodes-sub">лимит {u.subscription_server_count > 0 ? `≤ ${u.subscription_server_count}` : "все"}</div>
+                        <div className="ud-nodes-cell">
+                          <div className="ud-nodes-body">
+                            <div className="ud-nodes-main">{previews[u.id]?.count ?? "—"}</div>
+                            <div className="muted ud-nodes-sub">
+                              {u.subscription_server_ids?.length
+                                ? u.subscription_server_count === 0
+                                  ? `все (${u.subscription_server_ids.length})`
+                                  : `${u.subscription_server_ids.length} узл.`
+                                : u.subscription_server_count > 0
+                                  ? `≤ ${u.subscription_server_count}`
+                                  : "все"}
+                            </div>
+                          </div>
+                          {renderHideUserButton(u)}
+                        </div>
                       </td>
                     </tr>
                   );

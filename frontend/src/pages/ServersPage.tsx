@@ -1,6 +1,7 @@
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import {
   addServer,
+  addServerToAllSubscriptions,
   deleteServer,
   deployVlessStream,
   installXrayStream,
@@ -12,7 +13,8 @@ import {
 } from "../api";
 import DashboardLayout from "../components/DashboardLayout";
 import LiveLogPanel, { type LogLine } from "../components/LiveLogPanel";
-import ServerSettingsCard from "../components/ServerSettingsCard";
+import ServerCard, { type ServerBusyAction } from "../components/ServerCard";
+import ServerSubscriptionSettingsPanel from "../components/ServerSubscriptionSettingsPanel";
 import { COUNTRY_CODES_ALPHA2, countryCodeLabel } from "../countryCodes";
 import { countryFlagEmoji } from "../flagEmoji";
 
@@ -21,6 +23,7 @@ export default function ServersPage({ onLogout }: { onLogout: () => void }) {
   const [msg, setMsg] = useState<{ type: "ok" | "err"; text: string } | null>(null);
   const [activity, setActivity] = useState<{ title: string; lines: LogLine[] } | null>(null);
   const [busyId, setBusyId] = useState<number | null>(null);
+  const [busyAction, setBusyAction] = useState<ServerBusyAction>(null);
 
   const [name, setName] = useState("");
   const [countryCode, setCountryCode] = useState("");
@@ -29,6 +32,7 @@ export default function ServersPage({ onLogout }: { onLogout: () => void }) {
   const [sshPass, setSshPass] = useState("");
   const [sshPort, setSshPort] = useState("22");
   const [vlessPort, setVlessPort] = useState("8443");
+  const [subSettingsServer, setSubSettingsServer] = useState<ServerDto | null>(null);
 
   const refresh = useCallback(async () => {
     const s = await listServers();
@@ -97,11 +101,13 @@ export default function ServersPage({ onLogout }: { onLogout: () => void }) {
 
   async function runServerStream(
     serverId: number,
+    action: ServerBusyAction,
     title: string,
     run: (emit: (ev: NdjsonEvent) => void) => Promise<void>,
   ) {
     setMsg(null);
     setBusyId(serverId);
+    setBusyAction(action);
     setActivity({ title, lines: [] });
     let finished = false;
     try {
@@ -115,6 +121,7 @@ export default function ServersPage({ onLogout }: { onLogout: () => void }) {
       setMsg({ type: "err", text: t });
     } finally {
       setBusyId(null);
+      setBusyAction(null);
       await refresh();
     }
   }
@@ -192,72 +199,92 @@ export default function ServersPage({ onLogout }: { onLogout: () => void }) {
         ) : (
           <div className="server-card-grid">
             {servers.map((s) => (
-              <ServerSettingsCard
+              <ServerCard
                 key={s.id}
                 server={s}
                 disabled={busyId === s.id}
+                busyAction={busyId === s.id ? busyAction : null}
+                onNotify={(type, text) => setMsg({ type, text })}
                 onSave={async (newName, cc) => {
                   setMsg(null);
-                  await patchServer(s.id, { name: newName, country_code: cc });
-                  setMsg({ type: "ok", text: "Имя и страна сервера сохранены. Клиентам обновите подписку." });
+                  setBusyId(s.id);
+                  setBusyAction("save");
+                  try {
+                    await patchServer(s.id, { name: newName, country_code: cc });
+                    setMsg({ type: "ok", text: "Имя и страна сервера сохранены. Клиентам обновите подписку." });
+                    await refresh();
+                  } finally {
+                    setBusyId(null);
+                    setBusyAction(null);
+                  }
+                }}
+                onOpenSubscriptionSettings={() => setSubSettingsServer(s)}
+                onTestSsh={() =>
+                  void runServerStream(s.id, "ssh", `SSH: ${s.host}`, async (emit) => {
+                    await testServerStream(s.id, emit);
+                  })
+                }
+                onInstallXray={() =>
+                  void runServerStream(s.id, "xray", `Установка Xray: ${s.host}`, async (emit) => {
+                    await installXrayStream(s.id, emit);
+                  })
+                }
+                onDeployVless={() =>
+                  void runServerStream(s.id, "vless", `VLESS: ${s.host}`, async (emit) => {
+                    await deployVlessStream(s.id, emit);
+                  })
+                }
+                onAddToAllSubscriptions={() => {
+                  const n = s.subscription_users_missing ?? 0;
+                  if (
+                    !window.confirm(
+                      `Добавить «${s.name || s.host}» в подписку у ${n} клиент${n === 1 ? "а" : n < 5 ? "ов" : "ов"}?`,
+                    )
+                  ) {
+                    return;
+                  }
+                  void (async () => {
+                    setBusyId(s.id);
+                    setBusyAction("addSubs");
+                    setMsg(null);
+                    try {
+                      const r = await addServerToAllSubscriptions(s.id);
+                      await refresh();
+                      setMsg({
+                        type: "ok",
+                        text:
+                          r.updated_users > 0
+                            ? `Сервер добавлен в подписки (${r.updated_users} клиент${r.updated_users === 1 ? "" : "ов"}).`
+                            : "Сервер уже был во всех подписках.",
+                      });
+                    } catch (e) {
+                      setMsg({ type: "err", text: String(e) });
+                    } finally {
+                      setBusyId(null);
+                      setBusyAction(null);
+                    }
+                  })();
+                }}
+                onDelete={async () => {
+                  await deleteServer(s.id);
                   await refresh();
                 }}
-              >
-                <div className="server-card-actions-inner">
-                  <button
-                    type="button"
-                    className="ghost"
-                    disabled={busyId === s.id}
-                    onClick={() =>
-                      void runServerStream(s.id, `SSH: ${s.host}`, async (emit) => {
-                        await testServerStream(s.id, emit);
-                      })
-                    }
-                  >
-                    Проверить SSH
-                  </button>
-                  <button
-                    type="button"
-                    className="ghost"
-                    disabled={busyId === s.id}
-                    onClick={() =>
-                      void runServerStream(s.id, `Установка Xray: ${s.host}`, async (emit) => {
-                        await installXrayStream(s.id, emit);
-                      })
-                    }
-                  >
-                    Установить Xray
-                  </button>
-                  <button
-                    type="button"
-                    className="primary"
-                    disabled={busyId === s.id}
-                    onClick={() =>
-                      void runServerStream(s.id, `VLESS: ${s.host}`, async (emit) => {
-                        await deployVlessStream(s.id, emit);
-                      })
-                    }
-                  >
-                    Развернуть VLESS
-                  </button>
-                  <button
-                    type="button"
-                    className="danger"
-                    disabled={busyId === s.id}
-                    onClick={async () => {
-                      if (!confirm("Удалить сервер из списка?")) return;
-                      await deleteServer(s.id);
-                      await refresh();
-                    }}
-                  >
-                    Удалить
-                  </button>
-                </div>
-              </ServerSettingsCard>
+              />
             ))}
           </div>
         )}
       </section>
+
+      {subSettingsServer ? (
+        <ServerSubscriptionSettingsPanel
+          server={subSettingsServer}
+          onClose={() => setSubSettingsServer(null)}
+          onSaved={(srv) => {
+            setServers((rows) => rows.map((r) => (r.id === srv.id ? srv : r)));
+          }}
+          onToast={(type, text) => setMsg({ type, text })}
+        />
+      ) : null}
     </DashboardLayout>
   );
 }

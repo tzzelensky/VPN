@@ -9,6 +9,21 @@ import {
 } from "./vlessLinkHints.js";
 import path from "node:path";
 import { generateX25519RealityKeyPair, randomRealityShortId } from "./realityKeygen.js";
+import type { ServerSubscriptionSettings } from "./serverSubscriptionSettings.js";
+import { resolveSubscriptionFlow, resolveInboundDecryption, subscriptionUsesPqClientEncryption } from "./serverSubscriptionSettings.js";
+import {
+  buildInboundSniffing,
+  buildInboundStreamFromSubscription,
+  buildServerDnsBlock,
+  resolveRealityKeysForApply,
+} from "./subscriptionXrayShared.js";
+import { tryOpenFirewallPort, type FirewallOpenResult } from "./experimentFirewall.js";
+import { applyXrayLogConfig } from "./xrayLogUtil.js";
+import {
+  buildVlessAuthPair,
+  parseVlessEncOutput,
+  type VlessAuthGenMode,
+} from "./vlessAuthKeygen.js";
 
 export type SshConfig = {
   host: string;
@@ -141,7 +156,9 @@ function shellQuote(s: string): string {
   return `'${s.replace(/'/g, `'\\''`)}'`;
 }
 
-function isTzadminManagedConfigPath(configPath: string): boolean {
+export { shellQuote };
+
+export function isTzadminManagedConfigPath(configPath: string): boolean {
   return configPath.includes("/tzadmin-xray/");
 }
 
@@ -214,8 +231,86 @@ async function restartTzadminXrayService(conn: Client, configPath: string, log?:
   const r = await exec(conn, `bash -lc ${JSON.stringify(script)}`);
   if (r.code === 0) return;
   const text = (r.stderr || r.stdout || "").trim();
-  if (r.code === 20) throw new Error("На сервере не найден бинарник xray");
-  throw new Error(`tzadmin-xray restart: ${text || `exit ${r.code}`}`);
+  const journal = await exec(conn, "journalctl -u tzadmin-xray -n 8 --no-pager 2>/dev/null || true");
+  const jtail = (journal.stdout || "").trim();
+  if (/binary not found|exit 20/i.test(`${text}\n${jtail}`)) {
+    throw new Error("На сервере не найден бинарник xray. Установите Xray (/usr/local/bin/xray) или x-ui.");
+  }
+  throw new Error(`tzadmin-xray restart: ${text || jtail.slice(-400) || `exit ${r.code}`}`);
+}
+
+function remoteXrayBinaryProbeCommand(): string {
+  return (
+    "for p in /usr/local/bin/xray /usr/local/x-ui/bin/xray-linux-amd64 /usr/local/x-ui/bin/xray /usr/local/sbin/xray /usr/sbin/xray; do " +
+    'if [ -x "$p" ]; then echo "$p"; exit 0; fi; done; ' +
+    "command -v xray 2>/dev/null || true"
+  );
+}
+
+async function resolveRemoteXrayBinary(conn: Client): Promise<string> {
+  const r = await exec(conn, remoteXrayBinaryProbeCommand());
+  const bin = (r.stdout || "").trim().split("\n").map((l) => l.trim()).find((l) => l.startsWith("/")) ?? "";
+  if (!bin) {
+    throw new Error("На сервере не найден бинарник xray. Установите Xray или x-ui на узле.");
+  }
+  return bin;
+}
+
+async function ensureTzadminLogDir(conn: Client, log?: SshLog): Promise<void> {
+  log?.("Подготовка /var/log/tzadmin-xray…");
+  await exec(
+    conn,
+    "install -d -m 0755 /var/log/tzadmin-xray && touch /var/log/tzadmin-xray/access.log /var/log/tzadmin-xray/error.log && chmod 644 /var/log/tzadmin-xray/access.log /var/log/tzadmin-xray/error.log 2>/dev/null || true",
+  );
+}
+
+/** Порт занят не-xray (nginx и т.д.) — inbound не поднимется. */
+async function assertHostPortAvailableForInbound(conn: Client, port: number, log?: SshLog): Promise<void> {
+  const r = await exec(conn, `ss -lntp 2>/dev/null | grep -F ':${port} ' || true`);
+  const line = (r.stdout || "").trim();
+  if (!line) return;
+  if (/xray|xray-linux-amd64/i.test(line)) return;
+  log?.(`Порт ${port} занят: ${line.slice(0, 160)}`);
+  throw new Error(
+    `Порт ${port} уже занят на сервере (${line.slice(0, 120)}). ` +
+      (port === 443 ? "На 443 обычно nginx — укажите другой порт (например 444 или 8433)." : "Выберите другой порт."),
+  );
+}
+
+/** Сгенерировать пару decryption/encryption через `xray vlessenc` на целевом узле. */
+export async function generateRemoteVlessAuthPair(
+  conn: Client,
+  mode: VlessAuthGenMode,
+  log?: SshLog,
+): Promise<ReturnType<typeof buildVlessAuthPair>> {
+  const xray = await resolveRemoteXrayBinary(conn);
+  log?.(`Генерация VLESS auth (${mode}) через ${xray} vlessenc…`);
+  const r = await exec(conn, `${shellQuote(xray)} vlessenc 2>&1`);
+  const out = `${r.stdout || ""}\n${r.stderr || ""}`.trim();
+  if (r.code !== 0 && !out.includes('"decryption"')) {
+    throw new Error(out || `xray vlessenc exit ${r.code}`);
+  }
+  const { decrypt_value, encrypt_value } = parseVlessEncOutput(out, mode);
+  return buildVlessAuthPair(mode, decrypt_value, encrypt_value);
+}
+
+async function verifyRemoteXrayConfig(conn: Client, configPath: string, port: number, log?: SshLog): Promise<void> {
+  log?.(`Проверка inbound на порту ${port}…`);
+  await exec(conn, "sleep 2");
+  if (isTzadminManagedConfigPath(configPath)) {
+    const active = await exec(conn, "systemctl is-active tzadmin-xray 2>/dev/null || true");
+    if (active.stdout.trim() !== "active") {
+      const journal = await exec(conn, "journalctl -u tzadmin-xray -n 10 --no-pager 2>/dev/null || true");
+      const hint = (journal.stdout || "").trim().split("\n").slice(-3).join(" ");
+      throw new Error(`Сервис tzadmin-xray не активен.${hint ? ` ${hint.slice(0, 300)}` : ""}`);
+    }
+  }
+  const listen = await exec(conn, `ss -lntp 2>/dev/null | grep -F ':${port} ' || true`);
+  if (!(listen.stdout || "").includes(String(port))) {
+    throw new Error(
+      `После перезапуска порт ${port} не слушается. Проверьте конфиг и journalctl -u tzadmin-xray.`,
+    );
+  }
 }
 
 async function restartXray(conn: Client, configPath: string, log?: SshLog): Promise<void> {
@@ -520,7 +615,6 @@ function buildMinimalConfig(clientEntries: ManagedClientInput[], vlessPort: numb
     };
   });
   const cfg: Record<string, unknown> = {
-    log: { loglevel: "warning" },
     stats: {},
     policy: {
       levels: {
@@ -558,6 +652,7 @@ function buildMinimalConfig(clientEntries: ManagedClientInput[], vlessPort: numb
   };
   ensureClientPolicyLevels(cfg, clientEntries);
   ensureXrayStatsPolicyApi(cfg);
+  applyXrayLogConfig(cfg, { loglevel: "warning", ensureFilePaths: true });
   return cfg;
 }
 
@@ -639,15 +734,28 @@ function realityFromInboundOrNew(ib?: Record<string, unknown>): {
   return { sni, sid, privateKey, publicKey: pub, fingerprint, spiderX };
 }
 
-function chooseManagedPort(inbounds: Record<string, unknown>[], preferredPort: number): number {
-  const occupied = new Set<number>();
+function chooseManagedPort(
+  inbounds: Record<string, unknown>[],
+  preferredPort: number,
+  opts?: { strict?: boolean },
+): number {
+  const strict = opts?.strict ?? false;
+  const occupied = new Map<number, string[]>();
   for (const ib of inbounds) {
     if (String(ib.protocol ?? "").toLowerCase() !== "vless") continue;
     if (String(ib.tag ?? "") === TZADMIN_VLESS_TAG) continue;
     const p = Number(ib.port);
-    if (Number.isFinite(p) && p > 0) occupied.add(p);
+    if (!Number.isFinite(p) || p <= 0) continue;
+    const tag = String(ib.tag ?? ib.protocol ?? "vless");
+    occupied.set(p, [...(occupied.get(p) ?? []), tag]);
   }
   if (!occupied.has(preferredPort)) return preferredPort;
+  if (strict) {
+    const blockers = occupied.get(preferredPort) ?? [];
+    throw new Error(
+      `Порт ${preferredPort} занят inbound: ${blockers.join(", ")}. Освободите порт или укажите другой в настройках.`,
+    );
+  }
   const candidates = [8433, 8443, 2053, 2083, 2087, 2096];
   for (const p of candidates) {
     if (!occupied.has(p)) return p;
@@ -897,7 +1005,14 @@ export async function detectXrayConfigPath(cfg: SshConfig, log?: SshLog): Promis
  */
 export async function deployOrSyncVless(
   cfg: SshConfig,
-  opts: { clientUuids?: string[]; clientEntries?: ManagedClientInput[]; vlessPort: number; configPath: string },
+  opts: {
+    clientUuids?: string[];
+    clientEntries?: ManagedClientInput[];
+    vlessPort: number;
+    configPath: string;
+    /** Настройки подписки — для PQ/decryption при sync UUID. */
+    subscriptionSettings?: ServerSubscriptionSettings | null;
+  },
   log?: SshLog,
 ): Promise<{ ok: boolean; detail: string; backup?: string; hints?: ServerLinkHints }> {
   const backup = `${opts.configPath}.bak.${Date.now()}`;
@@ -972,44 +1087,36 @@ export async function deployOrSyncVless(
                 log?.("VLESS inbound не найден — записан минимальный конфиг.");
               }
             } else if (idx >= 0) {
-              const ib = inbounds[idx] as Record<string, unknown>;
-              const settings = (ib.settings as Record<string, unknown>) ?? {};
-              const prevList = (settings.clients as Array<Record<string, unknown>>) ?? [];
-              // Управляемый inbound панели держим простым (как «рабочий» узел): VLESS TCP security=none.
-              const managedPort = chooseManagedPort(inbounds as Record<string, unknown>[], opts.vlessPort);
-              const rp = realityFromInboundOrNew(ib);
-              const managed = buildManagedInbound(clientEntries, managedPort);
-              const defaultFlow = defaultClientFlowForInbound(managed, prevList) || "xtls-rprx-vision";
-              const forceFlow = shouldForceClientFlowForInbound(managed);
-              managed.settings = {
-                ...(managed.settings as Record<string, unknown>),
-                clients: buildManagedClients(prevList, clientEntries, defaultFlow, forceFlow),
-              };
-              managed.streamSettings = {
-                network: "tcp",
-                security: "reality",
-                realitySettings: {
-                  show: false,
-                  dest: `${rp.sni}:443`,
-                  xver: 0,
-                  serverNames: [rp.sni],
-                  privateKey: rp.privateKey,
-                  publicKey: rp.publicKey,
-                  shortIds: [rp.sid],
-                  fingerprint: rp.fingerprint,
-                  spiderX: rp.spiderX,
-                },
-              };
-              if (managedPort !== opts.vlessPort) {
+              const ib = { ...(inbounds[idx] as Record<string, unknown>) };
+              const prevSettings = (ib.settings as Record<string, unknown>) ?? {};
+              const prevList = (prevSettings.clients as Array<Record<string, unknown>>) ?? [];
+              const sub = opts.subscriptionSettings ?? null;
+              if (sub) {
+                const pq = subscriptionUsesPqClientEncryption(sub);
+                const clientFlow = resolveSubscriptionFlow(sub);
+                const forceFlow = sub.security === "reality" && Boolean(clientFlow) && !pq;
+                prevSettings.decryption = resolveInboundDecryption(sub);
+                let clients = buildManagedClients(prevList, clientEntries, clientFlow, forceFlow);
+                if (pq) {
+                  clients = clients.map((c) => {
+                    const copy = { ...c };
+                    delete copy.flow;
+                    return copy;
+                  });
+                }
+                prevSettings.clients = clients;
+                ib.settings = prevSettings;
                 log?.(
-                  `Порт ${opts.vlessPort} занят другим VLESS inbound, managed inbound перенесён на ${managedPort}.`,
+                  `Обновлён inbound «${TZADMIN_VLESS_TAG}» (${clientUuids.length} UUID, decryption=${String(prevSettings.decryption).slice(0, 32)}…).`,
                 );
+              } else {
+                const defaultFlow = defaultClientFlowForInbound(ib, prevList);
+                const forceFlow = shouldForceClientFlowForInbound(ib);
+                prevSettings.clients = buildManagedClients(prevList, clientEntries, defaultFlow, forceFlow);
+                ib.settings = prevSettings;
+                log?.(`Обновлён inbound «${TZADMIN_VLESS_TAG}» (${clientUuids.length} UUID), decryption сохранён.`);
               }
-              const curPort = Number(ib.port);
-              if (Number.isFinite(curPort) && curPort > 0 && curPort !== managedPort) {
-                log?.(`Обновлён порт managed inbound: ${curPort} -> ${managedPort}.`);
-              }
-              inbounds[idx] = managed;
+              inbounds[idx] = ib;
               // Backup для x-ui: поддерживаем клиентов и в "рабочем" inbound,
               // чтобы подписка не падала, если x-ui потом удалит tzadmin-vless.
               const rowsAll = inbounds as Record<string, unknown>[];
@@ -1044,7 +1151,7 @@ export async function deployOrSyncVless(
                 rows[candIdx] = cand;
                 log?.(`Клиенты синхронизированы в существующий inbound порт ${Number(cand.port) || 0}.`);
               }
-              const managedPort = chooseManagedPort(rows, opts.vlessPort);
+              const managedPort = chooseManagedPort(rows, opts.vlessPort, { strict: true });
               if (managedPort !== opts.vlessPort) {
                 log?.(`Порт ${opts.vlessPort} занят другим VLESS inbound, managed inbound создан на ${managedPort}.`);
               }
@@ -1078,17 +1185,189 @@ export async function deployOrSyncVless(
       },
       log,
     );
-    return { ok: true, detail, backup, hints };
+    const deployPort = Number(hints?.sub_port) > 0 ? Number(hints!.sub_port) : opts.vlessPort;
+    let fwDetail = "";
+    try {
+      const fw = await tryOpenFirewallPort(cfg, deployPort);
+      fwDetail = fw.opened ? ` Firewall: ${deployPort}/tcp открыт (${fw.kind}).` : ` Firewall: ${fw.detail}`;
+    } catch (e) {
+      fwDetail = ` Firewall: ${e instanceof Error ? e.message : String(e)}`;
+    }
+    return { ok: true, detail: detail + fwDetail, backup, hints };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     return { ok: false, detail: msg };
   }
 }
 
+export type ApplySubscriptionResult = {
+  ok: boolean;
+  detail: string;
+  appliedPort?: number;
+  publicKey?: string;
+  privateKey?: string;
+  /** Что записано на сервер (inbound, dns, sniffing, clients…). */
+  pushed?: string[];
+  firewall?: FirewallOpenResult;
+};
+
+/** Записать настройки подписки в inbound Xray на сервере (порт, REALITY, flow, fingerprint и т.д.). */
+export async function applySubscriptionSettingsToServer(
+  cfg: SshConfig,
+  opts: {
+    configPath: string;
+    settings: ServerSubscriptionSettings;
+    clientEntries: ManagedClientInput[];
+  },
+  log?: SshLog,
+): Promise<ApplySubscriptionResult> {
+  try {
+    const applied = await withSsh(
+      cfg,
+      async (conn) => {
+        log?.(`Применение настроек подписки → ${opts.configPath}`);
+        const backup = `${opts.configPath}.bak.${Date.now()}`;
+        await exec(
+          conn,
+          `test -f ${shellQuote(opts.configPath)} && cp ${shellQuote(opts.configPath)} ${shellQuote(backup)} || true`,
+        );
+
+        let parsed: Record<string, unknown>;
+        try {
+          const raw = await sftpReadFile(conn, opts.configPath);
+          parsed = JSON.parse(raw.toString("utf8")) as Record<string, unknown>;
+        } catch {
+          throw new Error("Не удалось прочитать конфиг Xray на сервере");
+        }
+
+        if (!Array.isArray(parsed.inbounds)) parsed.inbounds = [];
+        const inbounds = parsed.inbounds as Record<string, unknown>[];
+
+        let idx = inbounds.findIndex((ib) => String(ib.tag ?? "") === TZADMIN_VLESS_TAG);
+        let ib: Record<string, unknown>;
+        if (idx < 0) {
+          const candIdx = findCandidateVlessInboundIndex(inbounds, opts.settings.vless_port);
+          if (candIdx >= 0) {
+            idx = candIdx;
+            ib = { ...(inbounds[idx] as Record<string, unknown>) };
+            if (!String(ib.tag ?? "").trim()) ib.tag = TZADMIN_VLESS_TAG;
+          } else {
+            ib = buildManagedInbound(opts.clientEntries, opts.settings.vless_port);
+            inbounds.push(ib);
+            idx = inbounds.length - 1;
+          }
+        } else {
+          ib = { ...(inbounds[idx] as Record<string, unknown>) };
+        }
+
+        const managedPort = chooseManagedPort(inbounds, opts.settings.vless_port, { strict: true });
+        await assertHostPortAvailableForInbound(conn, managedPort, log);
+        ib.port = managedPort;
+        ib.protocol = "vless";
+        ib.listen = ib.listen ?? "0.0.0.0";
+        ib.tag = TZADMIN_VLESS_TAG;
+
+        const sec = opts.settings.security;
+        const keys = sec === "reality" ? resolveRealityKeysForApply(opts.settings, ib) : { privateKey: "", publicKey: "" };
+        ib.streamSettings = buildInboundStreamFromSubscription(opts.settings, keys);
+
+        const sniffing = buildInboundSniffing(opts.settings);
+        if (sniffing) ib.sniffing = sniffing;
+        else delete ib.sniffing;
+
+        const prevSettings = (ib.settings as Record<string, unknown>) ?? {};
+        const prevList = (prevSettings.clients as Array<Record<string, unknown>>) ?? [];
+        const pq = subscriptionUsesPqClientEncryption(opts.settings);
+        const clientFlow = resolveSubscriptionFlow(opts.settings);
+        const forceFlow = sec === "reality" && Boolean(clientFlow) && !pq;
+        prevSettings.decryption = resolveInboundDecryption(opts.settings);
+        let clients = buildManagedClients(prevList, opts.clientEntries, clientFlow, forceFlow);
+        if (pq) {
+          clients = clients.map((c) => {
+            const copy = { ...c };
+            delete copy.flow;
+            return copy;
+          });
+        }
+        prevSettings.clients = clients;
+        ib.settings = prevSettings;
+
+        inbounds[idx] = ib;
+        parsed.inbounds = inbounds;
+
+        parsed.dns = buildServerDnsBlock(opts.settings);
+
+        ensureClientPolicyLevels(parsed, opts.clientEntries);
+        ensureXrayStatsPolicyApi(parsed);
+
+        const decLabel = resolveInboundDecryption(opts.settings);
+        const pushed = [
+          "inbound: port, network, security, REALITY/TLS",
+          pq ? "clients: UUID без flow (PQ)" : "clients: UUID + flow",
+          `decryption: ${decLabel === "none" ? "none" : "mlkem…"}`,
+          "dns: servers + queryStrategy",
+          sniffing ? "sniffing: inbound" : "sniffing: off",
+        ];
+
+        const json = JSON.stringify(parsed, null, 2);
+        log?.(`Запись ${opts.configPath} (${json.length} байт)…`);
+        await sftpWriteFile(conn, opts.configPath, Buffer.from(json, "utf8"));
+        await ensureTzadminLogDir(conn, log);
+        log?.("Перезапуск Xray…");
+        await restartXray(conn, opts.configPath, log);
+        await verifyRemoteXrayConfig(conn, opts.configPath, managedPort, log);
+
+        return { port: managedPort, keys, pushed };
+      },
+      log,
+    );
+
+    let firewall: FirewallOpenResult | undefined;
+    try {
+      firewall = await tryOpenFirewallPort(cfg, applied.port);
+      log?.(`Firewall ${applied.port}/tcp: ${firewall.detail}`);
+    } catch (e) {
+      firewall = {
+        kind: "unknown",
+        opened: false,
+        already_open: false,
+        detail: e instanceof Error ? e.message : String(e),
+        manual_command: `sudo ufw allow ${applied.port}/tcp`,
+        cloud_security_group_hint: `Откройте TCP ${applied.port} в security group хостинга, если UFW не используется.`,
+      };
+    }
+
+    const fwNote = firewall.opened
+      ? ` Firewall: порт ${applied.port}/tcp открыт (${firewall.kind}).`
+      : ` Firewall: ${firewall.detail}`;
+
+    return {
+      ok: true,
+      detail: `Настройки применены на сервере (${(applied.pushed ?? []).join("; ")}), Xray перезапущен.${fwNote}`,
+      appliedPort: applied.port,
+      publicKey: applied.keys.publicKey,
+      privateKey: applied.keys.privateKey,
+      pushed: [
+        ...(applied.pushed ?? []),
+        firewall.opened ? `firewall: ${applied.port}/tcp open` : `firewall: ${firewall.detail.slice(0, 80)}`,
+      ],
+      firewall,
+    };
+  } catch (e) {
+    return { ok: false, detail: e instanceof Error ? e.message : String(e) };
+  }
+}
+
 /** Синхронизировать список UUID клиентов на сервере с БД (все пользователи + UUID узла). */
 export async function syncServerClientUuids(
   cfg: SshConfig,
-  opts: { configPath: string; vlessPort: number; clientUuids?: string[]; clientEntries?: ManagedClientInput[] },
+  opts: {
+    configPath: string;
+    vlessPort: number;
+    clientUuids?: string[];
+    clientEntries?: ManagedClientInput[];
+    subscriptionSettings?: ServerSubscriptionSettings | null;
+  },
   log?: SshLog,
 ): Promise<{ ok: boolean; detail: string; hints?: ServerLinkHints }> {
   return deployOrSyncVless(
@@ -1098,6 +1377,7 @@ export async function syncServerClientUuids(
       clientEntries: opts.clientEntries ?? [],
       vlessPort: opts.vlessPort,
       configPath: opts.configPath,
+      subscriptionSettings: opts.subscriptionSettings ?? null,
     },
     log,
   );
@@ -1209,4 +1489,30 @@ export async function sshExecCommand(
   log?: SshLog,
 ): Promise<{ code: number | null; stdout: string; stderr: string }> {
   return withSsh(cfg, (conn) => exec(conn, cmd), log);
+}
+
+/** Прочитать конфиг, изменить и перезапустить Xray (для loglevel и др.). */
+export async function mutateXrayConfigAndRestart(
+  cfg: SshConfig,
+  configPath: string,
+  mutate: (config: Record<string, unknown>) => void,
+  log?: SshLog,
+): Promise<void> {
+  return withSsh(
+    cfg,
+    async (conn) => {
+      const raw = await sftpReadFile(conn, configPath);
+      let parsed: Record<string, unknown>;
+      try {
+        parsed = JSON.parse(raw.toString("utf8")) as Record<string, unknown>;
+      } catch {
+        throw new Error("invalid_xray_config_json");
+      }
+      mutate(parsed);
+      const json = JSON.stringify(parsed, null, 2);
+      await sftpWriteFile(conn, configPath, Buffer.from(json, "utf8"));
+      await restartXray(conn, configPath, log);
+    },
+    log,
+  );
 }

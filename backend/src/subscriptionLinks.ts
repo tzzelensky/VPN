@@ -1,31 +1,72 @@
-import type { ServerRow, UserRow } from "./db.js";
-import { serversForUserSubscription } from "./db.js";
+import { subscriptionUrisFromVault } from "./configVaultDb.js";
+import { parseProxyUri } from "./configVaultUri.js";
+import { getWhitelistAccessState, subscriptionWhitelistUrisForUser } from "./whitelistVaultDb.js";
+import { getServerSubscriptionSettings, serversForUserSubscription, userHasActiveSubscription, type ServerRow, type UserRow } from "./db.js";
 import { HAPP_WHITELIST_SUBSCRIPTION_LINE } from "./happWhitelistLine.js";
-import { serverNameForSubscription } from "./serverDisplay.js";
-import { buildVlessUriForUser, vlessListLabel } from "./vlessLink.js";
+import { buildVlessUriFromSubscriptionSettings } from "./vlessLink.js";
 
 function vlessUriForRow(user: UserRow, r: ServerRow): string {
-  return buildVlessUriForUser(
-    r.host,
-    r.vless_port,
-    user.vless_uuid,
-    vlessListLabel(serverNameForSubscription(r), user),
-    user,
-    r,
-  );
+  const settings = getServerSubscriptionSettings(r);
+  return buildVlessUriFromSubscriptionSettings(r, user, settings);
+}
+
+/** Ключ для дедупликации: один host+port+uuid = одна строка (фрагмент #… не учитываем). */
+function subscriptionUriIdentityKey(uri: string): string {
+  const trimmed = uri.trim();
+  if (!trimmed) return "";
+  const lower = trimmed.toLowerCase();
+  if (lower.startsWith("happ://")) return lower;
+  const parsed = parseProxyUri(trimmed);
+  if (parsed) {
+    const net = (parsed.network || "tcp").toLowerCase();
+    return `${net}:${parsed.uuid.toLowerCase()}@${parsed.address.toLowerCase()}:${parsed.port}`;
+  }
+  return lower;
+}
+
+function appendUniqueSubscriptionUris(out: string[], seen: Set<string>, uris: string[]): void {
+  for (const raw of uris) {
+    const uri = raw.trim();
+    const key = subscriptionUriIdentityKey(uri);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    out.push(uri);
+  }
 }
 
 /**
- * Одна строка VLESS на каждый развёрнутый узел (с учётом subscription_server_count).
- * При whitelist_happ_enabled: к этому списку в конце добавляются последние 4 узла (ещё раз как отдельные строки)
- * и строка happ://… (конфиг белых списков для Happ).
+ * Одна строка VLESS на каждый выбранный развёрнутый узел (subscription_server_ids).
+ * При whitelist_happ_enabled в конец добавляется строка happ://… (конфиг белых списков для Happ).
+ * Дубликаты по одному endpoint (в т.ч. tail и ключи vault) отбрасываются.
  */
 export function subscriptionVlessLinksForUser(user: UserRow): string[] {
   const rows = serversForUserSubscription(user);
-  const main = rows.map((r) => vlessUriForRow(user, r));
-  if (user.whitelist_happ_enabled !== 1) return main;
+  const seen = new Set<string>();
+  const out: string[] = [];
+
+  appendUniqueSubscriptionUris(
+    out,
+    seen,
+    rows.map((r) => vlessUriForRow(user, r)),
+  );
+
+  const extras = (user.extra_vless_links ?? []).map((x) => x.uri.trim()).filter(Boolean);
+  const vault = subscriptionUrisFromVault();
+  const whitelist = subscriptionWhitelistUrisForUser(user);
+  appendUniqueSubscriptionUris(out, seen, [...extras, ...vault, ...whitelist]);
+
+  if (user.whitelist_happ_enabled !== 1) return out;
+  if (!userHasActiveSubscription(user) || getWhitelistAccessState(user).status !== "active") return out;
 
   const tail = rows.length ? rows.slice(-4) : [];
-  const tailUris = tail.map((r) => vlessUriForRow(user, r));
-  return [...main, ...tailUris, HAPP_WHITELIST_SUBSCRIPTION_LINE];
+  appendUniqueSubscriptionUris(
+    out,
+    seen,
+    tail.map((r) => vlessUriForRow(user, r)),
+  );
+
+  const happ = HAPP_WHITELIST_SUBSCRIPTION_LINE.trim();
+  if (happ) appendUniqueSubscriptionUris(out, seen, [happ]);
+
+  return out;
 }

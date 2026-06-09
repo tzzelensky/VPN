@@ -26,6 +26,9 @@ object PanelWebViewHelper {
         }
         webView.setLayerType(WebView.LAYER_TYPE_HARDWARE, null)
         webView.overScrollMode = WebView.OVER_SCROLL_IF_CONTENT_SCROLLS
+        webView.isNestedScrollingEnabled = true
+        webView.isHorizontalScrollBarEnabled = true
+        webView.isVerticalScrollBarEnabled = true
     }
 
     fun injectMobileShell(webView: WebView) {
@@ -42,13 +45,15 @@ object PanelWebViewHelper {
               m.setAttribute('content',
                 'width=device-width, initial-scale=1, maximum-scale=5, viewport-fit=cover');
               root.style.setProperty('-webkit-tap-highlight-color', 'transparent');
+              try {
+                if (document.cookie.indexOf('tzadmin.sid=') >= 0 && window.VpnAdminAndroid) {
+                  window.VpnAdminAndroid.onPanelLoggedIn();
+                }
+              } catch (e) {}
             })();
         """.trimIndent()
         webView.evaluateJavascript(js, null)
     }
 
-    fun hasSessionCookie(panelUrl: String): Boolean {
-        val cookies = android.webkit.CookieManager.getInstance().getCookie(panelUrl) ?: return false
-        return cookies.contains("tzadmin.sid=")
-    }
+    fun hasSessionCookie(panelUrl: String): Boolean = PanelCookieHelper.hasSession(panelUrl)
 }

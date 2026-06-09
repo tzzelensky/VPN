@@ -23,6 +23,7 @@ export async function startTelegramLongPolling(): Promise<void> {
   try {
     await telegramDeleteWebhook();
     console.log("[telegram] Вебхук сброшен (deleteWebhook), запущен long polling.");
+    console.log("[telegram] handlers: home=delete-then-welcome (2026-06-03)");
   } catch (e) {
     console.error("[telegram] deleteWebhook:", e instanceof Error ? e.message : e);
   }

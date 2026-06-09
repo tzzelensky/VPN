@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { finishDropperSession, type MySubProfileDto } from "../api";
+import { subscriptionLabel } from "../subscriptionLabel";
 import { drawHeroBack } from "../lib/dropperHero";
 import { startDropperAmbient } from "../lib/dropperMusic";
 
@@ -634,14 +635,14 @@ export default function DropperGame({
               >
                 {profile.subscriptions.map((s) => (
                   <option key={s.id} value={s.id}>
-                    #{s.id} {s.name}
+                    {subscriptionLabel(s)}
                   </option>
                 ))}
               </select>
             </div>
           ) : (
             <p className="dropper-pixel-sub">
-              {rewardSub ? `Подписка: #${rewardSub.id} ${rewardSub.name}` : `#${targetUserId}`}
+              {rewardSub ? `Подписка: ${subscriptionLabel(rewardSub)}` : "Подписка выбрана"}
             </p>
           )}
           <div className="dropper-gift-row">

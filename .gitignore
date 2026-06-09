@@ -3,7 +3,17 @@ dist/
 build/
 .env
 backend/.env
+backend/firebase-sa.json
+**/firebase-sa.json
 *.db
 backend/data.json
+backend/panel_settings.json
+backend/panel_secrets.json
+backend/panel-avatars/
 *.log
 .DS_Store
+.cursor/
+.idea/
+deploy-*.tgz
+**/dist-deploy.tgz
+tmp-check-log.py

@@ -1,19 +1,15 @@
+import { getEffectiveTelegramAdminIds, getPanelBotToken } from "../panelSettings.js";
+
 /**
- * Секреты только из окружения (.env). Токен бота никогда не хранить в коде репозитория.
+ * Токен: panel_secrets.json (настройки панели) или TELEGRAM_BOT_TOKEN в .env.
  */
 export function getTelegramBotToken(): string {
-  return (process.env.TELEGRAM_BOT_TOKEN ?? "").trim();
+  return getPanelBotToken();
 }
 
-/** Числовые Telegram user id админов, через запятую. */
+/** Числовые Telegram user id админов: настройки панели или .env. */
 export function getTelegramAdminIds(): number[] {
-  const raw = process.env.TELEGRAM_ADMIN_IDS ?? process.env.TELEGRAM_ADMIN_ID ?? "";
-  return raw
-    .split(/[,;\s]+/)
-    .map((s) => s.trim())
-    .filter(Boolean)
-    .map((s) => Number(s))
-    .filter((n) => Number.isFinite(n) && n > 0);
+  return getEffectiveTelegramAdminIds();
 }
 
 /** Куда слать чеки на оплату (если TELEGRAM_ADMIN_IDS пуст — 404740026). */

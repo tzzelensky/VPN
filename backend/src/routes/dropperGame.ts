@@ -10,6 +10,7 @@ import {
   type DropperGameConfig,
 } from "../db.js";
 import { requireAuth } from "../middleware/requireAuth.js";
+import { notifyDropperTicketsAfterPurchase } from "../telegram/dropperTickets.js";
 
 const router = Router();
 router.use(requireAuth);
@@ -28,7 +29,7 @@ router.put("/", (req, res) => {
   }
 });
 
-router.post("/grant-tickets", (req, res) => {
+router.post("/grant-tickets", async (req, res) => {
   const body = (req.body ?? {}) as { user_ids?: unknown; tickets?: unknown };
   const idsRaw = Array.isArray(body.user_ids) ? body.user_ids : [];
   const ids = [...new Set(idsRaw.map((x) => Math.floor(Number(x))).filter((n) => Number.isFinite(n) && n > 0))];
@@ -41,12 +42,22 @@ router.post("/grant-tickets", (req, res) => {
     res.status(400).json({ error: "tickets_required" });
     return;
   }
-  const { uniquePools } = grantDropperTicketsToUserIds(ids, tickets);
+  const { uniquePools, tgChatIds } = grantDropperTicketsToUserIds(ids, tickets);
+  let notified = 0;
+  for (const chatId of tgChatIds) {
+    try {
+      await notifyDropperTicketsAfterPurchase(chatId, tickets, { adminGrant: true });
+      notified++;
+    } catch (e) {
+      console.error("[dropper] grant-tickets notify", chatId, e);
+    }
+  }
   res.json({
     ok: true,
     selected_rows: ids.length,
     unique_pools: uniquePools,
     tickets_each: tickets,
+    notified_chats: notified,
   });
 });
 

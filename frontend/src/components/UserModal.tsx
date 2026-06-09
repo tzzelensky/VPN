@@ -1,29 +1,20 @@
-import { FormEvent, useEffect, useState } from "react";
-import { fetchRealityKeyPair, notifyUserExpiring, type CreateUserPayload, type ServerDto, type UserDto } from "../api";
-import { formatNotifyExpiryError, userExpiryNotifyEligible } from "../expiryNotify";
+import { FormEvent, useEffect, useMemo, useState } from "react";
+import { notifyUserExpired, notifyUserExpiring, type CreateUserPayload, type ServerDto, type UserDto } from "../api";
+import {
+  formatNotifyExpiredError,
+  formatNotifyExpiryError,
+  userExpiredNotifyEligible,
+  userExpiryNotifyEligible,
+} from "../expiryNotify";
+import type { ExtraVlessLinkDto } from "../api";
+import AddVlessKeyModal from "./AddVlessKeyModal";
+import DualListPicker from "./DualListPicker";
 import ExpiryDateTimePicker from "./ExpiryDateTimePicker";
 import Spinner from "./Spinner";
 
 const FLOW_FIXED = "xtls-rprx-vision";
 
-const REALITY_SNI_PRESETS = [
-  "www.oracle.com",
-  "www.microsoft.com",
-  "www.cloudflare.com",
-  "dl.google.com",
-  "github.com",
-  "www.apple.com",
-] as const;
-
-const SNI_CUSTOM = "__custom__";
-
 export type UserModalMode = "create" | "edit";
-
-function randomShortIdHex(): string {
-  const a = new Uint8Array(3);
-  crypto.getRandomValues(a);
-  return Array.from(a, (b) => b.toString(16).padStart(2, "0")).join("");
-}
 
 function sanitizePositiveIntInput(raw: string): string {
   const digits = raw.replace(/[^\d]/g, "");
@@ -51,24 +42,19 @@ function serverSegLabel(s: ServerDto): string {
   return prefix ? `${prefix} ${name}` : name;
 }
 
-function buildServerCountOptions(servers: ServerDto[]): { value: number; label: string; title: string }[] {
-  const ord = [...servers].sort((a, b) => a.id - b.id);
-  if (ord.length === 0) {
-    return [{ value: 0, label: "Все развёрнутые (узлов пока нет)", title: "Добавьте и разверните VLESS на сервере" }];
+function deployedIdsOrdered(servers: ServerDto[]): number[] {
+  return [...servers].sort((a, b) => a.id - b.id).map((s) => s.id);
+}
+
+function serverIdsFromUser(user: UserDto, deployed: ServerDto[]): number[] {
+  const all = deployedIdsOrdered(deployed);
+  if (user.subscription_server_ids?.length) {
+    const valid = new Set(all);
+    return user.subscription_server_ids.filter((id) => valid.has(id));
   }
-  const out: { value: number; label: string; title: string }[] = [];
-  out.push({
-    value: 0,
-    label: `Все развёрнутые (${ord.length})`,
-    title: "В подписке все узлы подряд, как в списке «Серверы»",
-  });
-  for (let n = 1; n <= ord.length; n++) {
-    const slice = ord.slice(0, n);
-    const full = `Только: ${slice.map(serverSegLabel).join(" · ")}`;
-    const label = full.length > 56 ? `${full.slice(0, 53)}…` : full;
-    out.push({ value: n, label, title: full });
-  }
-  return out;
+  const lim = Math.max(0, Math.floor(Number(user.subscription_server_count) || 0));
+  if (lim <= 0 || lim >= all.length) return all;
+  return all.slice(0, lim);
 }
 
 export default function UserModal({
@@ -89,26 +75,33 @@ export default function UserModal({
   const [comment, setComment] = useState("");
   const [totalGb, setTotalGb] = useState("0");
   const [expiryMs, setExpiryMs] = useState(0);
-  const [serverCount, setServerCount] = useState(0);
+  const [selectedServerIds, setSelectedServerIds] = useState<number[]>([]);
+  const [serverPickerOpen, setServerPickerOpen] = useState(false);
   const [deviceLimitEnabled, setDeviceLimitEnabled] = useState(false);
   const [deviceLimitCount, setDeviceLimitCount] = useState("2");
   const [speedLimitMbps, setSpeedLimitMbps] = useState("");
   const [whitelistHappEnabled, setWhitelistHappEnabled] = useState(false);
-  const [remotePort, setRemotePort] = useState("");
-  const [realityPbk, setRealityPbk] = useState("");
-  const [realityFp, setRealityFp] = useState("chrome");
-  const [sniMode, setSniMode] = useState<string>(REALITY_SNI_PRESETS[0]);
-  const [sniCustom, setSniCustom] = useState("");
-  const [realitySid, setRealitySid] = useState("");
-  const [realitySpx, setRealitySpx] = useState("/");
   const [saving, setSaving] = useState(false);
-  const [keyBusy, setKeyBusy] = useState(false);
   const [expiryNotifyBusy, setExpiryNotifyBusy] = useState(false);
   const [expiryNotifyFlash, setExpiryNotifyFlash] = useState<{ type: "ok" | "err"; text: string } | null>(null);
+  const [extraVlessLinks, setExtraVlessLinks] = useState<ExtraVlessLinkDto[]>([]);
+  const [addVlessOpen, setAddVlessOpen] = useState(false);
+  const [editingVlessLink, setEditingVlessLink] = useState<ExtraVlessLinkDto | null>(null);
 
   useEffect(() => {
     if (!open) setExpiryNotifyFlash(null);
   }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      e.preventDefault();
+      onClose();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [open, onClose]);
 
   useEffect(() => {
     if (!open) return;
@@ -120,18 +113,12 @@ export default function UserModal({
       setComment("");
       setTotalGb("0");
       setExpiryMs(0);
-      setServerCount(0);
+      setSelectedServerIds(deployedIdsOrdered(deployedServers));
       setDeviceLimitEnabled(false);
       setDeviceLimitCount("2");
       setSpeedLimitMbps("");
       setWhitelistHappEnabled(false);
-      setRemotePort("");
-      setRealityPbk("");
-      setRealityFp("chrome");
-      setSniMode(REALITY_SNI_PRESETS[0]);
-      setSniCustom("");
-      setRealitySid(randomShortIdHex());
-      setRealitySpx("/");
+      setExtraVlessLinks([]);
       return;
     }
     if (!user) return;
@@ -144,47 +131,45 @@ export default function UserModal({
     setComment(user.comment);
     setTotalGb(String(user.total_gb ?? 0));
     setExpiryMs(Number(user.expiry_time) > 0 ? Number(user.expiry_time) : 0);
-    setServerCount(Math.max(0, Math.floor(Number(user.subscription_server_count) || 0)));
+    setSelectedServerIds(serverIdsFromUser(user, deployedServers));
     setDeviceLimitEnabled(Boolean(user.device_limit_enabled));
     setDeviceLimitCount(String(Math.max(1, Math.floor(Number(user.device_limit_count) || 1))));
     setSpeedLimitMbps(
       Number(user.speed_limit_mbps) > 0 ? String(Math.floor(Number(user.speed_limit_mbps))) : "",
     );
     setWhitelistHappEnabled(Boolean(user.whitelist_happ_enabled));
-    setRemotePort(user.remote_port != null ? String(user.remote_port) : "");
-    setRealityPbk(user.reality_pbk ?? "");
-    setRealityFp(user.reality_fp || "chrome");
-    const sni = (user.reality_sni ?? "").trim();
-    if (REALITY_SNI_PRESETS.includes(sni as (typeof REALITY_SNI_PRESETS)[number])) {
-      setSniMode(sni);
-      setSniCustom("");
-    } else {
-      setSniMode(SNI_CUSTOM);
-      setSniCustom(sni);
-    }
-    setRealitySid(user.reality_sid ?? "");
-    setRealitySpx(user.reality_spx || "/");
-  }, [open, mode, user]);
+    setExtraVlessLinks(user.extra_vless_links?.length ? [...user.extra_vless_links] : []);
+  }, [open, mode, user, deployedServers]);
 
   useEffect(() => {
-    if (!open) return;
-    const m = deployedServers.length;
-    setServerCount((c) => {
-      if (m === 0) return 0;
-      return c > m ? m : c < 0 ? 0 : c;
+    if (!open || mode !== "create") return;
+    setSelectedServerIds((prev) => {
+      const all = deployedIdsOrdered(deployedServers);
+      if (prev.length === 0) return all;
+      const valid = new Set(all);
+      const kept = prev.filter((id) => valid.has(id));
+      return kept.length > 0 ? kept : all;
     });
-  }, [open, deployedServers]);
+  }, [open, mode, deployedServers]);
 
-  if (!open) return null;
-  if (mode === "edit" && !user) return null;
+  const serverPickerItems = useMemo(
+    () =>
+      [...deployedServers]
+        .sort((a, b) => a.id - b.id)
+        .map((s) => ({
+          id: s.id,
+          label: `#${s.id} ${serverSegLabel(s)}`,
+        })),
+    [deployedServers],
+  );
 
+  useEffect(() => {
+    if (!open) setServerPickerOpen(false);
+  }, [open]);
+
+  const visible = open && !(mode === "edit" && !user);
   const formId = "user-form-main";
   const isCreate = mode === "create";
-
-  function effectiveSni(): string {
-    if (sniMode === SNI_CUSTOM) return sniCustom.trim();
-    return sniMode;
-  }
 
   function parseSpeedLimitMbps(raw: string): number {
     const n = Math.floor(Number(String(raw).replace(",", ".")) || 0);
@@ -193,7 +178,6 @@ export default function UserModal({
   }
 
   function buildPayload(): CreateUserPayload {
-    const rp = remotePort.trim() ? Number(remotePort) : null;
     const base: CreateUserPayload = {
       name: remark.trim() || email.trim() || "Пользователь",
       email: email.trim() || remark.trim() || "user",
@@ -203,17 +187,12 @@ export default function UserModal({
       enable,
       tg_id: tgId.trim(),
       comment: comment.trim(),
-      remote_port: rp != null && rp > 0 ? rp : null,
-      reality_pbk: realityPbk.trim() || undefined,
-      reality_fp: realityFp.trim() || undefined,
-      reality_sni: effectiveSni() || "www.oracle.com",
-      reality_sid: realitySid.trim() || undefined,
-      reality_spx: realitySpx.trim() || undefined,
-      subscription_server_count: serverCount,
+      subscription_server_ids: selectedServerIds,
       device_limit_enabled: deviceLimitEnabled,
       device_limit_count: Math.max(1, Math.floor(Number(deviceLimitCount) || 1)),
       speed_limit_mbps: parseSpeedLimitMbps(speedLimitMbps),
       whitelist_happ_enabled: whitelistHappEnabled,
+      extra_vless_links: extraVlessLinks,
     };
     if (isCreate) return base;
     return {
@@ -239,31 +218,83 @@ export default function UserModal({
     await save();
   }
 
-  async function generatePbk() {
-    setKeyBusy(true);
-    try {
-      const p = await fetchRealityKeyPair();
-      setRealityPbk(p.publicKey);
-      window.prompt(
-        "Скопируйте приватный ключ и укажите его в Xray inbound (realitySettings.privateKey). Публичный ключ уже в поле pbk.",
-        p.privateKey,
-      );
-    } catch (err) {
-      window.alert(String(err));
-    } finally {
-      setKeyBusy(false);
+  function labelFromVlessUri(trimmed: string): string {
+    let label = "VLESS";
+    const hash = trimmed.indexOf("#");
+    if (hash >= 0) {
+      try {
+        label = decodeURIComponent(trimmed.slice(hash + 1)).trim() || label;
+      } catch {
+        label = trimmed.slice(hash + 1).trim() || label;
+      }
     }
+    return label;
   }
 
-  const serverOptions = buildServerCountOptions(deployedServers);
+  function saveExtraVlessUri(uri: string, editId?: string) {
+    const trimmed = uri.trim();
+    const lower = trimmed.toLowerCase();
+    const duplicate = extraVlessLinks.some((x) => x.uri.toLowerCase() === lower && x.id !== editId);
+    if (duplicate) {
+      window.alert("Эта ссылка уже добавлена.");
+      return;
+    }
+    const label = labelFromVlessUri(trimmed);
+    if (editId) {
+      setExtraVlessLinks((prev) =>
+        prev.map((x) => (x.id === editId ? { ...x, uri: trimmed, label } : x)),
+      );
+      return;
+    }
+    setExtraVlessLinks((prev) => [...prev, { id: crypto.randomUUID(), uri: trimmed, label }]);
+  }
+
+  function openAddVlessModal() {
+    setEditingVlessLink(null);
+    setAddVlessOpen(true);
+  }
+
+  function openEditVlessModal(link: ExtraVlessLinkDto) {
+    setEditingVlessLink(link);
+    setAddVlessOpen(true);
+  }
+
+  function closeVlessModal() {
+    setAddVlessOpen(false);
+    setEditingVlessLink(null);
+  }
+
+  function removeExtraVless(id: string) {
+    setExtraVlessLinks((prev) => prev.filter((x) => x.id !== id));
+  }
+
+  const deployedTotal = deployedServers.length;
+  const selectedCount = selectedServerIds.length;
+  const allSelected = deployedTotal > 0 && selectedCount >= deployedTotal;
+
+  if (!visible) {
+    return (
+      <DualListPicker
+        open={false}
+        title="Серверы в подписке"
+        leftLabel="Доступные серверы"
+        rightLabel="В подписке"
+        items={serverPickerItems}
+        selectedIds={selectedServerIds}
+        onClose={() => setServerPickerOpen(false)}
+        onSave={(ids) => {
+          setSelectedServerIds(ids);
+          setServerPickerOpen(false);
+        }}
+      />
+    );
+  }
 
   return (
+    <>
     <div
       className="modal-backdrop"
       role="presentation"
-      onClick={(ev) => {
-        if (ev.target === ev.currentTarget) onClose();
-      }}
     >
       <div
         className="modal user-modal-panel"
@@ -303,8 +334,8 @@ export default function UserModal({
                 aria-pressed={enable}
               />
             </div>
-            <p className="user-modal-flow">
-              Flow для ссылок: <span className="mono">{FLOW_FIXED}</span>
+            <p className="user-modal-hint" style={{ margin: 0 }}>
+              Параметры VLESS / REALITY (порт, pbk, SNI, flow) настраиваются в карточке сервера → «Настройки подписки».
             </p>
           </section>
 
@@ -328,7 +359,10 @@ export default function UserModal({
                   placeholder="числовой id из @userinfobot"
                 />
                 <p className="field-hint">Укажите id пользователя, которому выдали эту подписку — бот покажет ему статистику и ссылку.</p>
-                {!isCreate && user && userExpiryNotifyEligible({ tg_id: tgId, expiry_time: expiryMs }) ? (
+                {!isCreate &&
+                user &&
+                (userExpiryNotifyEligible({ tg_id: tgId, expiry_time: expiryMs }) ||
+                  userExpiredNotifyEligible({ tg_id: tgId, expiry_time: expiryMs })) ? (
                   <div className="expiry-notify-block" style={{ marginTop: "0.55rem" }}>
                     <button
                       type="button"
@@ -338,13 +372,18 @@ export default function UserModal({
                         void (async () => {
                           setExpiryNotifyFlash(null);
                           setExpiryNotifyBusy(true);
+                          const expired = userExpiredNotifyEligible({ tg_id: tgId, expiry_time: expiryMs });
                           try {
-                            await notifyUserExpiring(user.id, { tg_id: tgId, expiry_time: expiryMs });
+                            if (expired) {
+                              await notifyUserExpired(user.id, { tg_id: tgId, expiry_time: expiryMs });
+                            } else {
+                              await notifyUserExpiring(user.id, { tg_id: tgId, expiry_time: expiryMs });
+                            }
                             setExpiryNotifyFlash({ type: "ok", text: "Сообщение отправлено в Telegram." });
                           } catch (e) {
                             setExpiryNotifyFlash({
                               type: "err",
-                              text: formatNotifyExpiryError(String(e)),
+                              text: expired ? formatNotifyExpiredError(String(e)) : formatNotifyExpiryError(String(e)),
                             });
                           } finally {
                             setExpiryNotifyBusy(false);
@@ -356,6 +395,8 @@ export default function UserModal({
                         <>
                           <Spinner /> Отправка…
                         </>
+                      ) : userExpiredNotifyEligible({ tg_id: tgId, expiry_time: expiryMs }) ? (
+                        "Подписка истекла — уведомить в Telegram"
                       ) : (
                         "Напоминание в Telegram (истекает ≤ 3 суток)"
                       )}
@@ -409,22 +450,27 @@ export default function UserModal({
                 </p>
               </div>
               <div className="form-field form-field-span-2">
-                <label>Серверов в подписке</label>
-                <div className="seg-row" role="group" aria-label="Число узлов в подписке">
-                  {serverOptions.map((o) => (
-                    <button
-                      key={o.value}
-                      type="button"
-                      className={`seg-btn ${serverCount === o.value ? "active" : ""}`}
-                      title={o.title || o.label}
-                      onClick={() => setServerCount(o.value)}
-                      disabled={saving}
-                    >
-                      {o.label}
-                    </button>
-                  ))}
+                <label>Серверы в подписке</label>
+                <div className="user-server-pick-row">
+                  <button
+                    type="button"
+                    className="ghost"
+                    disabled={saving || deployedTotal === 0}
+                    onClick={() => setServerPickerOpen(true)}
+                  >
+                    Выбрать серверы
+                  </button>
+                  <span className="user-server-pick-summary">
+                    {deployedTotal === 0
+                      ? "Нет развёрнутых узлов"
+                      : allSelected
+                        ? `Все серверы (${deployedTotal})`
+                        : `Выбрано: ${selectedCount} из ${deployedTotal}`}
+                  </span>
                 </div>
-                <p className="field-hint">Порядок — как в списке «Серверы» (по id). «Все» = каждый развёрнутый узел.</p>
+                <p className="field-hint">
+                  Как в «Коммуникациях»: переносите узлы вправо. По умолчанию в подписке все развёрнутые серверы.
+                </p>
               </div>
               <div className="form-field form-field-span-2">
                 <label>Ограничение по устройствам</label>
@@ -511,68 +557,52 @@ export default function UserModal({
           )}
 
           <section className="user-modal-card">
-            <h3 className="user-modal-section-title">Reality</h3>
-            <div className="user-form-grid">
-              <div className="form-field">
-                <label>Порт в ссылке</label>
-                <input
-                  value={remotePort}
-                  onChange={(e) => setRemotePort(e.target.value)}
-                  placeholder="пусто = порт сервера"
-                />
-              </div>
-              <div className="form-field">
-                <label>Reality pbk</label>
-                <div className="input-with-action user-modal-input-action">
-                  <input className="mono" value={realityPbk} onChange={(e) => setRealityPbk(e.target.value)} placeholder="публичный ключ" />
-                  <button
-                    type="button"
-                    className="ghost icon-btn"
-                    title="Сгенерировать пару ключей"
-                    disabled={keyBusy}
-                    onClick={() => void generatePbk()}
-                  >
-                    {keyBusy ? <Spinner /> : "Ключ"}
-                  </button>
-                </div>
-              </div>
-              <div className="form-field">
-                <label>Reality fp</label>
-                <input value={realityFp} onChange={(e) => setRealityFp(e.target.value)} />
-              </div>
-              <div className="form-field">
-                <label>Reality spiderX</label>
-                <input value={realitySpx} onChange={(e) => setRealitySpx(e.target.value)} />
-              </div>
-              <div className="form-field form-field-span-2 sni-block user-modal-sni">
-                <label>Reality SNI</label>
-                <select value={sniMode} onChange={(e) => setSniMode(e.target.value)}>
-                  {REALITY_SNI_PRESETS.map((h) => (
-                    <option key={h} value={h}>
-                      {h}
-                    </option>
-                  ))}
-                  <option value={SNI_CUSTOM}>Другой…</option>
-                </select>
-                {sniMode === SNI_CUSTOM ? (
-                  <input
-                    className="sni-custom-input"
-                    value={sniCustom}
-                    onChange={(e) => setSniCustom(e.target.value)}
-                    placeholder="ваш домен для SNI"
-                  />
-                ) : null}
-              </div>
-              <div className="form-field">
-                <label>Reality shortId</label>
-                <div className="input-with-action user-modal-input-action">
-                  <input className="mono" value={realitySid} onChange={(e) => setRealitySid(e.target.value)} />
-                  <button type="button" className="ghost icon-btn" title="Сгенерировать shortId" onClick={() => setRealitySid(randomShortIdHex())}>
-                    ↻
-                  </button>
-                </div>
-              </div>
+            <div className="user-modal-section-head">
+              <h3 className="user-modal-section-title">Дополнительные VLESS ключи</h3>
+              <button type="button" className="ghost btn-sm" disabled={saving} onClick={openAddVlessModal}>
+                Добавить vless ключ
+              </button>
             </div>
+            <p className="user-modal-hint" style={{ marginTop: 0 }}>
+              Вручную добавленные ссылки попадают в подписку клиента вместе с узлами панели. На сервера Xray не
+              деплоятся.
+            </p>
+            {extraVlessLinks.length === 0 ? (
+              <p className="muted" style={{ margin: 0, fontSize: "0.88rem" }}>
+                Нет дополнительных ключей.
+              </p>
+            ) : (
+              <ul className="user-extra-vless-list">
+                {extraVlessLinks.map((link) => (
+                  <li key={link.id} className="user-extra-vless-item">
+                    <div className="user-extra-vless-meta">
+                      <strong>{link.label}</strong>
+                      <span className="mono user-extra-vless-uri" title={link.uri}>
+                        {link.uri.length > 72 ? `${link.uri.slice(0, 72)}…` : link.uri}
+                      </span>
+                    </div>
+                    <div className="user-extra-vless-actions">
+                      <button
+                        type="button"
+                        className="ghost btn-sm"
+                        disabled={saving}
+                        onClick={() => openEditVlessModal(link)}
+                      >
+                        Изменить
+                      </button>
+                      <button
+                        type="button"
+                        className="ghost btn-sm err-text"
+                        disabled={saving}
+                        onClick={() => removeExtraVless(link.id)}
+                      >
+                        Удалить
+                      </button>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
           </section>
         </form>
 
@@ -593,6 +623,29 @@ export default function UserModal({
           </button>
         </div>
       </div>
+
+      <DualListPicker
+        open={serverPickerOpen}
+        title="Серверы в подписке"
+        leftLabel="Доступные серверы"
+        rightLabel="В подписке"
+        items={serverPickerItems}
+        selectedIds={selectedServerIds}
+        requireSelection
+        onClose={() => setServerPickerOpen(false)}
+        onSave={(ids) => {
+          setSelectedServerIds(ids);
+          setServerPickerOpen(false);
+        }}
+      />
     </div>
+
+    <AddVlessKeyModal
+      open={addVlessOpen}
+      editLink={editingVlessLink}
+      onClose={closeVlessModal}
+      onSave={(uri, editId) => saveExtraVlessUri(uri, editId)}
+    />
+    </>
   );
 }

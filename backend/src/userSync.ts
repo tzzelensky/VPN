@@ -1,5 +1,6 @@
 import {
   getServer,
+  getServerSubscriptionSettings,
   listDeployedServers,
   listUsers,
   updateServer,
@@ -16,6 +17,7 @@ import {
   type SshLog,
 } from "./ssh.js";
 import { enforceSpeedLimitsOnServer } from "./speedLimitEnforce.js";
+import { subscriptionUsesPqClientEncryption } from "./serverSubscriptionSettings.js";
 
 function sshCfg(row: ServerRow) {
   return {
@@ -79,7 +81,7 @@ function mapFromClients(clients: ManagedClientInput[]): Map<string, ClientPolicy
   return out;
 }
 
-function managedClientsForServer(serverUuid: string | null): ManagedClientInput[] {
+export function managedClientsForServer(serverUuid: string | null): ManagedClientInput[] {
   const out: ManagedClientInput[] = [];
   const seen = new Set<string>();
   const srv = String(serverUuid ?? "").trim();
@@ -131,6 +133,8 @@ export async function pushClientListToAllDeployedServers(log?: SshLog): Promise<
     for (const row of listDeployedServers()) {
       const path = await resolveConfigPath(row, log);
       const clients = managedClientsForServer(row.vless_uuid);
+      const subscriptionSettings = getServerSubscriptionSettings(row);
+      const pqMode = subscriptionUsesPqClientEncryption(subscriptionSettings);
       const sig = signatureForClients(clients);
       const prevSig = lastSyncedSignatureByServerId.get(row.id);
       if (prevSig === sig) {
@@ -140,7 +144,7 @@ export async function pushClientListToAllDeployedServers(log?: SshLog): Promise<
       }
       const nextMap = mapFromClients(clients);
       const prevMap = lastSyncedClientMapByServerId.get(row.id);
-      if (prevMap) {
+      if (prevMap && !pqMode) {
         const add: ManagedClientInput[] = [];
         const rem: string[] = [];
         let hasMutableUpdates = false;
@@ -179,6 +183,7 @@ export async function pushClientListToAllDeployedServers(log?: SshLog): Promise<
           configPath: path,
           vlessPort: row.vless_port,
           clientEntries: clients,
+          subscriptionSettings,
         },
         log,
       );

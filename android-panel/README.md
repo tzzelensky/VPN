@@ -71,6 +71,29 @@ Remove-Item -Recurse -Force "$env:USERPROFILE\.gradle\caches\modules-2" -ErrorAc
 
 Для установки на чужие телефоны нужен подписанный keystore — настройте `signingConfigs` в `app/build.gradle.kts` (стандартная схема Android).
 
+## Иконка приложения
+
+Логотип HSN VPN: исходник `app/src/main/ic_launcher_source.png`. После замены картинки пересоберите mipmaps:
+
+```powershell
+cd C:\git_clone\VPN\android-panel
+powershell -ExecutionPolicy Bypass -File .\scripts\generate-icons.ps1
+```
+
+Adaptive icon: чёрный фон + логотип по центру (все плотности `mipmap-*` и `drawable-*`).
+
+## Мгновенные push (Firebase FCM)
+
+Подробно: **[FIREBASE.md](./FIREBASE.md)**
+
+Кратко:
+
+1. `google-services.json` → `app/google-services.json`
+2. На сервере в `.env`: `FCM_SERVER_KEY=...` (Server key из Firebase)
+3. Соберите APK v1.2+, войдите в панель, разрешите уведомления.
+
+При новом обращении сервер шлёт FCM сразу; Telegram-уведомления админам работают как раньше.
+
 ## Ограничения
 
 - Это **не офлайн-приложение**: нужен интернет и работающий сервер панели.

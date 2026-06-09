@@ -2,10 +2,13 @@ import { useCallback, useEffect, useState } from "react";
 import {
   loadSubscriptionShopActivity,
   loadSubscriptionShop,
+  loadTestSubscriptions,
+  deleteTestSubscription,
   saveSubscriptionShop,
   type SubscriptionShopActivityEntry,
   type SubscriptionShopDto,
   type SubscriptionShopPlanDto,
+  type TestSubscriptionEntryDto,
   type TopUpShopPlanDto,
 } from "../api";
 import DashboardLayout from "../components/DashboardLayout";
@@ -17,6 +20,13 @@ function cloneShop(s: SubscriptionShopDto): SubscriptionShopDto {
     payment_url: s.payment_url,
     plans: s.plans.map((p) => ({ ...p })),
     topup_plans: s.topup_plans.map((p) => ({ ...p })),
+    test_plan: {
+      enabled: s.test_plan?.enabled ?? false,
+      title: s.test_plan?.title ?? "Тестовая подписка",
+      total_gb: s.test_plan?.total_gb ?? 10,
+      days: s.test_plan?.days ?? 3,
+      price_rub: s.test_plan?.price_rub ?? 10,
+    },
   };
 }
 
@@ -29,17 +39,20 @@ export default function SubscriptionShopPage({ onLogout }: { onLogout: () => voi
     subscriptions: [],
     topups: [],
   });
+  const [testSubs, setTestSubs] = useState<TestSubscriptionEntryDto[]>([]);
+  const [testDeleteBusyId, setTestDeleteBusyId] = useState<number>(0);
 
   const refresh = useCallback(async () => {
     setLoading(true);
     setMsg(null);
     try {
-      const [s, a] = await Promise.all([loadSubscriptionShop(), loadSubscriptionShopActivity()]);
+      const [s, a, t] = await Promise.all([loadSubscriptionShop(), loadSubscriptionShopActivity(), loadTestSubscriptions()]);
       setShop(cloneShop(s));
       setActivity({
         subscriptions: a.subscriptions ?? [],
         topups: a.topups ?? [],
       });
+      setTestSubs(t.entries ?? []);
     } catch (e) {
       setMsg({ type: "err", text: String(e) });
     } finally {
@@ -83,6 +96,21 @@ export default function SubscriptionShopPage({ onLogout }: { onLogout: () => voi
       setMsg({ type: "err", text: String(e) });
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function onDeleteTestSubscription(userId: number) {
+    if (!window.confirm("Удалить тестовую подписку этого пользователя? Доступ к VPN будет отключён.")) return;
+    setTestDeleteBusyId(userId);
+    setMsg(null);
+    try {
+      await deleteTestSubscription(userId);
+      setTestSubs((prev) => prev.filter((e) => e.id !== userId));
+      setMsg({ type: "ok", text: "Тестовая подписка удалена." });
+    } catch (e) {
+      setMsg({ type: "err", text: String(e) });
+    } finally {
+      setTestDeleteBusyId(0);
     }
   }
 
@@ -138,8 +166,8 @@ export default function SubscriptionShopPage({ onLogout }: { onLogout: () => voi
                 <div>
                   <label>Отключение продажи</label>
                   <p className="field-hint" style={{ marginTop: "0.25rem" }}>
-                    Включено — у пользователей без привязки к панели скрыта покупка; оплата продления доступна только с
-                    привязанным Telegram Chat ID.
+                    Включено — новые пользователи не могут оплатить подписку, тестовую подписку и другие покупки ни в боте, ни в
+                    WebApp. Продление доступно только привязанным клиентам.
                   </p>
                 </div>
                 <button
@@ -274,6 +302,135 @@ export default function SubscriptionShopPage({ onLogout }: { onLogout: () => voi
                               ? new Date(e.created_at).toLocaleString("ru-RU", { dateStyle: "short", timeStyle: "short" })
                               : ""}
                           </span>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+              </aside>
+            </div>
+          </section>
+
+          <section className="panel shop-section-gap">
+            <h2 style={{ fontSize: "1rem", marginTop: 0 }}>Тестовая подписка</h2>
+            <p className="sub" style={{ marginTop: 0 }}>
+              Одноразовый тариф для новых пользователей без подписки. Промокоды не применяются. Кнопка в боте и WebApp
+              скрывается, если у пользователя уже есть подписка или он уже оформлял тест. Активные тестовые подписки — в
+              списке справа (не в разделе «Пользователи»).
+            </p>
+            <div className="shop-layout-with-feed shop-layout-with-feed--narrow-form">
+              <div className="user-modal-card shop-plan-card shop-test-plan-card">
+                <div className="user-form-grid">
+                <div className="form-field form-field-span-2 shop-toggle-row">
+                  <div>
+                    <label>Включить тестовую подписку</label>
+                    <p className="field-hint" style={{ marginTop: "0.25rem" }}>
+                      Выключено — кнопки «Оформить тестовую подписку» / «Получить тестовую подписку» не показываются.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    className={`toggle ${shop.test_plan.enabled ? "on" : ""}`}
+                    title={shop.test_plan.enabled ? "Тестовая подписка включена" : "Тестовая подписка выключена"}
+                    aria-pressed={shop.test_plan.enabled}
+                    onClick={() =>
+                      setShop({
+                        ...shop,
+                        test_plan: { ...shop.test_plan, enabled: !shop.test_plan.enabled },
+                      })
+                    }
+                  />
+                </div>
+                <div className="form-field form-field-span-2">
+                  <label>Название</label>
+                  <input
+                    value={shop.test_plan.title}
+                    onChange={(e) =>
+                      setShop({ ...shop, test_plan: { ...shop.test_plan, title: e.target.value } })
+                    }
+                  />
+                </div>
+                <div className="shop-plan-metrics-row">
+                  <div className="form-field">
+                    <label>ГБ (0 = безлимит)</label>
+                    <input
+                      inputMode="numeric"
+                      value={shop.test_plan.total_gb}
+                      onChange={(e) =>
+                        setShop({
+                          ...shop,
+                          test_plan: {
+                            ...shop.test_plan,
+                            total_gb: Math.max(0, Math.floor(Number(e.target.value) || 0)),
+                          },
+                        })
+                      }
+                    />
+                  </div>
+                  <div className="form-field">
+                    <label>Дней</label>
+                    <input
+                      inputMode="numeric"
+                      value={shop.test_plan.days}
+                      onChange={(e) =>
+                        setShop({
+                          ...shop,
+                          test_plan: {
+                            ...shop.test_plan,
+                            days: Math.max(1, Math.floor(Number(e.target.value) || 1)),
+                          },
+                        })
+                      }
+                    />
+                  </div>
+                </div>
+                <div className="form-field form-field-span-2">
+                  <label>Цена, ₽</label>
+                  <input
+                    inputMode="numeric"
+                    value={shop.test_plan.price_rub}
+                    onChange={(e) =>
+                      setShop({
+                        ...shop,
+                        test_plan: {
+                          ...shop.test_plan,
+                          price_rub: Math.max(0, Math.floor(Number(e.target.value) || 0)),
+                        },
+                      })
+                    }
+                  />
+                </div>
+              </div>
+              </div>
+              <aside className="shop-feed" aria-label="Оформленные тестовые подписки">
+                <label className="referral-feed-label">Тестовые подписки</label>
+                <p className="field-hint referral-feed-hint">Клиенты с активной тестовой подпиской. Удаление отключает доступ.</p>
+                <div className="ref-ios-wheel" role="log">
+                  <div className="ref-ios-wheel-mask" aria-hidden="true" />
+                  <div className="ref-ios-wheel-scroll">
+                    {testSubs.length === 0 ? (
+                      <p className="sub ref-ios-empty">Пока нет тестовых подписок.</p>
+                    ) : (
+                      testSubs.map((e) => (
+                        <div key={e.id} className="ref-ios-row shop-test-sub-row">
+                          <div className="shop-test-sub-main">
+                            <span className="ref-ios-line">{e.line}</span>
+                            <span className="ref-ios-date">
+                              {e.created_at
+                                ? new Date(e.created_at).toLocaleString("ru-RU", { dateStyle: "short", timeStyle: "short" })
+                                : ""}
+                            </span>
+                          </div>
+                          <button
+                            type="button"
+                            className="ghost shop-test-sub-delete"
+                            title="Удалить тестовую подписку"
+                            aria-label={`Удалить тестовую подписку ${e.name}`}
+                            disabled={testDeleteBusyId === e.id}
+                            onClick={() => void onDeleteTestSubscription(e.id)}
+                          >
+                            🗑
+                          </button>
                         </div>
                       ))
                     )}

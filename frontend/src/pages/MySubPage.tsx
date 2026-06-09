@@ -1,15 +1,20 @@
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import DropperGame from "../components/DropperGame";
+import RouletteGame from "../components/RouletteGame";
 import DropperLobbyHero from "../components/DropperLobbyHero";
+import MySubProfileStats from "../components/MySubProfileStats";
+import MySubBottomNav, { type MySubNavTabId } from "../components/MySubBottomNav";
 import {
   claimMySubReferralReward,
   loadMySubWebAppProfile,
   previewMySubPromoCode,
   sendMySubPaymentProof,
+  sendMySubSupportAppeal,
   startDropperSession,
   type MySubProfileDto,
 } from "../api";
+import { subscriptionLabel } from "../subscriptionLabel";
 
 type Tab = "home" | "subscription" | "game" | "friends" | "profile";
 
@@ -101,9 +106,11 @@ export default function MySubPage() {
   const [msg, setMsg] = useState<string>("");
   const [err, setErr] = useState<string>("");
   const [showInstruction, setShowInstruction] = useState(false);
+  const [showWhitelistInstruction, setShowWhitelistInstruction] = useState(false);
   const [showPickModal, setShowPickModal] = useState(false);
-  const [payProduct, setPayProduct] = useState<"subscription" | "topup">("subscription");
+  const [payProduct, setPayProduct] = useState<"subscription" | "topup" | "white_lists">("subscription");
   const [payPlanId, setPayPlanId] = useState<number>(1);
+  const [payIsTest, setPayIsTest] = useState(false);
   const [payPhoto, setPayPhoto] = useState<File | null>(null);
   const [busyPay, setBusyPay] = useState(false);
   const [payTargetId, setPayTargetId] = useState<number>(0); // 0 = "Новая подписка"
@@ -124,6 +131,10 @@ export default function MySubPage() {
   const [dropperNoTickets, setDropperNoTickets] = useState(false);
   const [dropperStartBusy, setDropperStartBusy] = useState(false);
   const [theme, setTheme] = useState<MySubTheme>(() => readMySubTheme());
+  const [supportOpen, setSupportOpen] = useState(false);
+  const [supportText, setSupportText] = useState("");
+  const [supportPhotos, setSupportPhotos] = useState<File[]>([]);
+  const [supportBusy, setSupportBusy] = useState(false);
 
   function applyMySubTheme(next: MySubTheme) {
     setTheme(next);
@@ -204,7 +215,10 @@ export default function MySubPage() {
       tgWebApp?.expand?.();
       try {
         const profile = await loadMySubWebAppProfile(initData);
-        setData(profile);
+        setData({
+          ...profile,
+          support_appeals: profile.support_appeals ?? { enabled: false },
+        });
         if (profile.subscriptions.length > 0) {
           setPickedSubId(profile.subscriptions[0]!.id);
           setHomeSubId(profile.subscriptions[0]!.id);
@@ -224,7 +238,29 @@ export default function MySubPage() {
   }, [tab]);
 
   useEffect(() => {
-    if (data && !data.dropper.enabled && tab === "game") setTab("home");
+    if (tab !== "profile") return;
+    const id = getInitData();
+    if (!id) return;
+    void loadMySubWebAppProfile(id)
+      .then((profile) => {
+        setData((prev) =>
+          prev
+            ? {
+                ...prev,
+                support_appeals: profile.support_appeals ?? { enabled: false },
+              }
+            : {
+                ...profile,
+                support_appeals: profile.support_appeals ?? { enabled: false },
+              },
+        );
+      })
+      .catch(() => {});
+  }, [tab]);
+
+  useEffect(() => {
+    const visible = data?.game_tab_visible ?? data?.dropper.enabled ?? false;
+    if (data && !visible && tab === "game") setTab("home");
   }, [data, tab]);
 
   const dropperTargetUserId = useMemo(() => {
@@ -267,14 +303,29 @@ export default function MySubPage() {
     if (!data?.topup_plans?.length) return null;
     return data.topup_plans.find((p) => p.id === payPlanId) ?? null;
   }, [data, payPlanId]);
+  const testPlanAvailable = data?.test_plan?.available === true;
+  const salesDisabledForNew = data?.sales_disabled_for_new === true;
 
-  function switchPayProduct(next: "subscription" | "topup") {
+  function openTestPay() {
+    setPayProduct("subscription");
+    setPayIsTest(true);
+    setPayPlanId(1);
+    setPromoApplied(null);
+    setPromoFeedback(null);
+    setPromoCodeInput("");
+    setTab("subscription");
+  }
+
+  function switchPayProduct(next: "subscription" | "topup" | "white_lists") {
+    setPayIsTest(false);
     setPromoApplied(null);
     setPromoFeedback(null);
     setPromoCodeInput("");
     setPayPlanId(1);
-    if (next === "topup" && data?.subscriptions.length) {
-      setPayTargetId((prev) => (prev <= 0 ? data.subscriptions[0]!.id : prev));
+    if ((next === "topup" || next === "white_lists") && data?.subscriptions.length) {
+      const wlId = next === "white_lists" ? data.whitelist?.purchase_user_id : null;
+      if (wlId && wlId > 0) setPayTargetId(wlId);
+      else setPayTargetId((prev) => (prev <= 0 ? data.subscriptions[0]!.id : prev));
     }
     setPayProduct(next);
   }
@@ -339,7 +390,24 @@ export default function MySubPage() {
       setMsg("Выберите тариф или пакет ГБ и фото чека.");
       return;
     }
-    if (payProduct === "topup") {
+    if (salesDisabledForNew && data.subscriptions.length === 0) {
+      setMsg("Оформление новых подписок временно недоступно.");
+      return;
+    }
+    if (payProduct === "white_lists") {
+      if (!data.whitelist?.can_buy) {
+        setMsg(
+          data.whitelist?.status === "connected"
+            ? "Белые списки уже подключены."
+            : data.whitelist?.block_reason || "Покупка белых списков недоступна.",
+        );
+        return;
+      }
+      if (!data.subscriptions.length || payTargetId <= 0 || !payTargetSub) {
+        setMsg("Выберите активную подписку для подключения белых списков.");
+        return;
+      }
+    } else if (payProduct === "topup") {
       if (!data.subscriptions.length) {
         setMsg("Докупка ГБ доступна только при привязанной подписке.");
         return;
@@ -352,34 +420,48 @@ export default function MySubPage() {
         setMsg("Выберите пакет докупки.");
         return;
       }
+    } else if (payIsTest) {
+      if (!testPlanAvailable || !data.test_plan) {
+        setMsg("Тестовая подписка недоступна.");
+        return;
+      }
+    } else if (!selectedPlan) {
+      setMsg("Выберите тариф.");
+      return;
     } else if (payTargetId > 0 && !payTargetSub) {
       setMsg("Выберите подписку для продления.");
       return;
     }
     const chosenNewName =
-      payTargetId === 0 ? (newSubName.trim() || defaultNewSubscriptionName(data.subscriptions)) : "";
+      payTargetId === 0 && !payIsTest ? (newSubName.trim() || defaultNewSubscriptionName(data.subscriptions)) : "";
     setBusyPay(true);
     setMsg("");
     try {
       const compressed = await compressImage(payPhoto);
       await sendMySubPaymentProof({
         init_data: initData,
-        pay_kind: payProduct,
-        user_id: payTargetId > 0 ? payTargetId : undefined,
-        plan_id: payPlanId,
+        pay_kind: payIsTest ? "test" : payProduct,
+        user_id: payTargetId > 0 ? payTargetId : payProduct === "white_lists" ? data.subscriptions[0]?.id : undefined,
+        plan_id: payIsTest || payProduct === "white_lists" ? 1 : payPlanId,
         photo_base64: compressed.base64,
         photo_mime: compressed.mime,
         photo_name: compressed.name,
-        new_subscription_name: payProduct === "subscription" && payTargetId === 0 ? chosenNewName.slice(0, 25) : undefined,
-        promo_code: promoApplied?.code,
+        new_subscription_name:
+          payProduct === "subscription" && !payIsTest && payTargetId === 0 ? chosenNewName.slice(0, 25) : undefined,
+        promo_code: payIsTest ? undefined : promoApplied?.code,
       });
       setMsg(
-        payProduct === "topup"
+        payIsTest
+          ? "Чек получен. Администратор проверит оплату и активирует тестовую подписку."
+          : payProduct === "white_lists"
+            ? "Чек получен. После подтверждения оплаты белые списки будут добавлены в подписку."
+          : payProduct === "topup"
           ? "Чек получен. Администратор проверит оплату и начислит ГБ. Обычно это занимает немного времени."
           : "Чек получен. Администратор проверит оплату и примет решение. Обычно это занимает немного времени. После подтверждения подписка придет в чат",
       );
       setPayPhoto(null);
       if (payTargetId === 0) setNewSubName("");
+      if (payIsTest) setPayIsTest(false);
     } catch (e) {
       const m = e instanceof Error ? e.message : String(e);
       if (m.includes("tg_webapp_auth_required")) setErr("Требуется авторизация через тг.");
@@ -390,6 +472,10 @@ export default function MySubPage() {
   }
 
   async function applyPromoCode() {
+    if (payIsTest) {
+      setPromoFeedback({ type: "err", text: "Промокод нельзя применить к тестовой подписке." });
+      return;
+    }
     const priceBase =
       payProduct === "topup" ? selectedTopUpPlan?.price_rub : selectedPlan?.price_rub;
     if (priceBase == null) {
@@ -419,13 +505,18 @@ export default function MySubPage() {
       else if (m.includes("promo_not_found")) setPromoFeedback({ type: "err", text: "Промокод не найден." });
       else if (m.includes("promo_inactive")) setPromoFeedback({ type: "err", text: "Этот промокод сейчас неактивен." });
       else if (m.includes("promo_expired")) setPromoFeedback({ type: "err", text: "Срок действия этого промокода истек." });
-      else setPromoFeedback({ type: "err", text: "Не удалось применить промокод." });
+      else if (m.includes("promo_new_users_only")) {
+        setPromoFeedback({ type: "err", text: "Промокод только для новых пользователей без подписки." });
+      } else setPromoFeedback({ type: "err", text: "Не удалось применить промокод." });
     }
   }
 
+  const autoDiscountPercent = !payIsTest && !promoApplied ? data?.roulette_purchase_discount?.discount_percent ?? 0 : 0;
+  const activeDiscountPercent = promoApplied?.discount_percent ?? autoDiscountPercent;
+
   const discountedPriceForPlan = (priceRub: number) => {
-    if (!promoApplied) return priceRub;
-    return Math.max(0, Math.floor(priceRub - (priceRub * promoApplied.discount_percent) / 100));
+    if (!activeDiscountPercent) return priceRub;
+    return Math.max(0, Math.floor(priceRub - (priceRub * activeDiscountPercent) / 100));
   };
 
   function openPickForCopy() {
@@ -455,10 +546,42 @@ export default function MySubPage() {
   }
 
   function openSupportProfile() {
-    const url = "https://t.me/hsnvps";
-    const tgWebApp = (window as unknown as { Telegram?: { WebApp?: { openTelegramLink?: (u: string) => void } } }).Telegram?.WebApp;
-    if (tgWebApp?.openTelegramLink) tgWebApp.openTelegramLink(url);
-    else window.open(url, "_blank", "noopener,noreferrer");
+    if (!data?.support_appeals?.enabled) return;
+    setSupportText("");
+    setSupportPhotos([]);
+    setMsg("");
+    setSupportOpen(true);
+  }
+
+  async function submitSupportAppeal() {
+    const text = supportText.trim();
+    if (!text && supportPhotos.length === 0) {
+      setMsg("Опишите проблему или приложите фото.");
+      return;
+    }
+    setSupportBusy(true);
+    setMsg("");
+    try {
+      const photos: Array<{ base64: string; mime?: string; name?: string }> = [];
+      for (const f of supportPhotos.slice(0, 5)) {
+        const c = await compressImage(f);
+        photos.push({ base64: c.base64, mime: c.mime, name: c.name });
+      }
+      await sendMySubSupportAppeal({ init_data: initData, text, photos });
+      setSupportOpen(false);
+      setSupportText("");
+      setSupportPhotos([]);
+      setMsg("Сообщение отправлено. Результат ответа придёт в чат Telegram.");
+      const tgWebApp = (window as unknown as { Telegram?: { WebApp?: { showAlert?: (m: string) => void } } }).Telegram
+        ?.WebApp;
+      tgWebApp?.showAlert?.("Сообщение отправлено. Ответ придёт в чат.");
+    } catch (e) {
+      const m = e instanceof Error ? e.message : String(e);
+      if (m.includes("support_disabled")) setMsg("Поддержка временно недоступна.");
+      else setMsg(m.slice(0, 200));
+    } finally {
+      setSupportBusy(false);
+    }
   }
 
   async function claimFriendReward(kind: "gb" | "days") {
@@ -511,7 +634,7 @@ export default function MySubPage() {
       setMsg("Нужна хотя бы одна подписка, чтобы играть и получать награду.");
       return;
     }
-    if (data.dropper.tickets <= 0) {
+    if ((data.subscriptions.find((s) => s.id === uid)?.tickets ?? 0) <= 0) {
       setDropperNoTickets(true);
       return;
     }
@@ -581,8 +704,41 @@ export default function MySubPage() {
     }
   }
 
-  const dropperPlaying = tab === "game" && Boolean(dropperSession);
-  const isGameTab = tab === "game" && Boolean(data?.dropper.enabled);
+  const gameVisible = Boolean(data?.game_tab_visible ?? data?.dropper.enabled ?? data?.roulette?.enabled);
+  const activeGame = data?.active_game ?? (data?.roulette?.enabled ? "roulette" : data?.dropper.enabled ? "dropper" : "none");
+  const gameTickets = data?.roulette?.enabled
+    ? (data.roulette.tickets ?? data.dropper.tickets)
+    : data?.dropper.tickets ?? 0;
+
+  const dropperPlaying = tab === "game" && activeGame === "dropper" && Boolean(dropperSession);
+  const isGameTab = tab === "game" && gameVisible;
+
+  const profileSub = useMemo(() => {
+    if (!data?.subscriptions.length) return undefined;
+    const id = pickedSubId > 0 ? pickedSubId : data.subscriptions[0]!.id;
+    return data.subscriptions.find((s) => s.id === id) ?? data.subscriptions[0];
+  }, [data?.subscriptions, pickedSubId]);
+
+  const bottomNavItems = useMemo(() => {
+    if (!data) return [];
+    const rows: Array<{ id: MySubNavTabId; label: string; gameTickets?: number; gameEnabled?: boolean }> = [
+      { id: "home", label: "Главная" },
+      { id: "subscription", label: "Оплата" },
+    ];
+    if (gameVisible) {
+      rows.push({
+        id: "game",
+        label: "Игра",
+        gameTickets,
+        gameEnabled: true,
+      });
+    }
+    rows.push({ id: "friends", label: "Друзья" }, { id: "profile", label: "Профиль" });
+    return rows.map((row) => ({
+      ...row,
+      icon: <NavIcon tab={row.id} />,
+    }));
+  }, [data]);
 
   return (
     <div
@@ -619,16 +775,27 @@ export default function MySubPage() {
                 <p className="sub">Быстрый и надежный VPN для стабильного подключения.</p>
                 <div className="mysub-sub-box">
                   {data.subscriptions.length === 0 ? (
-                    <>
+                    salesDisabledForNew ? (
                       <p className="mysub-no-sub-text">
-                        У вас еще нет подписки! Купите её в разделе «Оплата».
+                        Оформление новых подписок сейчас недоступно. Обратитесь к администратору.
                       </p>
-                      <div className="row-actions" style={{ marginTop: "0.65rem" }}>
-                        <button type="button" className="primary" onClick={() => setTab("subscription")}>
-                          Купить подписку
-                        </button>
-                      </div>
-                    </>
+                    ) : (
+                      <>
+                        <p className="mysub-no-sub-text">
+                          У вас еще нет подписки! Купите её в разделе «Оплата».
+                        </p>
+                        <div className="row-actions" style={{ marginTop: "0.65rem", flexDirection: "column", alignItems: "stretch" }}>
+                          <button type="button" className="primary" onClick={() => setTab("subscription")}>
+                            Купить подписку
+                          </button>
+                          {testPlanAvailable ? (
+                            <button type="button" className="ghost" onClick={openTestPay}>
+                              Получить тестовую подписку
+                            </button>
+                          ) : null}
+                        </div>
+                      </>
+                    )
                   ) : (
                     <>
                       {data.subscriptions.length > 1 ? (
@@ -644,14 +811,14 @@ export default function MySubPage() {
                           >
                             {data.subscriptions.map((s) => (
                               <option key={s.id} value={s.id}>
-                                #{s.id} {s.name}
+                                {subscriptionLabel(s)}
                               </option>
                             ))}
                           </select>
                         </div>
                       ) : null}
                       <p className="sub" style={{ marginBottom: "0.4rem" }}>
-                        {homeSub ? `Конфиг: #${homeSub.id} ${homeSub.name}` : "Выберите подписку"}
+                        {homeSub ? `Конфиг: ${subscriptionLabel(homeSub)}` : "Выберите подписку"}
                       </p>
                       <div className="mysub-url">{homeSub?.subscription_url || "Нажмите кнопку «Скопировать конфиг»"}</div>
                       <div className="row-actions">
@@ -681,6 +848,63 @@ export default function MySubPage() {
                     </>
                   )}
                 </div>
+                {data.whitelist?.visible ? (
+                  <div className="mysub-sub-box" style={{ marginTop: "0.65rem" }}>
+                    <h3 className="mysub-title" style={{ marginBottom: "0.45rem" }}>
+                      Белые списки
+                    </h3>
+                    <p className="sub" style={{ margin: "0 0 0.55rem" }}>
+                      {data.whitelist.description}
+                    </p>
+                    <p className="sub">
+                      Статус:{" "}
+                      <b>
+                        {data.whitelist.status === "connected"
+                          ? data.whitelist.active_until
+                            ? `Подключено · до ${new Date(data.whitelist.active_until).toLocaleDateString("ru-RU")}`
+                            : "Подключено"
+                          : data.whitelist.status === "suspended"
+                            ? data.whitelist.remaining_days
+                              ? `Приостановлено · осталось ${data.whitelist.remaining_days} дн.`
+                              : "Приостановлено · нужна основная подписка"
+                            : data.whitelist.status === "expired"
+                              ? "Истекли"
+                              : "Не подключено"}
+                      </b>
+                    </p>
+                    {data.whitelist.status !== "connected" && data.whitelist.can_buy ? (
+                      <div style={{ display: "flex", flexDirection: "column", gap: "0.45rem", marginTop: "0.55rem" }}>
+                        <span className="sub">
+                          Цена: <b>{data.whitelist.price_rub} ₽</b>
+                        </span>
+                        <button
+                          type="button"
+                          className="primary"
+                          onClick={() => {
+                            switchPayProduct("white_lists");
+                            setTab("subscription");
+                          }}
+                        >
+                          Купить белые списки
+                        </button>
+                      </div>
+                    ) : data.whitelist.status !== "connected" && data.whitelist.block_reason ? (
+                      <p className="sub" style={{ marginTop: "0.55rem", color: "var(--danger, #f87171)" }}>
+                        {data.whitelist.block_reason}
+                      </p>
+                    ) : null}
+                    {data.whitelist.status === "connected" ? (
+                      <button
+                        type="button"
+                        className="ghost"
+                        style={{ marginTop: "0.55rem", width: "100%" }}
+                        onClick={() => setShowWhitelistInstruction(true)}
+                      >
+                        Инструкция по обновлению подписки
+                      </button>
+                    ) : null}
+                  </div>
+                ) : null}
                 <div className="mysub-highlight-box">
                   <b>Почему выбирают нас?</b>
                   <span>YouTube в 4K без ограничений и тормозов.</span>
@@ -713,6 +937,21 @@ export default function MySubPage() {
                       >
                         Докупка ГБ
                       </button>
+                      {data.whitelist?.visible ? (
+                        <button
+                          type="button"
+                          className={payProduct === "white_lists" ? "primary" : "ghost"}
+                          disabled={
+                            !data.subscriptions.length ||
+                            data.whitelist.status === "connected" ||
+                            !data.whitelist.can_buy
+                          }
+                          onClick={() => switchPayProduct("white_lists")}
+                          style={{ width: "100%" }}
+                        >
+                          Белые списки
+                        </button>
+                      ) : null}
                     </div>
                     {payProduct === "topup" && !data.subscriptions.length ? (
                       <p className="field-hint" style={{ marginTop: "0.4rem" }}>
@@ -744,7 +983,7 @@ export default function MySubPage() {
                             className={payTargetId === s.id ? "primary" : "ghost"}
                             onClick={() => setPayTargetId(s.id)}
                           >
-                            #{s.id} {s.name}
+                            {subscriptionLabel(s)}
                             {s.allowed ? " · активна" : ""}
                           </button>
                         ))}
@@ -766,9 +1005,32 @@ export default function MySubPage() {
                       </div>
                     ) : (
                       <p className="sub" style={{ margin: "0.5rem 0 0" }}>
-                        Средства зачислим в подписку #{payTargetSub?.id} {payTargetSub?.name}
+                        Средства зачислим в подписку {payTargetSub ? subscriptionLabel(payTargetSub) : ""}
                       </p>
                     )}
+                  </div>
+                ) : payProduct === "white_lists" && data.subscriptions.length > 0 ? (
+                  <div className="mysub-sub-box" style={{ marginBottom: "0.65rem" }}>
+                    <div className="form-field">
+                      <label>Подписка для белых списков</label>
+                      <div className="mysub-stat-list">
+                        {data.subscriptions.map((s) => (
+                          <button
+                            key={`pay-wl-${s.id}`}
+                            type="button"
+                            className={payTargetId === s.id ? "primary" : "ghost"}
+                            onClick={() => setPayTargetId(s.id)}
+                          >
+                            {subscriptionLabel(s)}
+                            {s.allowed ? " · активна" : ""}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <p className="field-hint" style={{ marginTop: "0.45rem" }}>
+                      {data.whitelist?.description ||
+                        "Дополнительные VLESS-ключи для доступа к ресурсам из белого списка."}
+                    </p>
                   </div>
                 ) : payProduct === "topup" && data.subscriptions.length > 0 ? (
                   <div className="mysub-sub-box" style={{ marginBottom: "0.65rem" }}>
@@ -782,7 +1044,7 @@ export default function MySubPage() {
                             className={payTargetId === s.id ? "primary" : "ghost"}
                             onClick={() => setPayTargetId(s.id)}
                           >
-                            #{s.id} {s.name}
+                            {subscriptionLabel(s)}
                             {s.allowed ? " · активна" : ""}
                           </button>
                         ))}
@@ -792,21 +1054,36 @@ export default function MySubPage() {
                 ) : null}
                 <div className="mysub-sub-box mysub-pay-panel">
                   <p className="mysub-pay-lead">
-                    {payProduct === "topup"
+                    {salesDisabledForNew && data.subscriptions.length === 0
+                      ? "Оформление новых подписок и тестовой подписки сейчас недоступно."
+                      : payProduct === "white_lists"
+                        ? data.whitelist?.status === "connected"
+                          ? "Белые списки уже подключены к вашей подписке."
+                          : `Покупка белых списков для ${payTargetSub ? subscriptionLabel(payTargetSub) : "подписки"}. После оплаты VLESS-ключи будут добавлены в подписку.`
+                      : payProduct === "topup"
                       ? data.subscriptions.length === 0
                         ? "Докупка ГБ станет доступна после привязки подписки к этому Telegram."
-                        : `Докупка ГБ для подписки #${payTargetSub?.id} ${payTargetSub?.name}. Лимит трафика увеличится после подтверждения оплаты.`
+                        : `Докупка ГБ для подписки ${payTargetSub ? subscriptionLabel(payTargetSub) : ""}. Лимит трафика увеличится после подтверждения оплаты.`
                       : data.subscriptions.length === 0
                         ? "У вас пока нет подписок. Выберите тариф, оплатите и отправьте чек — после проверки администратором появится доступ."
                         : payTargetId === 0
                           ? "Оплата пойдёт на новую подписку — после подтверждения чека вы получите отдельный конфиг."
-                          : `Оплата для продления: #${payTargetSub?.id} ${payTargetSub?.name}.`}
+                          : `Оплата для продления: ${payTargetSub ? subscriptionLabel(payTargetSub) : ""}.`}
                   </p>
                   <div className="mysub-pay-flow">
                     <div className="mysub-pay-step">
                       <span className="mysub-pay-step-badge">1</span>
                       <div className="mysub-pay-step-body">
-                        <p className="mysub-pay-step-title">{payProduct === "topup" ? "Пакет ГБ" : "Тариф"}</p>
+                        <p className="mysub-pay-step-title">
+                          {payProduct === "topup" ? "Пакет ГБ" : payProduct === "white_lists" ? "Белые списки" : "Тариф"}
+                        </p>
+                        {payProduct === "white_lists" ? (
+                          <div className="mysub-plan-card is-selected" style={{ maxWidth: "100%" }}>
+                            <span className="mysub-plan-card-title">Белые списки</span>
+                            <span className="mysub-plan-card-meta">Дополнение к текущей подписке</span>
+                            <span className="mysub-plan-card-price">{data.whitelist?.price_rub ?? 0} ₽</span>
+                          </div>
+                        ) : (
                         <div
                           className="mysub-plan-grid"
                           role="radiogroup"
@@ -825,7 +1102,7 @@ export default function MySubPage() {
                                   <span className="mysub-plan-card-title">{p.title.trim() || `Пакет ${p.id}`}</span>
                                   <span className="mysub-plan-card-meta">{formatTopUpMeta(p)}</span>
                                   <span className="mysub-plan-card-price">
-                                    {promoApplied ? (
+                                    {activeDiscountPercent ? (
                                       <>
                                         <s>{p.price_rub} ₽</s> {discountedPriceForPlan(p.price_rub)} ₽
                                       </>
@@ -835,19 +1112,46 @@ export default function MySubPage() {
                                   </span>
                                 </button>
                               ))
-                            : data.plans.map((p) => (
+                            : (
+                              <>
+                                {testPlanAvailable && data.subscriptions.length === 0 && data.test_plan ? (
+                                  <button
+                                    type="button"
+                                    role="radio"
+                                    aria-checked={payIsTest}
+                                    className={`mysub-plan-card ${payIsTest ? "is-selected" : ""}`.trim()}
+                                    onClick={() => {
+                                      setPayIsTest(true);
+                                      setPromoApplied(null);
+                                      setPromoFeedback(null);
+                                      setPromoCodeInput("");
+                                    }}
+                                  >
+                                    <span className="mysub-plan-card-title">
+                                      {data.test_plan.title.trim() || "Тестовая подписка"}
+                                    </span>
+                                    <span className="mysub-plan-card-meta">
+                                      {formatMySubPlanMeta(data.test_plan)}
+                                    </span>
+                                    <span className="mysub-plan-card-price">{data.test_plan.price_rub} ₽</span>
+                                  </button>
+                                ) : null}
+                                {data.plans.map((p) => (
                                 <button
                                   key={p.id}
                                   type="button"
                                   role="radio"
-                                  aria-checked={payPlanId === p.id}
-                                  className={`mysub-plan-card ${payPlanId === p.id ? "is-selected" : ""}`.trim()}
-                                  onClick={() => setPayPlanId(p.id)}
+                                  aria-checked={!payIsTest && payPlanId === p.id}
+                                  className={`mysub-plan-card ${!payIsTest && payPlanId === p.id ? "is-selected" : ""}`.trim()}
+                                  onClick={() => {
+                                    setPayIsTest(false);
+                                    setPayPlanId(p.id);
+                                  }}
                                 >
                                   <span className="mysub-plan-card-title">{p.title.trim() || `Тариф ${p.id}`}</span>
                                   <span className="mysub-plan-card-meta">{formatMySubPlanMeta(p)}</span>
                                   <span className="mysub-plan-card-price">
-                                    {promoApplied ? (
+                                    {activeDiscountPercent ? (
                                       <>
                                         <s>{p.price_rub} ₽</s> {discountedPriceForPlan(p.price_rub)} ₽
                                       </>
@@ -857,7 +1161,10 @@ export default function MySubPage() {
                                   </span>
                                 </button>
                               ))}
+                              </>
+                            )}
                         </div>
+                        )}
                       </div>
                     </div>
                     <div className="mysub-pay-step">
@@ -865,17 +1172,22 @@ export default function MySubPage() {
                       <div className="mysub-pay-step-body">
                         <p className="mysub-pay-step-title">Оплата</p>
                         <p className="sub">
-                          {payProduct === "topup" ? (
+                          {payProduct === "white_lists" ? (
+                            <>В комментарии к переводу укажите: <b>white_lists</b>.</>
+                          ) : payProduct === "topup" ? (
                             <>
                               В комментарии к переводу укажите <b>номер пакета докупки</b>: <b>{payPlanId}</b> (обычно{" "}
                               <code>1</code>, <code>2</code> или <code>3</code>).
                             </>
+                          ) : payIsTest ? (
+                            <>В комментарии к переводу укажите слово <b>тест</b>. Промокоды к тестовой подписке не применяются.</>
                           ) : (
                             <>
                               В комментарии к переводу укажите номер тарифа: <b>{payPlanId}</b>.
                             </>
                           )}
                         </p>
+                        {!payIsTest && payProduct !== "white_lists" ? (
                         <div className="mysub-promo-box">
                           <input
                             className="mysub-promo-input"
@@ -891,10 +1203,16 @@ export default function MySubPage() {
                               Скидка применилась! К оплате {discountedPriceForPlan((payProduct === "topup" ? selectedTopUpPlan! : selectedPlan!).price_rub)}{" "}
                               руб
                             </p>
+                          ) : autoDiscountPercent > 0 && (payProduct === "topup" ? selectedTopUpPlan : selectedPlan) ? (
+                            <p className="mysub-promo-feedback ok">
+                              Применена автоскидка {autoDiscountPercent}%. К оплате{" "}
+                              {discountedPriceForPlan((payProduct === "topup" ? selectedTopUpPlan! : selectedPlan!).price_rub)} руб
+                            </p>
                           ) : promoFeedback ? (
                             <p className="mysub-promo-feedback err">{promoFeedback.text}</p>
                           ) : null}
                         </div>
+                        ) : null}
                         <a className="mysub-pay-link-btn" href={data.payment_url} target="_blank" rel="noreferrer">
                           Перейти к оплате
                         </a>
@@ -983,7 +1301,56 @@ export default function MySubPage() {
                   <p className="sub">Реферальная программа временно отключена.</p>
                 )}
               </section>
-            ) : tab === "game" && data.dropper.enabled ? (
+            ) : tab === "game" && gameVisible && activeGame === "roulette" && data.roulette ? (
+              <RouletteGame
+                initData={initData}
+                subscriptions={data.subscriptions.map((s) => ({
+                  id: s.id,
+                  name: s.name,
+                  tickets: s.tickets ?? 0,
+                  total_gb: s.total_gb,
+                  expiry_time: s.expiry_time,
+                  gb_piggy: s.gb_piggy ?? null,
+                  stats: {
+                    remaining_days: s.stats.remaining_days,
+                    remaining_gb: s.stats.remaining_gb ?? null,
+                    unlimited_traffic: s.stats.unlimited_traffic,
+                    unlimited_time: s.stats.unlimited_time,
+                  },
+                }))}
+                ticketsPerPurchase={data.roulette.tickets_per_purchase ?? data.tickets_per_purchase ?? 1}
+                prizes={data.roulette.prizes ?? []}
+                ticketShop={data.roulette.ticket_shop}
+                history={data.roulette.history ?? []}
+                ticketPurchaseHistory={data.roulette.ticket_purchase_history ?? []}
+                onSubscriptionUpdate={(subId, patch) =>
+                  setData((prev) => {
+                    if (!prev) return prev;
+                    const subs = prev.subscriptions.map((s) =>
+                      s.id !== subId
+                        ? s
+                        : {
+                            ...s,
+                            ...(patch.tickets != null ? { tickets: patch.tickets } : {}),
+                            ...(patch.gb_piggy !== undefined ? { gb_piggy: patch.gb_piggy } : {}),
+                          },
+                    );
+                    const totalTickets = subs.reduce((sum, s) => sum + (s.tickets ?? 0), 0);
+                    return {
+                      ...prev,
+                      subscriptions: subs,
+                      dropper: { ...prev.dropper, tickets: totalTickets },
+                      roulette: prev.roulette ? { ...prev.roulette, tickets: totalTickets } : prev.roulette,
+                    };
+                  })
+                }
+                onBuyClick={() => setTab("subscription")}
+                onRefreshProfile={() => {
+                  if (!initData) return;
+                  void loadMySubWebAppProfile(initData).then(setData).catch(() => {});
+                }}
+              />
+            ) : tab === "game" && gameVisible && activeGame === "dropper" && data.dropper.enabled ? (
               <div className={`mysub-dropper-page ${dropperSession ? "mysub-dropper-page--playing" : ""}`.trim()}>
                 <section className="mysub-section mysub-dropper-section">
                   {!dropperSession ? (
@@ -993,7 +1360,11 @@ export default function MySubPage() {
                   ) : null}
                   {!dropperSession ? (
                     <p className="mysub-dropper-tickets">
-                      Билетов: <b>{data.dropper.tickets}</b>
+                      Билетов:{" "}
+                      <b>
+                        {data.subscriptions.find((s) => s.id === dropperTargetUserId)?.tickets ??
+                          data.dropper.tickets}
+                      </b>
                     </p>
                   ) : null}
 
@@ -1011,7 +1382,7 @@ export default function MySubPage() {
                         >
                           {data.subscriptions.map((s) => (
                             <option key={s.id} value={s.id}>
-                              #{s.id} {s.name}
+                              {subscriptionLabel(s)}
                             </option>
                           ))}
                         </select>
@@ -1073,7 +1444,8 @@ export default function MySubPage() {
             ) : (
               <section className="mysub-section mysub-section-anim">
                 <h3 className="mysub-title">Профиль</h3>
-                <div className="mysub-sub-box">
+                <MySubProfileStats subscription={profileSub} whitelist={data.whitelist} />
+                <div className="mysub-sub-box" style={{ marginTop: "0.75rem" }}>
                   <p style={{ margin: 0, fontWeight: 600 }}>{data.name}</p>
                   <p className="sub" style={{ marginTop: "0.35rem" }}>Список подписок:</p>
                   <div className="mysub-stat-list">
@@ -1086,10 +1458,11 @@ export default function MySubPage() {
                           type="button"
                           className={pickedSubId === s.id ? "primary" : "ghost"}
                           onClick={() => {
+                            setPickedSubId(s.id);
                             setProfileSubModalId(s.id);
                           }}
                         >
-                          #{s.id} {s.name}
+                          {subscriptionLabel(s)}
                         </button>
                       ))
                     )}
@@ -1117,41 +1490,24 @@ export default function MySubPage() {
                     </button>
                   </div>
                 </div>
-                <div className="row-actions" style={{ marginTop: "0.75rem" }}>
-                  <button type="button" className="ghost" onClick={openSupportProfile}>
-                    Поддержка
-                  </button>
-                </div>
+                {data.support_appeals?.enabled ? (
+                  <div className="row-actions" style={{ marginTop: "0.75rem" }}>
+                    <button type="button" className="ghost" onClick={openSupportProfile}>
+                      Сообщить о проблеме
+                    </button>
+                  </div>
+                ) : null}
               </section>
             )}
 
             {msg && !dropperPlaying ? <div className="flash ok">{msg}</div> : null}
             {!dropperPlaying ? (
-            <div
-              className={`mysub-bottom-actions ${data.dropper.enabled ? "mysub-bottom-actions--5" : ""}`.trim()}
-            >
-              {(
-                [
-                  ["home", "Главная"],
-                  ["subscription", "Оплата"],
-                  ...(data.dropper.enabled ? ([["game", "Игра"]] as Array<[Tab, string]>) : []),
-                  ["friends", "Друзья"],
-                  ["profile", "Профиль"],
-                ] as Array<[Tab, string]>
-              ).map(([t, label]) => (
-                <button
-                  key={t}
-                  type="button"
-                  className={`mysub-nav-btn ${tab === t ? "active" : ""} ${
-                    t === "game" && data.dropper.tickets > 0 ? "mysub-nav-btn--game" : ""
-                  } ${t === "game" && data.dropper.tickets <= 0 ? "mysub-nav-btn--game-muted" : ""}`.trim()}
-                  onClick={() => setTab(t)}
-                >
-                  <NavIcon tab={t} />
-                  <span>{label}</span>
-                </button>
-              ))}
-            </div>
+              <MySubBottomNav
+                items={bottomNavItems}
+                active={tab}
+                onChange={setTab}
+                fiveColumns={gameVisible}
+              />
             ) : null}
           </>
         ) : null}
@@ -1169,6 +1525,80 @@ export default function MySubPage() {
                 practiceMode={dropperSession.practice === true}
                 onDone={() => void finishDropperAndRefresh()}
               />
+            </div>,
+            document.body,
+          )
+        : null}
+      {supportOpen
+        ? createPortal(
+            <div
+              className={`mysub-support-portal ${theme === "light" ? "mysub-support-portal--light" : ""}`.trim()}
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="mysub-support-title"
+            >
+              <div className="modal-backdrop" onClick={() => !supportBusy && setSupportOpen(false)}>
+                <div className="modal mysub-modal mysub-support-modal" onClick={(e) => e.stopPropagation()}>
+                  <div className="modal-head">
+                    <h2 id="mysub-support-title">Сообщить о проблеме</h2>
+                    <button
+                      type="button"
+                      className="ghost modal-close"
+                      disabled={supportBusy}
+                      onClick={() => setSupportOpen(false)}
+                    >
+                      ×
+                    </button>
+                  </div>
+                  <div className="modal-body">
+                    <p className="sub" style={{ marginTop: 0 }}>
+                      Если у вас возник вопрос или проблема, опишите её. При необходимости приложите фото — мы
+                      постараемся помочь.
+                    </p>
+                    <div className="form-field" style={{ marginTop: "0.75rem" }}>
+                      <label>Описание</label>
+                      <textarea
+                        rows={5}
+                        value={supportText}
+                        onChange={(e) => setSupportText(e.target.value)}
+                        placeholder="Что произошло?"
+                        maxLength={8000}
+                        disabled={supportBusy}
+                      />
+                    </div>
+                    <div className="form-field" style={{ marginTop: "0.65rem" }}>
+                      <label>Фото (необязательно)</label>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        multiple
+                        disabled={supportBusy || supportPhotos.length >= 5}
+                        onChange={(e) => {
+                          const list = Array.from(e.target.files ?? []);
+                          setSupportPhotos((prev) => [...prev, ...list].slice(0, 5));
+                          e.target.value = "";
+                        }}
+                      />
+                      <p className="field-hint">
+                        {supportPhotos.length ? `Выбрано файлов: ${supportPhotos.length}` : "До 5 изображений."}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="modal-footer">
+                    <button type="button" className="ghost" disabled={supportBusy} onClick={() => setSupportOpen(false)}>
+                      Отмена
+                    </button>
+                    <button
+                      type="button"
+                      className="primary"
+                      disabled={supportBusy}
+                      onClick={() => void submitSupportAppeal()}
+                    >
+                      {supportBusy ? "Отправка…" : "Отправить"}
+                    </button>
+                  </div>
+                </div>
+              </div>
             </div>,
             document.body,
           )
@@ -1199,6 +1629,37 @@ export default function MySubPage() {
             </div>
             <div className="modal-footer">
               <button type="button" className="primary" onClick={() => setShowInstruction(false)}>
+                Понятно
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+      {showWhitelistInstruction && data?.whitelist?.instruction ? (
+        <div className="modal-backdrop" onClick={() => setShowWhitelistInstruction(false)}>
+          <div className="modal mysub-modal comms-picker-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-head">
+              <h2>{data.whitelist.instruction.title || "Как обновить подписку"}</h2>
+              <button type="button" className="ghost modal-close" onClick={() => setShowWhitelistInstruction(false)}>
+                ×
+              </button>
+            </div>
+            <div className="modal-body">
+              {data.whitelist.instruction.photo_url ? (
+                <img
+                  src={data.whitelist.instruction.photo_url}
+                  alt=""
+                  style={{ width: "100%", borderRadius: "8px", marginBottom: "0.75rem" }}
+                />
+              ) : null}
+              <div className="mysub-sub-box">
+                <p className="sub" style={{ whiteSpace: "pre-wrap", margin: 0 }}>
+                  {data.whitelist.instruction.text}
+                </p>
+              </div>
+            </div>
+            <div className="modal-footer">
+              <button type="button" className="primary" onClick={() => setShowWhitelistInstruction(false)}>
                 Понятно
               </button>
             </div>
@@ -1273,23 +1734,20 @@ export default function MySubPage() {
               </button>
             </div>
             <div className="modal-body">
-              <div className="mysub-stat-list">
+              <div className="mysub-pick-sub-list">
                 {data.subscriptions.map((s) => (
                   <button
                     key={s.id}
                     type="button"
-                    className={pickedSubId === s.id ? "primary" : "ghost"}
+                    className={`mysub-pick-sub-item ${pickedSubId === s.id ? "is-selected" : ""}`}
                     onClick={() => setPickedSubId(s.id)}
                   >
-                    #{s.id} {s.name}
+                    {subscriptionLabel(s)}
                   </button>
                 ))}
               </div>
             </div>
-            <div className="modal-footer">
-              <button type="button" className="ghost" onClick={() => setShowPickModal(false)}>
-                Отмена
-              </button>
+            <div className="modal-footer mysub-pick-modal-footer">
               <button
                 type="button"
                 className="primary"
@@ -1302,6 +1760,9 @@ export default function MySubPage() {
                 }}
               >
                 Выбрать
+              </button>
+              <button type="button" className="ghost" onClick={() => setShowPickModal(false)}>
+                Отмена
               </button>
             </div>
           </div>
@@ -1322,7 +1783,7 @@ export default function MySubPage() {
                 if (!s) return <p className="sub">Подписка не найдена.</p>;
                 return (
                   <div className="mysub-stat-list">
-                    <div><b>#{s.id} {s.name}</b></div>
+                    <div><b>{subscriptionLabel(s)}</b></div>
                     <div>Использовано: {s.used_text}</div>
                     <div>Лимит: {s.total_text}</div>
                     <div>

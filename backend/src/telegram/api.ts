@@ -72,8 +72,8 @@ export async function sendTelegramHtml(
   chatId: number,
   text: string,
   reply_markup?: unknown,
-): Promise<void> {
-  const r = await tgCall<unknown>("sendMessage", {
+): Promise<number | undefined> {
+  const r = await tgCall<{ message_id: number }>("sendMessage", {
     chat_id: chatId,
     text,
     parse_mode: "HTML",
@@ -81,6 +81,98 @@ export async function sendTelegramHtml(
     ...(reply_markup ? { reply_markup } : {}),
   });
   if (!r.ok) throw new Error(r.description ?? "sendMessage failed");
+  const mid = r.result?.message_id;
+  if (typeof mid === "number") pushBotScreenMessage(chatId, mid);
+  return mid;
+}
+
+const lastBotMessageIdByChat = new Map<number, number>();
+const botScreenStackByChat = new Map<number, number[]>();
+
+export function rememberLastBotMessageId(chatId: number, messageId: number): void {
+  lastBotMessageIdByChat.set(chatId, messageId);
+}
+
+export function pushBotScreenMessage(chatId: number, messageId: number): void {
+  rememberLastBotMessageId(chatId, messageId);
+  const stack = botScreenStackByChat.get(chatId) ?? [];
+  stack.push(messageId);
+  botScreenStackByChat.set(chatId, stack);
+}
+
+export function getLastBotMessageId(chatId: number): number | undefined {
+  const stack = botScreenStackByChat.get(chatId);
+  if (stack && stack.length > 0) return stack[stack.length - 1];
+  return lastBotMessageIdByChat.get(chatId);
+}
+
+export function forgetBotScreenMessage(chatId: number, messageId: number): void {
+  const stack = botScreenStackByChat.get(chatId) ?? [];
+  const idx = stack.lastIndexOf(messageId);
+  if (idx >= 0) stack.splice(idx, 1);
+  if (stack.length > 0) lastBotMessageIdByChat.set(chatId, stack[stack.length - 1]!);
+  else lastBotMessageIdByChat.delete(chatId);
+}
+
+export type TelegramScreenRef = { messageId: number; threadId?: number };
+
+/** Заменяет текст экрана (fallback, если deleteMessage не сработал). */
+export async function editTelegramMessageText(
+  chatId: number,
+  messageId: number,
+  text: string,
+  opts?: { reply_markup?: unknown; parseMode?: "HTML" | null; threadId?: number },
+): Promise<boolean> {
+  const body: Record<string, unknown> = {
+    chat_id: chatId,
+    message_id: messageId,
+    text,
+    disable_web_page_preview: true,
+  };
+  if (opts?.threadId != null) body.message_thread_id = opts.threadId;
+  if (opts?.parseMode !== null) body.parse_mode = "HTML";
+  if (opts?.reply_markup !== undefined) body.reply_markup = opts.reply_markup;
+
+  const r = await tgCall<boolean>("editMessageText", body);
+  if (!r.ok) {
+    console.warn(
+      "[telegram] editMessageText failed:",
+      r.description ?? "unknown",
+      "chat=",
+      chatId,
+      "msg=",
+      messageId,
+    );
+    return false;
+  }
+  return true;
+}
+
+export async function editTelegramReplyMarkup(
+  chatId: number,
+  messageId: number,
+  reply_markup: unknown,
+  threadId?: number,
+): Promise<boolean> {
+  const body: Record<string, unknown> = {
+    chat_id: chatId,
+    message_id: messageId,
+    reply_markup,
+  };
+  if (threadId != null) body.message_thread_id = threadId;
+  const r = await tgCall<boolean>("editMessageReplyMarkup", body);
+  if (!r.ok) {
+    console.warn(
+      "[telegram] editMessageReplyMarkup failed:",
+      r.description ?? "unknown",
+      "chat=",
+      chatId,
+      "msg=",
+      messageId,
+    );
+    return false;
+  }
+  return true;
 }
 
 /**
@@ -90,6 +182,34 @@ export async function sendTelegramHtml(
 export async function telegramHasDialog(chatId: number): Promise<boolean> {
   const r = await tgCall<unknown>("getChat", { chat_id: chatId });
   return r.ok;
+}
+
+/** Удаляет сообщение бота в чате (например, экран с inline-кнопкой «В меню»). */
+export async function deleteTelegramMessage(
+  chatId: number,
+  messageId: number,
+  threadId?: number,
+): Promise<boolean> {
+  const body: Record<string, unknown> = {
+    chat_id: Number(chatId),
+    message_id: Number(messageId),
+  };
+  if (threadId != null) body.message_thread_id = Number(threadId);
+  const r = await tgCall<boolean>("deleteMessage", body);
+  if (!r.ok) {
+    console.error(
+      "[telegram] deleteMessage failed:",
+      r.description ?? "unknown",
+      "chat=",
+      chatId,
+      "msg=",
+      messageId,
+      "thread=",
+      threadId ?? "—",
+    );
+    return false;
+  }
+  return true;
 }
 
 export async function answerCallbackQuery(
@@ -125,6 +245,24 @@ export async function sendTelegramPhoto(
     ...(opts?.reply_markup ? { reply_markup: opts.reply_markup } : {}),
   });
   if (!r.ok) throw new Error(r.description ?? "sendPhoto failed");
+}
+
+export async function editMessageCaption(
+  chatId: number,
+  messageId: number,
+  caption: string,
+  opts?: { parse_mode?: "HTML"; reply_markup?: unknown },
+): Promise<void> {
+  const r = await tgCall<unknown>("editMessageCaption", {
+    chat_id: chatId,
+    message_id: messageId,
+    caption,
+    parse_mode: opts?.parse_mode ?? "HTML",
+    ...(opts?.reply_markup !== undefined ? { reply_markup: opts.reply_markup } : {}),
+  });
+  if (!r.ok) {
+    console.error("[telegram] editMessageCaption failed:", r.description);
+  }
 }
 
 export async function sendTelegramPhotoBinary(

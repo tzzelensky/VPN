@@ -1,9 +1,11 @@
 import { FormEvent, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { login, loginVerifyCode } from "../api";
 
 export default function LoginPage({ onSuccess }: { onSuccess: () => void }) {
   const nav = useNavigate();
+  const location = useLocation();
+  const sessionExpired = Boolean((location.state as { sessionExpired?: boolean } | null)?.sessionExpired);
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [code, setCode] = useState("");
@@ -75,6 +77,11 @@ export default function LoginPage({ onSuccess }: { onSuccess: () => void }) {
         <p className="sub" style={{ marginBottom: "1rem" }}>
           {awaitingCode ? "Введите код из Telegram" : "Вход в панель управления"}
         </p>
+        {sessionExpired ? (
+          <div className="flash err" style={{ marginBottom: "1rem" }}>
+            Сессия завершена из‑за бездействия. Войдите снова.
+          </div>
+        ) : null}
         <form className="stack-sm" onSubmit={onSubmit}>
           {!awaitingCode ? (
             <>

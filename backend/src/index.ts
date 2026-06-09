@@ -10,12 +10,22 @@ import communicationsRouter from "./routes/communications.js";
 import subscriptionShopRouter from "./routes/subscriptionShop.js";
 import referralProgramRouter from "./routes/referralProgram.js";
 import promoCodesRouter from "./routes/promoCodes.js";
+import configVaultRouter from "./routes/configVault.js";
+import whitelistVaultRouter from "./routes/whitelistVault.js";
 import dropperGameRouter from "./routes/dropperGame.js";
+import rouletteGameRouter from "./routes/rouletteGame.js";
+import supportAppealsRouter from "./routes/supportAppeals.js";
+import pushRouter from "./routes/push.js";
 import mySubRouter from "./routes/mySub.js";
 import subscriptionRouter from "./routes/subscription.js";
+import experimentsRouter from "./routes/experiments.js";
+import experimentSubscriptionRouter from "./routes/experimentSubscription.js";
 import telegramRouter from "./routes/telegram.js";
 import { SUBSCRIPTION_DECOY_HTML } from "./subscriptionLanding.js";
 import { initDb } from "./db.js";
+import { initSurveyDb } from "./surveyDb.js";
+import { initPanelSettings } from "./panelSettings.js";
+import settingsRouter from "./routes/settings.js";
 import {
   getTelegramBotToken,
   getTelegramWebhookSecret,
@@ -24,8 +34,13 @@ import {
 } from "./telegram/env.js";
 import { startTelegramLongPolling } from "./telegram/polling.js";
 import { startAutoTrafficNotifyLoop } from "./telegram/trafficNotify.js";
+import { startAutoExpiryNotifyLoop } from "./telegram/expiryNotify.js";
+import { startConfigVaultAutoCheckLoop } from "./configVaultAutoCheck.js";
+import { startWhitelistVaultAutoCheckLoop } from "./whitelistVaultAutoCheck.js";
 
 initDb();
+initSurveyDb();
+initPanelSettings();
 
 {
   const tgToken = getTelegramBotToken();
@@ -108,14 +123,23 @@ app.use("/api/auth", authRouter);
 app.use("/api/servers", serversRouter);
 app.use("/api/users", usersRouter);
 app.use("/api/communications", communicationsRouter);
+app.use("/api/settings", settingsRouter);
 app.use("/api/subscription-shop", subscriptionShopRouter);
 app.use("/api/referral-program", referralProgramRouter);
 app.use("/api/promo-codes", promoCodesRouter);
+app.use("/api/config-vault", configVaultRouter);
+app.use("/api/whitelist-vault", whitelistVaultRouter);
 app.use("/api/dropper-game", dropperGameRouter);
+app.use("/api/roulette-game", rouletteGameRouter);
+app.use("/api/support-appeals", supportAppealsRouter);
+app.use("/api/push", pushRouter);
 app.use("/api/mysub", mySubRouter);
 app.use("/sub", subscriptionRouter);
 app.use("/api/sub", subscriptionRouter);
 app.use("/api/subscription", subscriptionRouter);
+app.use("/api/experiments", experimentsRouter);
+app.use("/exp-sub", experimentSubscriptionRouter);
+app.use("/api/exp-sub", experimentSubscriptionRouter);
 if (isTelegramWebhookEnabled()) {
   app.use("/api/telegram", telegramRouter);
 }
@@ -135,5 +159,8 @@ app.listen(PORT, "0.0.0.0", () => {
   }
   if (getTelegramBotToken()) {
     startAutoTrafficNotifyLoop();
+    startAutoExpiryNotifyLoop();
   }
+  startConfigVaultAutoCheckLoop();
+  startWhitelistVaultAutoCheckLoop();
 });

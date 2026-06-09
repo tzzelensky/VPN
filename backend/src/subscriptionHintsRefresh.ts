@@ -1,4 +1,5 @@
-import { listDeployedServers, updateServer, type ServerRow } from "./db.js";
+import { getServer, listDeployedServers, updateServer, type ServerRow } from "./db.js";
+import { subscriptionSettingsFromLegacyServer } from "./serverSubscriptionSettings.js";
 import { detectXrayConfigPath, sshExecCommand, sshReadRemoteFile, type SshConfig, type SshLog } from "./ssh.js";
 import {
   ensureRealityPublicKeyOnHintsFromConfig,
@@ -144,6 +145,10 @@ async function refreshOneServerHints(row: ServerRow, log?: SshLog): Promise<void
     sub_reality_sid: hints.sub_reality_sid,
     sub_reality_spx: hints.sub_reality_spx,
   });
+  const updated = getServer(row.id);
+  if (updated && !updated.subscription_settings_custom) {
+    updateServer(row.id, { subscription_settings: subscriptionSettingsFromLegacyServer(updated) });
+  }
 }
 
 /**

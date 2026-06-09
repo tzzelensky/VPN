@@ -1,12 +1,18 @@
 import { Router } from "express";
+import surveysRouter from "./surveys.js";
+import { buildSegmentRows, toChatId, uniqTargets, type TargetUserLite } from "../communicationTargets.js";
 import { logCommunicationMessage, stripHtmlPreview } from "../communicationLog.js";
 import {
   createCommunicationSegment,
   deleteCommunicationSegment,
+  ensureTestSubscriptionSegment,
   getUser,
+  isTestSubscriptionSystemSegment,
   listCommunicationMessageLog,
   listCommunicationSegments,
+  listTestSubscriptionSegmentUserIds,
   listUsers,
+  refreshTestSubscriptionSegment,
   updateCommunicationSegment,
   type CommunicationSegmentRow,
 } from "../db.js";
@@ -16,8 +22,6 @@ import { getTelegramBotToken, getTelegramWebAppUrl } from "../telegram/env.js";
 
 const router = Router();
 router.use(requireAuth);
-
-type TargetUserLite = { id: number; name: string; tg_id: string; enable: boolean };
 
 type SendBody = {
   mode?: unknown;
@@ -48,12 +52,6 @@ type SegmentBody = {
   preset_text?: unknown;
 };
 
-function toChatId(raw: string): number | null {
-  const n = Number(String(raw ?? "").trim());
-  if (!Number.isFinite(n) || n <= 0) return null;
-  return n;
-}
-
 function parseDataUrl(input: string): { mime: string; bytes: Uint8Array } | null {
   const m = /^data:([^;,]+);base64,(.+)$/i.exec(input.trim());
   if (!m) return null;
@@ -66,18 +64,6 @@ function parseDataUrl(input: string): { mime: string; bytes: Uint8Array } | null
   } catch {
     return null;
   }
-}
-
-function uniqTargets(rows: TargetUserLite[]): Array<{ chatId: number; userId: number; userName: string }> {
-  const out: Array<{ chatId: number; userId: number; userName: string }> = [];
-  const seen = new Set<number>();
-  for (const r of rows) {
-    const chatId = toChatId(r.tg_id);
-    if (!chatId || seen.has(chatId)) continue;
-    seen.add(chatId);
-    out.push({ chatId, userId: r.id, userName: r.name });
-  }
-  return out;
 }
 
 router.get("/targets", async (_req, res) => {
@@ -145,6 +131,8 @@ function parseButtons(raw: unknown): CommInlineBtn[] {
 }
 
 router.get("/segments", (_req, res) => {
+  ensureTestSubscriptionSegment();
+  refreshTestSubscriptionSegment();
   res.json({ segments: listCommunicationSegments() });
 });
 
@@ -176,7 +164,24 @@ router.patch("/segments/:id", (req, res) => {
     res.status(400).json({ error: "segment_id_required" });
     return;
   }
-  const updated = updateCommunicationSegment(id, parseSegmentBody((req.body ?? {}) as SegmentBody));
+  const existing = listCommunicationSegments().find((s) => s.id === id);
+  if (!existing) {
+    res.status(404).json({ error: "segment_not_found" });
+    return;
+  }
+  const body = parseSegmentBody((req.body ?? {}) as SegmentBody);
+  if (isTestSubscriptionSystemSegment(existing)) {
+    const updated = updateCommunicationSegment(id, {
+      preset_enabled: body.preset_enabled,
+      preset_text: body.preset_text,
+      days_mode: "any",
+      gb_mode: "any",
+      user_ids: listTestSubscriptionSegmentUserIds(),
+    });
+    res.json(updated ?? refreshTestSubscriptionSegment());
+    return;
+  }
+  const updated = updateCommunicationSegment(id, body);
   if (!updated) {
     res.status(404).json({ error: "segment_not_found" });
     return;
@@ -190,6 +195,11 @@ router.delete("/segments/:id", (req, res) => {
     res.status(400).json({ error: "segment_id_required" });
     return;
   }
+  const existing = listCommunicationSegments().find((s) => s.id === id);
+  if (existing && isTestSubscriptionSystemSegment(existing)) {
+    res.status(403).json({ error: "system_segment_protected" });
+    return;
+  }
   const ok = deleteCommunicationSegment(id);
   if (!ok) {
     res.status(404).json({ error: "segment_not_found" });
@@ -198,11 +208,25 @@ router.delete("/segments/:id", (req, res) => {
   res.json({ ok: true });
 });
 
+router.post("/segments/:id/refresh-test-subscriptions", (req, res) => {
+  const id = String(req.params.id ?? "").trim();
+  const existing = listCommunicationSegments().find((s) => s.id === id);
+  if (!existing || !isTestSubscriptionSystemSegment(existing)) {
+    res.status(404).json({ error: "segment_not_found" });
+    return;
+  }
+  const segment = refreshTestSubscriptionSegment();
+  res.json(segment);
+});
+
 function daysLeft(u: { expiry_time: number }): number | null {
   if (!u.expiry_time || u.expiry_time <= 0) return null;
-  const ms = u.expiry_time - Date.now();
-  if (ms <= 0) return 0;
-  return Math.max(0, Math.ceil(ms / 86400000));
+  const now = new Date();
+  now.setHours(0, 0, 0, 0);
+  const end = new Date(u.expiry_time);
+  end.setHours(0, 0, 0, 0);
+  const diff = Math.round((end.getTime() - now.getTime()) / 86400000);
+  return Math.max(0, diff);
 }
 
 function remainingGb(u: { total_gb: number; traffic_up: number; traffic_down: number }): number | null {
@@ -211,39 +235,27 @@ function remainingGb(u: { total_gb: number; traffic_up: number; traffic_down: nu
   return Math.max(0, Number((u.total_gb - used).toFixed(2)));
 }
 
-function matchesMetric(value: number | null, mode: "any" | "exact" | "range", exact?: number, from?: number, to?: number): boolean {
-  if (mode === "any") return true;
-  if (value == null) return false;
-  if (mode === "exact") return Math.floor(value) === Math.max(0, Math.floor(Number(exact) || 0));
-  const a = Math.max(0, Math.floor(Number(from) || 0));
-  const b = Math.max(0, Math.floor(Number(to) || 0));
-  const lo = Math.min(a, b);
-  const hi = Math.max(a, b);
-  return value >= lo && value <= hi;
+function formatDaysBeforeEnd(value: number | null): string {
+  if (value == null) return "без срока";
+  if (value <= 0) return "сегодня";
+  const mod10 = value % 10;
+  const mod100 = value % 100;
+  if (mod10 === 1 && mod100 !== 11) return `${value} день`;
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return `${value} дня`;
+  return `${value} дней`;
 }
 
-async function buildSegmentRows(segmentId: string): Promise<TargetUserLite[]> {
-  const segment = listCommunicationSegments().find((s) => s.id === segmentId);
-  if (!segment) throw new Error("segment_not_found");
-  const all = listUsers();
-  const pre = segment.user_ids.length > 0 ? all.filter((u) => segment.user_ids.includes(u.id)) : all;
-  const filtered = pre.filter((u) => {
-    const d = daysLeft(u);
-    const g = remainingGb(u);
-    return (
-      matchesMetric(d, segment.days_mode, segment.days_exact, segment.days_from, segment.days_to) &&
-      matchesMetric(g, segment.gb_mode, segment.gb_exact, segment.gb_from, segment.gb_to)
-    );
-  });
-  const rows: TargetUserLite[] = [];
-  for (const u of filtered) {
-    const chatId = toChatId(u.tg_id);
-    if (!chatId) continue;
-    const hasChat = await telegramHasDialog(chatId);
-    if (!hasChat) continue;
-    rows.push({ id: u.id, name: u.name, tg_id: u.tg_id, enable: u.enable === 1 });
-  }
-  return rows;
+function formatGbBeforeEnd(value: number | null): string {
+  if (value == null) return "без лимита";
+  return `${value.toLocaleString("ru-RU", { maximumFractionDigits: 2 })} ГБ`;
+}
+
+function renderCommunicationText(template: string, userId: number): string {
+  const u = getUser(userId);
+  if (!u) return template;
+  return template
+    .replaceAll("{days_before_end}", formatDaysBeforeEnd(daysLeft(u)))
+    .replaceAll("{gb_before_end}", formatGbBeforeEnd(remainingGb(u)));
 }
 
 router.get("/segments/:id/users", async (req, res) => {
@@ -359,10 +371,10 @@ router.post("/send", async (req, res) => {
   const markEnabled = body.mark_enabled === true || body.mark_enabled === 1 || body.mark_enabled === "1";
   const markText = String(body.mark_text ?? "").trim();
   const header = markEnabled ? `<b>${markText || "Сообщение от администратора"}</b>\n\n` : "";
-  const caption = `${header}${text}`;
   const buttons = parseButtons(body.buttons);
   const replyMarkup = buttons.length > 0 ? { inline_keyboard: buttons.map((b) => [b]) } : undefined;
   for (const t of targets) {
+    const caption = `${header}${renderCommunicationText(text, t.userId)}`;
     try {
       if (photo) {
         await sendTelegramPhotoBinary(t.chatId, photo.bytes, {
@@ -394,7 +406,7 @@ router.post("/send", async (req, res) => {
       source_label: MODE_SOURCE_LABELS[mode] ?? "Рассылка из панели",
       mode: mode as "global" | "single" | "selected" | "segment",
       ...(segment ? { segment_id: segment.id, segment_name: segment.name } : {}),
-      text: stripHtmlPreview(caption),
+      text: stripHtmlPreview(`${header}${text}`),
       has_photo: Boolean(photo),
       recipients: targets.map((t) => ({ user_id: t.userId, user_name: t.userName })),
       sent,
@@ -413,5 +425,7 @@ router.post("/send", async (req, res) => {
     failures,
   });
 });
+
+router.use("/surveys", surveysRouter);
 
 export default router;

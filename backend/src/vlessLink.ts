@@ -1,4 +1,6 @@
 import type { ServerRow, UserRow } from "./db.js";
+import type { ServerSubscriptionSettings } from "./serverSubscriptionSettings.js";
+import { resolveSubscriptionAddress, resolveSubscriptionRemarks, resolveSubscriptionEncryption, resolveSubscriptionFlow } from "./serverSubscriptionSettings.js";
 
 export type VlessLinkUserSlice = Pick<
   UserRow,
@@ -37,7 +39,78 @@ function pickStr(serverVal: string, userVal: string): string {
 }
 
 /**
+ * VLESS URI из индивидуальных настроек подписки сервера.
+ */
+export function buildVlessUriFromSubscriptionSettings(
+  server: Pick<ServerRow, "host" | "name" | "country_code">,
+  user: VlessLinkUserSlice & Pick<UserRow, "vless_uuid" | "name">,
+  settings: ServerSubscriptionSettings,
+): string {
+  const address = resolveSubscriptionAddress(server as ServerRow, settings);
+  const label = resolveSubscriptionRemarks(server as ServerRow, settings, user);
+  const enc = encodeURIComponent(label || "vpn");
+  const port = settings.vless_port;
+  const uuid = user.vless_uuid;
+  const encryption = resolveSubscriptionEncryption(settings);
+  const fp = settings.reality.fingerprint.trim() || "chrome";
+  const flow = resolveSubscriptionFlow(settings);
+
+  if (settings.security === "reality") {
+    const q = new URLSearchParams({
+      type: settings.network === "tcp" ? "tcp" : settings.network,
+      encryption,
+      security: "reality",
+      pbk: settings.reality.public_key,
+      fp,
+      sni: settings.reality.server_name,
+      sid: settings.reality.short_id,
+      spx: settings.reality.spider_x.trim() || "/",
+    });
+    if (settings.reality.allow_insecure) q.set("allowInsecure", "1");
+    if (flow) q.set("flow", flow);
+    applyTransportQuery(q, settings);
+    return `vless://${uuid}@${address}:${port}?${q.toString()}#${enc}`;
+  }
+
+  if (settings.security === "tls") {
+    const q = new URLSearchParams({
+      type: settings.network === "tcp" ? "tcp" : settings.network,
+      encryption,
+      security: "tls",
+      sni: settings.reality.server_name,
+      fp,
+    });
+    if (settings.reality.allow_insecure) q.set("allowInsecure", "1");
+    applyTransportQuery(q, settings);
+    if (flow) q.set("flow", flow);
+    return `vless://${uuid}@${address}:${port}?${q.toString()}#${enc}`;
+  }
+
+  const q = new URLSearchParams({
+    encryption,
+    security: "none",
+    type: settings.network === "tcp" ? "tcp" : settings.network,
+  });
+  applyTransportQuery(q, settings);
+  if (flow) q.set("flow", flow);
+  return `vless://${uuid}@${address}:${port}?${q.toString()}#${enc}`;
+}
+
+function applyTransportQuery(q: URLSearchParams, settings: ServerSubscriptionSettings): void {
+  if (settings.network === "ws") {
+    q.set("type", "ws");
+    if (settings.ws.host) q.set("host", settings.ws.host);
+    if (settings.ws.path) q.set("path", settings.ws.path);
+  } else if (settings.network === "grpc") {
+    q.set("type", "grpc");
+    if (settings.grpc.service_name) q.set("serviceName", settings.grpc.service_name);
+    if (settings.grpc.authority) q.set("authority", settings.grpc.authority);
+  }
+}
+
+/**
  * VLESS URI для подписки: Reality из импорта x-ui или TCP без TLS (как в панели).
+ * @deprecated Prefer buildVlessUriFromSubscriptionSettings for panel servers.
  */
 /** Подпись узла в подписке: только сервер и имя клиента (внутренние заметки не публикуем). */
 export function vlessListLabel(serverName: string, user: Pick<UserRow, "name" | "comment">): string {

@@ -3,6 +3,9 @@ package com.vpnadmin.panel
 import android.annotation.SuppressLint
 import android.content.Intent
 import android.graphics.Bitmap
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import android.view.Menu
 import android.view.MenuItem
@@ -14,14 +17,26 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.ProgressBar
 import androidx.activity.OnBackPressedCallback
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.ContextCompat
 import com.google.android.material.appbar.MaterialToolbar
 
 class MainActivity : AppCompatActivity() {
 
+    companion object {
+        const val EXTRA_OPEN_PATH = "open_path"
+    }
+
     private lateinit var webView: WebView
     private lateinit var progress: ProgressBar
     private var panelUrl: String = ""
+
+    private val requestNotifications =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { _ ->
+            registerPushToken()
+            AppealPollWorker.runNow(this)
+        }
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -36,6 +51,10 @@ class MainActivity : AppCompatActivity() {
         }
         panelUrl = url
 
+        AppealNotifier.ensureChannel(this)
+        AppealPollWorker.schedule(this)
+        maybeRequestNotificationPermission()
+
         setContentView(R.layout.activity_main)
         val toolbar = findViewById<MaterialToolbar>(R.id.toolbar)
         setSupportActionBar(toolbar)
@@ -49,6 +68,7 @@ class MainActivity : AppCompatActivity() {
         cookies.setAcceptCookie(true)
         cookies.setAcceptThirdPartyCookies(webView, true)
         PanelWebViewHelper.configure(webView)
+        webView.addJavascriptInterface(PanelJsBridge(this), "VpnAdminAndroid")
 
         webView.webChromeClient = object : WebChromeClient() {
             override fun onProgressChanged(view: WebView?, newProgress: Int) {
@@ -81,6 +101,13 @@ class MainActivity : AppCompatActivity() {
                 progress.visibility = View.GONE
                 PanelWebViewHelper.injectMobileShell(webView)
                 CookieManager.getInstance().flush()
+                if (PanelWebViewHelper.hasSessionCookie(panelUrl)) {
+                    registerPushToken()
+                }
+                val path = url?.let { runCatching { android.net.Uri.parse(it).path }.getOrNull() } ?: ""
+                if (path?.contains("support-appeals") == true) {
+                    AppealPollWorker.ackCurrent(this@MainActivity)
+                }
             }
         }
 
@@ -96,13 +123,7 @@ class MainActivity : AppCompatActivity() {
         if (savedInstanceState != null) {
             webView.restoreState(savedInstanceState)
         } else {
-            val start =
-                if (PanelWebViewHelper.hasSessionCookie(panelUrl)) {
-                    "$panelUrl/servers"
-                } else {
-                    panelUrl
-                }
-            webView.loadUrl(start)
+            webView.loadUrl(resolveStartUrl(intent))
         }
     }
 
@@ -112,9 +133,7 @@ class MainActivity : AppCompatActivity() {
         if (::webView.isInitialized) {
             PanelUrlStore.get(this)?.let {
                 panelUrl = it
-                val start =
-                    if (PanelWebViewHelper.hasSessionCookie(panelUrl)) "$panelUrl/servers" else panelUrl
-                webView.loadUrl(start)
+                webView.loadUrl(resolveStartUrl(intent))
             }
         }
     }
@@ -126,6 +145,36 @@ class MainActivity : AppCompatActivity() {
             webView.resumeTimers()
         }
         CookieManager.getInstance().flush()
+        if (PanelWebViewHelper.hasSessionCookie(panelUrl)) {
+            registerPushToken()
+            AppealPollWorker.runNow(this)
+        }
+    }
+
+    private fun resolveStartUrl(intent: Intent?): String {
+        val deepPath = intent?.getStringExtra(EXTRA_OPEN_PATH)?.trim().orEmpty()
+        if (deepPath.isNotEmpty()) {
+            return panelUrl.trimEnd('/') + if (deepPath.startsWith("/")) deepPath else "/$deepPath"
+        }
+        return if (PanelWebViewHelper.hasSessionCookie(panelUrl)) {
+            "$panelUrl/servers"
+        } else {
+            panelUrl
+        }
+    }
+
+    private fun maybeRequestNotificationPermission() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
+            registerPushToken()
+            return
+        }
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) ==
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            registerPushToken()
+        } else {
+            requestNotifications.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
     }
 
     override fun onPause() {
@@ -140,6 +189,12 @@ class MainActivity : AppCompatActivity() {
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
         if (::webView.isInitialized) webView.saveState(outState)
+    }
+
+    fun registerPushToken() {
+        if (::webView.isInitialized) {
+            FcmRegistrar.registerIfLoggedIn(this, webView)
+        }
     }
 
     override fun onCreateOptionsMenu(menu: Menu): Boolean {

@@ -19,13 +19,16 @@ import { pushClientListToAllDeployedServers, refreshSpeedLimitsOnAllDeployedServ
 import { initNdjsonStream, ndjsonLine, wantsNdjsonStream } from "../streamUtil.js";
 import { buildSubscriptionPayload } from "../vlessLink.js";
 import { subscriptionVlessLinksForUser } from "../subscriptionLinks.js";
-import { parseXuiInboundImport } from "../xuiImport.js";
 import { generateX25519RealityKeyPair } from "../realityKeygen.js";
-import { sendExpiryRenewalReminder } from "../telegram/expiryNotify.js";
+import { logCommunicationMessage } from "../communicationLog.js";
+import { sendTelegramMessage } from "../telegram/api.js";
+import { sendExpiredSubscriptionReminder, sendExpiryRenewalReminder } from "../telegram/expiryNotify.js";
 import { runAutoTrafficNotificationsOnce } from "../telegram/trafficNotify.js";
-import { peekUserTrafficFromServers, pullTrafficFromAllDeployedServers } from "../xrayStatsPull.js";
+import { pullTrafficFromAllDeployedServers } from "../xrayStatsPull.js";
 import { refreshMissingSubscriptionHintsIfDue } from "../subscriptionHintsRefresh.js";
-import { clearSubscriptionUsageMonotonic } from "../subscriptionMeta.js";
+import { resetUserTrafficCounters } from "../trafficReset.js";
+import { coerceExtraVlessLinksInput, isValidVlessUri } from "../extraVless.js";
+import { userHasPaidWhitelistProduct } from "../whitelistVaultDb.js";
 
 const router = Router();
 
@@ -37,6 +40,16 @@ function deriveOnlineFromRow(u: UserRow): boolean {
   if (!t || !Number.isFinite(t) || Date.now() - t > ONLINE_SNAPSHOT_TTL_MS) return false;
   return Number(u.online_devices) > 0 || u.online_snapshot === 1;
 }
+
+function isExpiredUser(u: UserRow): boolean {
+  return Number(u.expiry_time) > 0 && Number(u.expiry_time) <= Date.now();
+}
+
+function parseChatId(raw: string): number | null {
+  const n = Math.floor(Number(String(raw ?? "").trim()));
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
 router.use(requireAuth);
 
 /** Пара X25519 для Reality: publicKey в клиент, privateKey — в inbound Xray на сервере. */
@@ -141,23 +154,26 @@ function userDto(u: UserRow) {
     reality_sid: u.reality_sid,
     reality_spx: u.reality_spx,
     subscription_server_count: u.subscription_server_count,
+    subscription_server_ids: u.subscription_server_ids,
     device_limit_enabled: u.device_limit_enabled === 1,
     device_limit_count: u.device_limit_count,
     speed_limit_mbps: u.speed_limit_mbps,
     whitelist_happ_enabled: u.whitelist_happ_enabled === 1,
+    whitelist_purchased: userHasPaidWhitelistProduct(u),
     online: deriveOnlineFromRow(u),
     online_devices: Number(u.online_devices) || 0,
     stats_synced_at: u.stats_synced_at,
     connection_profile: u.connection_profile,
     dropper_tickets: u.dropper_tickets,
     dropper_wins: dropperWinsForClientRow(u),
+    extra_vless_links: u.extra_vless_links ?? [],
     created_at: u.created_at,
     updated_at: u.updated_at,
   };
 }
 
 router.get("/", (_req, res) => {
-  res.json(listUsers().map(userDto));
+  res.json(listUsers().filter((u) => u.is_test_subscription !== 1).map(userDto));
 });
 
 function parseCreateBody(req: import("express").Request): CreateUserInput & { name?: string } {
@@ -192,6 +208,9 @@ function parseCreateBody(req: import("express").Request): CreateUserInput & { na
     reality_spx: b.reality_spx != null ? String(b.reality_spx) : undefined,
     subscription_server_count:
       b.subscription_server_count != null ? Number(b.subscription_server_count) : undefined,
+    subscription_server_ids: Array.isArray(b.subscription_server_ids)
+      ? (b.subscription_server_ids as unknown[]).map((x) => Math.floor(Number(x))).filter((n) => Number.isFinite(n) && n > 0)
+      : undefined,
     device_limit_enabled:
       typeof b.device_limit_enabled === "boolean"
         ? b.device_limit_enabled
@@ -216,7 +235,18 @@ function parseCreateBody(req: import("express").Request): CreateUserInput & { na
             : undefined,
     connection_profile:
       b.connection_profile != null && String(b.connection_profile).toLowerCase() === "reality" ? "reality" : undefined,
+    extra_vless_links: coerceExtraVlessLinksInput(b.extra_vless_links),
   };
+}
+
+function assertExtraVlessValid(links: import("../extraVless.js").ExtraVlessLink[] | undefined): void {
+  if (links === undefined) return;
+  const raw = links;
+  for (const item of raw) {
+    if (!isValidVlessUri(item.uri)) {
+      throw new Error("Некорректная VLESS-ссылка в дополнительных ключах");
+    }
+  }
 }
 
 router.post("/", async (req, res) => {
@@ -232,6 +262,7 @@ router.post("/", async (req, res) => {
   if (!input.name?.trim() && !input.email?.trim()) {
     input.name = "Пользователь";
   }
+  assertExtraVlessValid(input.extra_vless_links);
 
   try {
     log?.("Создание пользователя…");
@@ -255,59 +286,10 @@ router.post("/", async (req, res) => {
   }
 });
 
-router.post("/import", async (req, res) => {
-  const stream = wantsNdjsonStream(req);
-  if (stream) initNdjsonStream(res);
-  const log = stream
-    ? (msg: string) => {
-        ndjsonLine(res, { type: "log", msg, t: Date.now() });
-      }
-    : undefined;
-
-  try {
-    let raw: unknown = req.body?.json ?? req.body?.raw ?? req.body;
-    if (typeof raw === "string") {
-      raw = JSON.parse(raw) as unknown;
-    }
-    const parsed = parseXuiInboundImport(raw);
-    if (!parsed.ok) {
-      if (stream) {
-        ndjsonLine(res, { type: "error", message: parsed.error });
-        return res.end();
-      }
-      return res.status(400).json({ error: parsed.error });
-    }
-    const existing = findUserByVlessUuid(parsed.data.vless_uuid ?? "");
-    if (existing) {
-      const err = "Пользователь с таким UUID уже существует.";
-      if (stream) {
-        ndjsonLine(res, { type: "error", message: err });
-        return res.end();
-      }
-      return res.status(409).json({ error: err });
-    }
-    log?.("Импорт из x-ui…");
-    const user = createUser(parsed.data);
-    log?.(`Создан: ${user.name}`);
-    await pushClientListToAllDeployedServers(log);
-    if (stream) {
-      ndjsonLine(res, { type: "done", ok: true, user: userDto(user) });
-      return res.end();
-    }
-    res.json({ user: userDto(user) });
-  } catch (e) {
-    const message = e instanceof Error ? e.message : String(e);
-    if (stream) {
-      ndjsonLine(res, { type: "error", message });
-      return res.end();
-    }
-    res.status(500).json({ error: message });
-  }
-});
-
 router.patch("/:id(\\d+)", async (req, res) => {
   const id = Number(req.params.id);
   const patch = parseCreateBody(req) as Partial<CreateUserInput> & { name?: string };
+  assertExtraVlessValid(patch.extra_vless_links);
   const u = updateUserRow(id, patch);
   if (!u) {
     res.status(404).json({ error: "not_found" });
@@ -351,6 +333,35 @@ router.post("/:id(\\d+)/notify-expiry", async (req, res) => {
   }
 });
 
+router.post("/:id(\\d+)/notify-expired", async (req, res) => {
+  const id = Number(req.params.id);
+  const u = getUser(id);
+  if (!u) {
+    res.status(404).json({ error: "not_found" });
+    return;
+  }
+  const b = req.body as { tg_id?: unknown; expiry_time?: unknown };
+  const effective: UserRow = { ...u };
+  if (b.tg_id !== undefined) effective.tg_id = String(b.tg_id ?? "").trim();
+  if (b.expiry_time !== undefined) effective.expiry_time = coerceExpiryTimeMs(b.expiry_time);
+  try {
+    await sendExpiredSubscriptionReminder(effective, { manual: true });
+    res.json({ ok: true });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    const bad = new Set(["no_tg", "no_expiry", "not_expired"]);
+    if (bad.has(msg)) {
+      res.status(400).json({ error: msg });
+      return;
+    }
+    if (msg === "telegram_not_configured") {
+      res.status(503).json({ error: msg });
+      return;
+    }
+    res.status(502).json({ error: msg });
+  }
+});
+
 router.post("/:id(\\d+)/reset-traffic", async (req, res) => {
   const id = Number(req.params.id);
   const u = getUser(id);
@@ -358,31 +369,99 @@ router.post("/:id(\\d+)/reset-traffic", async (req, res) => {
     res.status(404).json({ error: "not_found" });
     return;
   }
-  let rawUp = Number.isFinite(Number(u.stats_raw_up)) ? Math.max(0, Math.floor(Number(u.stats_raw_up))) : 0;
-  let rawDown = Number.isFinite(Number(u.stats_raw_down)) ? Math.max(0, Math.floor(Number(u.stats_raw_down))) : 0;
-  try {
-    const agg = await peekUserTrafficFromServers(u);
-    rawUp = Math.max(0, Math.floor(Number(agg.up) || 0));
-    rawDown = Math.max(0, Math.floor(Number(agg.down) || 0));
-  } catch {
-    /* узлы недоступны — используем сохранённый baseline из БД */
-  }
-  const next = updateUserRow(id, {
-    traffic_up: 0,
-    traffic_down: 0,
-    online_snapshot: 0,
-    online_devices: 0,
-    stats_synced_at: Date.now(),
-    stats_raw_up: rawUp,
-    stats_raw_down: rawDown,
-    traffic_notify_state: "",
-  });
+  const next = await resetUserTrafficCounters(u);
   if (!next) {
     res.status(404).json({ error: "not_found" });
     return;
   }
-  clearSubscriptionUsageMonotonic(next);
   res.json({ ok: true, user: userDto(next) });
+});
+
+router.post("/bulk-delete-inactive", async (req, res) => {
+  const body = req.body as { user_ids?: unknown; send_message?: unknown; message?: unknown };
+  const requestedIds = Array.isArray(body.user_ids)
+    ? body.user_ids
+        .map((x) => Math.floor(Number(x)))
+        .filter((n, i, arr) => Number.isFinite(n) && n > 0 && arr.indexOf(n) === i)
+    : [];
+  if (requestedIds.length === 0) {
+    res.status(400).json({ error: "user_ids_required" });
+    return;
+  }
+
+  const sendMessage = body.send_message === true || body.send_message === 1 || body.send_message === "1";
+  const message = String(body.message ?? "").trim();
+  if (sendMessage && !message) {
+    res.status(400).json({ error: "message_required" });
+    return;
+  }
+
+  const requestedSet = new Set(requestedIds);
+  const inactiveUsers = listUsers().filter((u) => requestedSet.has(u.id) && isExpiredUser(u));
+  if (inactiveUsers.length === 0) {
+    res.status(400).json({ error: "inactive_users_not_found" });
+    return;
+  }
+
+  const notifyFailures: Array<{ user_id: number; user_name: string; error: string }> = [];
+  const deleteFailures: Array<{ user_id: number; user_name: string; error: string }> = [];
+  const notifiedRecipients: Array<{ user_id: number; user_name: string }> = [];
+  let deleted = 0;
+
+  for (const u of inactiveUsers) {
+    if (sendMessage) {
+      const chatId = parseChatId(u.tg_id);
+      if (chatId == null) {
+        notifyFailures.push({ user_id: u.id, user_name: u.name, error: "no_tg_id" });
+      } else {
+        try {
+          await sendTelegramMessage(chatId, message);
+          notifiedRecipients.push({ user_id: u.id, user_name: u.name });
+        } catch (e) {
+          notifyFailures.push({
+            user_id: u.id,
+            user_name: u.name,
+            error: e instanceof Error ? e.message : String(e),
+          });
+        }
+      }
+    }
+
+    try {
+      await removeUserUuidFromAllServers(u.vless_uuid);
+      deleteUser(u.id);
+      deleted++;
+    } catch (e) {
+      deleteFailures.push({
+        user_id: u.id,
+        user_name: u.name,
+        error: e instanceof Error ? e.message : String(e),
+      });
+    }
+  }
+
+  if (sendMessage && notifiedRecipients.length > 0) {
+    logCommunicationMessage({
+      automatic: false,
+      source_label: "Удаление неактивных",
+      mode: "selected",
+      text: message,
+      has_photo: false,
+      recipients: notifiedRecipients,
+      sent: notifiedRecipients.length,
+      attempted: inactiveUsers.length,
+      failed: notifyFailures.length,
+    });
+  }
+
+  res.json({
+    ok: deleteFailures.length === 0,
+    attempted: inactiveUsers.length,
+    deleted,
+    notified: notifiedRecipients.length,
+    delete_failures: deleteFailures,
+    notify_failures: notifyFailures,
+  });
 });
 
 router.get("/:id(\\d+)/subscription", (req, res) => {

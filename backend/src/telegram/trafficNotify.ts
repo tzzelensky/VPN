@@ -3,6 +3,7 @@ import { listUsers, updateUserRow, type UserRow } from "../db.js";
 import { sendTelegramHtml } from "./api.js";
 import { getTelegramBotToken } from "./env.js";
 import { buyGbReminderInline } from "./keyboards.js";
+import { subscriptionPublicName } from "./format.js";
 
 const BYTES_PER_GB = 1073741824;
 const LOW_GB_THRESHOLD = 30;
@@ -35,7 +36,7 @@ function remainGbText(u: UserRow): string {
 }
 
 async function sendLowTrafficReminder(u: UserRow, chatId: number): Promise<void> {
-  const subLabel = `#${u.id} ${u.name}`;
+  const subLabel = subscriptionPublicName(u);
   const body =
     `<b>Внимание: трафик почти закончился.</b>\n\n` +
     `Подписка: <b>${subLabel}</b>\n` +
@@ -55,7 +56,7 @@ async function sendLowTrafficReminder(u: UserRow, chatId: number): Promise<void>
 }
 
 async function sendEmptyTrafficReminder(u: UserRow, chatId: number): Promise<void> {
-  const subLabel = `#${u.id} ${u.name}`;
+  const subLabel = subscriptionPublicName(u);
   const body =
     `<b>Трафик закончился.</b>\n\n` +
     `Подписка: <b>${subLabel}</b>\n` +
@@ -79,6 +80,7 @@ export async function runAutoTrafficNotificationsOnce(): Promise<void> {
   const users = listUsers();
   for (const u of users) {
     if (u.enable === 0) continue;
+    if (u.is_test_subscription === 1) continue;
     if ((Number(u.total_gb) || 0) <= 0) continue;
     const chatId = targetChatId(u);
     if (!chatId) continue;

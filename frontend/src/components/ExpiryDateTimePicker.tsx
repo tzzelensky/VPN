@@ -2,8 +2,14 @@ import { useCallback, useEffect, useId, useRef, useState } from "react";
 
 const pad2 = (n: number) => String(n).padStart(2, "0");
 
+const DAY_MS = 86_400_000;
+
 function atNoon(d: Date): Date {
   return new Date(d.getFullYear(), d.getMonth(), d.getDate(), 12, 0, 0, 0);
+}
+
+function noonAfterDays(days: number): Date {
+  return atNoon(new Date(Date.now() + days * DAY_MS));
 }
 
 function formatDdMmYyyy(d: Date): string {
@@ -85,6 +91,12 @@ export default function ExpiryDateTimePicker({ valueMs, onChangeMs, disabled }: 
 
   function applyClear() {
     onChangeMs(0);
+    setOpen(false);
+  }
+
+  function applyPlusDays(days: number) {
+    const n = noonAfterDays(days);
+    onChangeMs(n.getTime());
     setOpen(false);
   }
 
@@ -174,6 +186,9 @@ export default function ExpiryDateTimePicker({ valueMs, onChangeMs, disabled }: 
           <div className="expiry-picker-footer">
             <button type="button" className="expiry-picker-link" onClick={applyTodayNoon}>
               Сегодня
+            </button>
+            <button type="button" className="expiry-picker-link" onClick={() => applyPlusDays(30)}>
+              30 дней
             </button>
             <button type="button" className="expiry-picker-link subtle" onClick={applyClear}>
               Без срока
