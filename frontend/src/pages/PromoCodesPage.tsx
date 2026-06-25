@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import DashboardLayout from "../components/DashboardLayout";
+import PurchaseDiscountsTab from "../components/PurchaseDiscountsTab";
 import ExpiryDateTimePicker from "../components/ExpiryDateTimePicker";
 import {
   createPromoCode,
@@ -26,6 +27,7 @@ function toExpiryIsoFromMs(ms: number): string {
 }
 
 export default function PromoCodesPage({ onLogout }: { onLogout: () => void }) {
+  const [tab, setTab] = useState<"promos" | "discounts">("promos");
   const [promos, setPromos] = useState<PromoCodeDto[]>([]);
   const [shop, setShop] = useState<SubscriptionShopDto | null>(null);
   const [name, setName] = useState("");
@@ -322,11 +324,37 @@ export default function PromoCodesPage({ onLogout }: { onLogout: () => void }) {
   return (
     <DashboardLayout onLogout={onLogout}>
       <section className="panel users-hero-panel">
-        <h1>Промокоды</h1>
-        <p className="sub users-hero-sub">Создание промокодов и просмотр, кто и сколько раз их применял.</p>
-        {msg ? <div className={`flash ${msg.type === "ok" ? "ok" : "err"}`}>{msg.text}</div> : null}
+        <h1>Промоакции</h1>
+        <p className="sub users-hero-sub">Промокоды, очередь скидок из рулетки и ежедневного подарка.</p>
+        <div className="survey-segmented promo-page-tabs" role="tablist" aria-label="Раздел промоакций">
+          <button
+            type="button"
+            role="tab"
+            className={`survey-segmented-btn${tab === "promos" ? " active" : ""}`}
+            aria-selected={tab === "promos"}
+            onClick={() => setTab("promos")}
+          >
+            Промокоды
+          </button>
+          <button
+            type="button"
+            role="tab"
+            className={`survey-segmented-btn${tab === "discounts" ? " active" : ""}`}
+            aria-selected={tab === "discounts"}
+            onClick={() => setTab("discounts")}
+          >
+            Скидки
+          </button>
+        </div>
+        {msg && tab === "promos" ? <div className={`flash ${msg.type === "ok" ? "ok" : "err"}`}>{msg.text}</div> : null}
       </section>
 
+      {tab === "discounts" ? (
+        <section className="panel">
+          <PurchaseDiscountsTab />
+        </section>
+      ) : (
+        <>
       <section className="panel">
         <div className="promos-layout">
           <div className="promos-create">
@@ -678,6 +706,8 @@ export default function PromoCodesPage({ onLogout }: { onLogout: () => void }) {
           </>
         )}
       </section>
+        </>
+      )}
     </DashboardLayout>
   );
 }

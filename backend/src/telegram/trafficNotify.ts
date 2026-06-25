@@ -1,3 +1,5 @@
+import { getAutoCommunicationsConfig } from "../autoCommunicationsStore.js";
+import { fillAutoMessageTemplate } from "../autoCommunicationsTypes.js";
 import { logCommunicationMessage, stripHtmlPreview } from "../communicationLog.js";
 import { listUsers, updateUserRow, type UserRow } from "../db.js";
 import { sendTelegramHtml } from "./api.js";
@@ -6,17 +8,16 @@ import { buyGbReminderInline } from "./keyboards.js";
 import { subscriptionPublicName } from "./format.js";
 
 const BYTES_PER_GB = 1073741824;
-const LOW_GB_THRESHOLD = 30;
 
 type TrafficBucket = "ok" | "low30" | "empty";
 
-function trafficBucket(u: UserRow): TrafficBucket {
+function trafficBucket(u: UserRow, lowThresholdGb: number): TrafficBucket {
   const totalGb = Number(u.total_gb) || 0;
   if (totalGb <= 0) return "ok";
   const usedBytes = Math.max(0, Number(u.traffic_up) || 0) + Math.max(0, Number(u.traffic_down) || 0);
   const remainGb = totalGb - usedBytes / BYTES_PER_GB;
   if (remainGb <= 0) return "empty";
-  if (remainGb <= LOW_GB_THRESHOLD) return "low30";
+  if (remainGb <= lowThresholdGb) return "low30";
   return "ok";
 }
 
@@ -36,16 +37,19 @@ function remainGbText(u: UserRow): string {
 }
 
 async function sendLowTrafficReminder(u: UserRow, chatId: number): Promise<void> {
+  const cfg = getAutoCommunicationsConfig().traffic;
   const subLabel = subscriptionPublicName(u);
-  const body =
-    `<b>Внимание: трафик почти закончился.</b>\n\n` +
-    `Подписка: <b>${subLabel}</b>\n` +
-    `У вас осталось примерно <b>${remainGbText(u)}</b> (меньше 30 ГБ).\n\n` +
-    `Чтобы не потерять доступ, докупите пакет трафика.`;
+  const vars = {
+    subscription: subLabel,
+    remaining_gb: remainGbText(u),
+    threshold_gb: String(cfg.low_gb_threshold),
+  };
+  const body = fillAutoMessageTemplate(cfg.low_message, vars);
+  const sourceLabel = fillAutoMessageTemplate(cfg.source_label_low, vars);
   await sendTelegramHtml(chatId, body, buyGbReminderInline);
   logCommunicationMessage({
     automatic: true,
-    source_label: "Авто: мало трафика (<30 ГБ)",
+    source_label: sourceLabel,
     text: stripHtmlPreview(body),
     has_photo: false,
     recipients: [{ user_id: u.id, user_name: u.name }],
@@ -56,16 +60,18 @@ async function sendLowTrafficReminder(u: UserRow, chatId: number): Promise<void>
 }
 
 async function sendEmptyTrafficReminder(u: UserRow, chatId: number): Promise<void> {
+  const cfg = getAutoCommunicationsConfig().traffic;
   const subLabel = subscriptionPublicName(u);
-  const body =
-    `<b>Трафик закончился.</b>\n\n` +
-    `Подписка: <b>${subLabel}</b>\n` +
-    `Лимит по подписке исчерпан, доступ может быть ограничен.\n\n` +
-    `Нажмите «Докупить ГБ», чтобы сразу пополнить баланс.`;
+  const vars = {
+    subscription: subLabel,
+    remaining_gb: remainGbText(u),
+    threshold_gb: String(cfg.low_gb_threshold),
+  };
+  const body = fillAutoMessageTemplate(cfg.empty_message, vars);
   await sendTelegramHtml(chatId, body, buyGbReminderInline);
   logCommunicationMessage({
     automatic: true,
-    source_label: "Авто: трафик закончился",
+    source_label: cfg.source_label_empty,
     text: stripHtmlPreview(body),
     has_photo: false,
     recipients: [{ user_id: u.id, user_name: u.name }],
@@ -76,16 +82,17 @@ async function sendEmptyTrafficReminder(u: UserRow, chatId: number): Promise<voi
 }
 
 export async function runAutoTrafficNotificationsOnce(): Promise<void> {
-  if (!getTelegramBotToken()) return;
+  const cfg = getAutoCommunicationsConfig().traffic;
+  if (!cfg.enabled || !getTelegramBotToken()) return;
   const users = listUsers();
   for (const u of users) {
     if (u.enable === 0) continue;
-    if (u.is_test_subscription === 1) continue;
+    if (cfg.skip_test_subscriptions && u.is_test_subscription === 1) continue;
     if ((Number(u.total_gb) || 0) <= 0) continue;
     const chatId = targetChatId(u);
     if (!chatId) continue;
 
-    const nowBucket = trafficBucket(u);
+    const nowBucket = trafficBucket(u, cfg.low_gb_threshold);
     const prev =
       u.traffic_notify_state === "low30" || u.traffic_notify_state === "empty" ? u.traffic_notify_state : "";
 
@@ -116,13 +123,18 @@ export async function runAutoTrafficNotificationsOnce(): Promise<void> {
 }
 
 export function startAutoTrafficNotifyLoop(): void {
-  const intervalMsRaw = Number(process.env.TELEGRAM_TRAFFIC_NOTIFY_INTERVAL_MS);
-  const intervalMs =
-    Number.isFinite(intervalMsRaw) && intervalMsRaw >= 60_000 ? Math.floor(intervalMsRaw) : 10 * 60 * 1000;
+  const envMsRaw = Number(process.env.TELEGRAM_TRAFFIC_NOTIFY_INTERVAL_MS);
+  const envMs = Number.isFinite(envMsRaw) && envMsRaw >= 60_000 ? Math.floor(envMsRaw) : null;
   let busy = false;
+  let lastRunAt = 0;
   const tick = async () => {
     if (busy) return;
+    const cfg = getAutoCommunicationsConfig().traffic;
+    const intervalMs = envMs ?? cfg.interval_minutes * 60_000;
+    const now = Date.now();
+    if (now - lastRunAt < intervalMs) return;
     busy = true;
+    lastRunAt = now;
     try {
       await runAutoTrafficNotificationsOnce();
     } finally {
@@ -132,5 +144,5 @@ export function startAutoTrafficNotifyLoop(): void {
   void tick();
   setInterval(() => {
     void tick();
-  }, intervalMs);
+  }, 60_000);
 }

@@ -9,11 +9,12 @@ import {
   purgeConfigVaultChecksOlderThanDays,
   saveConfigVaultSettings,
   setConfigVaultKeyInSubscriptions,
+  setConfigVaultSubscriptionTargets,
   updateConfigVaultKey,
   vaultKeyForApi,
 } from "../configVaultDb.js";
 import { getConfigVaultOverview, runConfigVaultCheckForKey, startConfigVaultCheckAllBackground } from "../configVaultService.js";
-import { parseProxyUri, validateConfigVaultKeyInput } from "../configVaultUri.js";
+import { parseProxyUri, validateConfigVaultKeyInput, parseConfigVaultJsonImport } from "../configVaultUri.js";
 import { getPanelSettings } from "../panelSettings.js";
 import { requireAuth } from "../middleware/requireAuth.js";
 
@@ -63,7 +64,14 @@ router.patch("/settings", (req, res) => {
 
 router.post("/", (req, res) => {
   try {
-    const b = (req.body ?? {}) as { name?: unknown; raw_uri?: unknown; active?: unknown; notify_on_fail?: unknown };
+    const b = (req.body ?? {}) as {
+      name?: unknown;
+      raw_uri?: unknown;
+      active?: unknown;
+      notify_on_fail?: unknown;
+      subscription_mode?: unknown;
+      subscription_user_ids?: unknown;
+    };
     const name = String(b.name ?? "").trim();
     const raw_uri = String(b.raw_uri ?? "").trim();
     const err = validateConfigVaultKeyInput(
@@ -75,11 +83,17 @@ router.post("/", (req, res) => {
       res.status(400).json({ error: err });
       return;
     }
+    const subscription_mode =
+      String(b.subscription_mode ?? "all").trim().toLowerCase() === "selected" ? "selected" : "all";
     const created = createConfigVaultKey({
       name,
       raw_uri,
       active: !(b.active === false || b.active === 0 || b.active === "0"),
       notify_on_fail: !(b.notify_on_fail === false || b.notify_on_fail === 0 || b.notify_on_fail === "0"),
+      subscription_mode,
+      subscription_user_ids: Array.isArray(b.subscription_user_ids)
+        ? b.subscription_user_ids.map((x) => Math.floor(Number(x))).filter((n) => n > 0)
+        : [],
     });
     res.status(201).json({ key: vaultKeyForApi(created, includeRaw()) });
   } catch (e) {
@@ -98,6 +112,65 @@ router.post("/import", (req, res) => {
       notify_on_fail: !(b.notify_on_fail === false || b.notify_on_fail === 0 || b.notify_on_fail === "0"),
     });
     res.json({ ...result, keys: mapKeys(listConfigVaultKeys()) });
+  } catch (e) {
+    res.status(400).json({ error: e instanceof Error ? e.message : String(e) });
+  }
+});
+
+router.post("/import-json", (req, res) => {
+  try {
+    const b = (req.body ?? {}) as Record<string, unknown>;
+    const jsonText = String(b.json ?? b.text ?? "").trim();
+    if (!jsonText) {
+      res.status(400).json({ error: "Вставьте JSON-конфиг" });
+      return;
+    }
+    const parsed = parseConfigVaultJsonImport(jsonText);
+    if ("error" in parsed) {
+      res.status(400).json({ error: parsed.error });
+      return;
+    }
+    const customName = String(b.name ?? "").trim();
+    const importAll = b.import_all !== false && b.import_all !== 0 && b.import_all !== "0";
+    const items = parsed.items.length > 1 && importAll ? parsed.items : [parsed.items[0]!];
+    const activeDefault = !(b.active === false || b.active === 0 || b.active === "0");
+    const notifyDefault = !(b.notify_on_fail === false || b.notify_on_fail === 0 || b.notify_on_fail === "0");
+    const created: ReturnType<typeof createConfigVaultKey>[] = [];
+    const errors: string[] = [];
+    let skipped_duplicates = 0;
+    for (const item of items) {
+      const name =
+        customName && items.length > 1
+          ? `${customName} · ${item.name}`.slice(0, 120)
+          : customName || item.name;
+      try {
+        created.push(
+          createConfigVaultKey({
+            name,
+            raw_uri: item.uri,
+            active: item.active !== undefined ? item.active : activeDefault,
+            notify_on_fail: notifyDefault,
+          }),
+        );
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        if (msg.includes("уже есть")) skipped_duplicates += 1;
+        else errors.push(msg);
+      }
+    }
+    if (created.length === 0) {
+      res.status(400).json({
+        error: errors[0] ?? (skipped_duplicates > 0 ? "Все ключи уже есть в хранилище" : "Не удалось импортировать ключи"),
+      });
+      return;
+    }
+    res.status(201).json({
+      added: created.length,
+      skipped_duplicates,
+      errors,
+      keys: mapKeys(listConfigVaultKeys()),
+      parsed_uris: items.map((x) => x.uri),
+    });
   } catch (e) {
     res.status(400).json({ error: e instanceof Error ? e.message : String(e) });
   }
@@ -168,6 +241,8 @@ router.patch("/:id", (req, res) => {
       raw_uri?: unknown;
       active?: unknown;
       notify_on_fail?: unknown;
+      subscription_mode?: unknown;
+      subscription_user_ids?: unknown;
     };
     if (b.raw_uri != null) {
       const err = validateConfigVaultKeyInput(
@@ -186,6 +261,15 @@ router.patch("/:id", (req, res) => {
       active: b.active !== undefined ? !(b.active === false || b.active === 0 || b.active === "0") : undefined,
       notify_on_fail:
         b.notify_on_fail !== undefined ? !(b.notify_on_fail === false || b.notify_on_fail === 0 || b.notify_on_fail === "0") : undefined,
+      subscription_mode:
+        b.subscription_mode != null
+          ? String(b.subscription_mode).trim().toLowerCase() === "selected"
+            ? "selected"
+            : "all"
+          : undefined,
+      subscription_user_ids: Array.isArray(b.subscription_user_ids)
+        ? b.subscription_user_ids.map((x) => Math.floor(Number(x))).filter((n) => n > 0)
+        : undefined,
     });
     res.json({ key: vaultKeyForApi(updated, includeRaw()) });
   } catch (e) {
@@ -208,6 +292,25 @@ router.post("/:id/subscriptions", (req, res) => {
     const id = Math.floor(Number(req.params.id));
     const added = (req.body as { added?: unknown })?.added !== false;
     const key = setConfigVaultKeyInSubscriptions(id, added);
+    res.json({ key: vaultKeyForApi(key, includeRaw()) });
+  } catch (e) {
+    res.status(400).json({ error: e instanceof Error ? e.message : String(e) });
+  }
+});
+
+router.post("/:id/subscription-targets", (req, res) => {
+  try {
+    const id = Math.floor(Number(req.params.id));
+    const b = (req.body ?? {}) as Record<string, unknown>;
+    const modeRaw = String(b.subscription_mode ?? "all").trim().toLowerCase();
+    if (modeRaw !== "all" && modeRaw !== "selected") {
+      res.status(400).json({ error: "Некорректный режим подписок" });
+      return;
+    }
+    const userIds = Array.isArray(b.subscription_user_ids)
+      ? b.subscription_user_ids.map((x) => Math.floor(Number(x))).filter((n) => n > 0)
+      : [];
+    const key = setConfigVaultSubscriptionTargets(id, modeRaw, userIds);
     res.json({ key: vaultKeyForApi(key, includeRaw()) });
   } catch (e) {
     res.status(400).json({ error: e instanceof Error ? e.message : String(e) });

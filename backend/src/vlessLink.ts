@@ -259,8 +259,9 @@ export function buildVlessUri(host: string, port: number, uuid: string, name: st
   });
 }
 
-export function buildSubscriptionPayload(links: string[]): string {
-  const body = links.join("\n");
+export function buildSubscriptionPayload(links: string[], opts?: { happDirectives?: string[] }): string {
+  const directives = (opts?.happDirectives ?? []).map((l) => String(l ?? "").trim()).filter(Boolean);
+  const body = [...directives, ...links].join("\n");
   return Buffer.from(body, "utf8").toString("base64");
 }
 
@@ -271,10 +272,10 @@ function buildNoticeVlessUri(label: string): string {
   return `vless://00000000-0000-0000-0000-000000000000@127.0.0.1:443?encryption=none&security=none&type=tcp#${enc}`;
 }
 
-export function buildSubscriptionNoticePayload(lines: string[]): string {
+export function buildSubscriptionNoticePayload(lines: string[], opts?: { happDirectives?: string[] }): string {
   const links = lines
     .map((x) => String(x ?? "").trim())
     .filter(Boolean)
     .map((x) => buildNoticeVlessUri(x));
-  return buildSubscriptionPayload(links);
+  return buildSubscriptionPayload(links, opts);
 }

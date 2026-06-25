@@ -1,11 +1,12 @@
 import { ReactNode, useCallback, useEffect, useRef, useState, type SVGProps } from "react";
 import { NavLink, useLocation, useNavigate } from "react-router-dom";
-import { createUser, listServers, listUsers, logout, type CreateUserPayload, type ServerDto, type UserDto } from "../api";
+import { createUser, listServers, logout, type CreateUserPayload, type ServerDto, type UserDto } from "../api";
 import { isAdminMobileShell, isAdminMobileScrollArea } from "../adminMobile";
 import { computeDashboardStats, isExpirySoon, isTrafficSoon, remainingTrafficGb, type DashboardStats } from "../dashboardStats";
-import { clearUsersListCache, readUsersListCache, writeUsersListCache } from "../usersListCache";
+import { clearUsersListCache, readUsersListCache } from "../usersListCache";
 import { notifyUsersChanged } from "../usersEvents";
-import AdminThemeToggle from "./AdminThemeToggle";
+import { prefetchUsersInBackground, USERS_CACHE_UPDATED_EVENT } from "../usersPrefetch";
+import AdminSidebarThemeDock from "./AdminSidebarThemeDock";
 import AdminSettingsButton from "./AdminSettingsButton";
 import PanelSettingsModal from "./PanelSettingsModal";
 import UserModal from "./UserModal";
@@ -124,11 +125,38 @@ function IconLogs(p: SVGProps<SVGSVGElement>) {
   );
 }
 
+function IconProxy(p: SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden {...p}>
+      <circle cx="12" cy="12" r="10" />
+      <path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+    </svg>
+  );
+}
+
 function IconGame(p: SVGProps<SVGSVGElement>) {
   return (
     <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden {...p}>
       <rect x="2" y="6" width="20" height="12" rx="2" />
       <path d="M6 12h4M8 10v4M15 11h.01M18 13h.01" />
+    </svg>
+  );
+}
+
+function IconDevice(p: SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden {...p}>
+      <rect x="7" y="2" width="10" height="20" rx="2" />
+      <path d="M11 18h2" />
+    </svg>
+  );
+}
+
+function IconGift(p: SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden {...p}>
+      <rect x="3" y="8" width="18" height="13" rx="2" />
+      <path d="M12 8v13M3 12h18M12 8c-2.5 0-4-1.5-4-3.5S9.5 1 12 1s4 1.5 4 3.5S14.5 8 12 8z" />
     </svg>
   );
 }
@@ -141,6 +169,45 @@ function IconLogout(p: SVGProps<SVGSVGElement>) {
   );
 }
 
+function ExpiryNotifyStatusIcon({ status, hint }: { status: "sent" | "waiting" | "error"; hint?: string }) {
+  const title = hint || (status === "sent" ? "Доставлено" : status === "waiting" ? "Ожидает отправки" : "Ошибка");
+  if (status === "sent") {
+    return (
+      <span className="admin-expiry-notify-icon admin-expiry-notify-icon--sent" title={title} aria-label={title}>
+        <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden>
+          <circle cx="12" cy="12" r="10" fill="currentColor" opacity="0.18" />
+          <path
+            d="M8 12.5l2.5 2.5L16 9"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
+      </span>
+    );
+  }
+  if (status === "waiting") {
+    return (
+      <span className="admin-expiry-notify-icon admin-expiry-notify-icon--wait" title={title} aria-label={title}>
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+          <circle cx="12" cy="12" r="9" />
+          <path d="M12 7v5l3 2" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      </span>
+    );
+  }
+  return (
+    <span className="admin-expiry-notify-icon admin-expiry-notify-icon--err" title={title} aria-label={title}>
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+        <circle cx="12" cy="12" r="9" />
+        <path d="M15 9l-6 6M9 9l6 6" strokeLinecap="round" />
+      </svg>
+    </span>
+  );
+}
+
 const NAV_ITEMS: NavItem[] = [
   { to: "/servers", label: "Сервера", Icon: IconServers, sectionKey: "servers" },
   { to: "/users", label: "Пользователи", Icon: IconUsers, sectionKey: "users" },
@@ -150,10 +217,13 @@ const NAV_ITEMS: NavItem[] = [
   { to: "/communications", label: "Коммуникации", Icon: IconComms, sectionKey: "communications" },
   { to: "/support-appeals", label: "Обращения", Icon: IconAppeals, sectionKey: "support_appeals" },
   { to: "/referral-program", label: "Реферальная программа", Icon: IconReferral, sectionKey: "referral_program" },
-  { to: "/promo-codes", label: "Промокоды", Icon: IconPromo, sectionKey: "promo_codes" },
+  { to: "/promo-codes", label: "Промоакции", Icon: IconPromo, sectionKey: "promo_codes" },
   { to: "/config-vault", label: "Конфиг-хранилище", Icon: IconConfigVault, sectionKey: "config_vault" },
   { to: "/whitelist-vault", label: "Белые списки", Icon: IconWhiteFlag, sectionKey: "whitelist_vault" },
+  { to: "/telegram-proxies", label: "Прокси", Icon: IconProxy, sectionKey: "telegram_proxies" },
   { to: "/dropper-game", label: "Игра", Icon: IconGame, sectionKey: "dropper_game" },
+  { to: "/daily-gift", label: "Ежедневный подарок", Icon: IconGift, sectionKey: "daily_gift" },
+  { to: "/device-limit", label: "Устройства", Icon: IconDevice, sectionKey: "device_limit" },
 ];
 
 function SidebarNav({ items, onNavigate }: { items: NavItem[]; onNavigate?: () => void }) {
@@ -199,6 +269,7 @@ export default function DashboardLayout({
   const [createOpen, setCreateOpen] = useState(false);
   const [deployedServers, setDeployedServers] = useState<ServerDto[]>([]);
   const [createServersLoading, setCreateServersLoading] = useState(false);
+  const [createFlash, setCreateFlash] = useState<{ type: "ok" | "err"; text: string } | null>(null);
   const shellRef = useRef<HTMLDivElement>(null);
   const drawerRef = useRef<HTMLElement>(null);
   const statsBarRef = useRef<HTMLDivElement>(null);
@@ -211,16 +282,18 @@ export default function DashboardLayout({
       setStatsUsers(cached.users);
       setStats(computeDashboardStats(cached.users));
       setStatsLoading(false);
-      return;
+    } else {
+      setStatsLoading(true);
     }
-    setStatsLoading(true);
     try {
-      const users = await listUsers();
-      setStatsUsers(users);
-      setStats(computeDashboardStats(users));
+      const data = await prefetchUsersInBackground({ force: !cached?.users?.length });
+      setStatsUsers(data.users);
+      setStats(computeDashboardStats(data.users));
     } catch {
-      setStatsUsers([]);
-      setStats(null);
+      if (!cached?.users?.length) {
+        setStatsUsers([]);
+        setStats(null);
+      }
     } finally {
       setStatsLoading(false);
     }
@@ -259,6 +332,18 @@ export default function DashboardLayout({
     const id = window.setInterval(() => void refreshStats(), 60_000);
     return () => window.clearInterval(id);
   }, [refreshStats, location.pathname]);
+
+  useEffect(() => {
+    const onCache = (e: Event) => {
+      const detail = (e as CustomEvent<{ users: UserDto[] }>).detail;
+      if (!detail?.users) return;
+      setStatsUsers(detail.users);
+      setStats(computeDashboardStats(detail.users));
+      setStatsLoading(false);
+    };
+    window.addEventListener(USERS_CACHE_UPDATED_EVENT, onCache);
+    return () => window.removeEventListener(USERS_CACHE_UPDATED_EVENT, onCache);
+  }, []);
 
   useEffect(() => {
     setMobileShell(isAdminMobileShell());
@@ -405,32 +490,42 @@ export default function DashboardLayout({
   });
 
   async function openCreateClient() {
+    setCreateFlash(null);
     setCreateOpen(true);
+    const cached = readUsersListCache();
+    if (cached?.deployedServers?.length) {
+      setDeployedServers(cached.deployedServers);
+      return;
+    }
     if (deployedServers.length > 0 || createServersLoading) return;
     setCreateServersLoading(true);
     try {
-      const servers = await listServers();
-      setDeployedServers(servers.filter((s) => s.vless_deployed));
+      const data = await prefetchUsersInBackground();
+      setDeployedServers(data.deployedServers);
     } catch {
-      setDeployedServers([]);
+      try {
+        const servers = await listServers();
+        setDeployedServers(servers.filter((s) => s.vless_deployed));
+      } catch {
+        setDeployedServers([]);
+      }
     } finally {
       setCreateServersLoading(false);
     }
   }
 
-  async function onCreateClient(payload: CreateUserPayload) {
-    await createUser(payload);
-    const users = await listUsers();
-    const cached = readUsersListCache();
-    writeUsersListCache({
-      users,
-      previews: cached?.previews ?? {},
-      deployedServers: cached?.deployedServers ?? deployedServers,
-    });
-    setStatsUsers(users);
-    setStats(computeDashboardStats(users));
-    notifyUsersChanged();
-    setCreateOpen(false);
+  function onCreateClient(payload: CreateUserPayload) {
+    setCreateFlash({ type: "ok", text: "Создаём клиента в фоне…" });
+    void (async () => {
+      try {
+        const { user } = await createUser(payload);
+        await prefetchUsersInBackground({ force: true });
+        notifyUsersChanged();
+        setCreateFlash({ type: "ok", text: `Клиент «${user.name}» создан.` });
+      } catch (e) {
+        setCreateFlash({ type: "err", text: String(e) });
+      }
+    })();
   }
 
   const statValue = (n: number | undefined) => (statsLoading && stats == null ? "…" : String(n ?? 0));
@@ -467,7 +562,11 @@ export default function DashboardLayout({
   const panelTitle = panel.settings?.panel.title ?? "Панель управления";
   const panelSubtitle = panel.settings?.panel.subtitle ?? "";
   const brandShort = panel.settings?.panel.brandName ?? panelTitle.split(" ")[0] ?? "VPN";
-  const avatarSrc = panel.avatarUrl ? `${panel.avatarUrl}?t=${panel.settings?.updatedAt ?? 0}` : null;
+  const avatarSrc = panel.settings?.panel.avatarPath && panel.avatarUrl ? panel.avatarUrl : null;
+  const [avatarBroken, setAvatarBroken] = useState(false);
+  useEffect(() => {
+    setAvatarBroken(false);
+  }, [avatarSrc]);
   const sectionHiddenMsg = (location.state as { sectionHidden?: boolean } | null)?.sectionHidden;
 
   return (
@@ -475,8 +574,18 @@ export default function DashboardLayout({
       {!mobileShell ? (
         <aside className="admin-sidebar" aria-label="Навигация">
           <div className="admin-sidebar-brand">
-            {avatarSrc ? (
-              <img src={avatarSrc} alt="" className="admin-sidebar-logo" width={40} height={40} />
+            {avatarSrc && !avatarBroken ? (
+              <img
+                src={avatarSrc}
+                alt=""
+                className="admin-sidebar-logo"
+                width={40}
+                height={40}
+                onError={() => {
+                  setAvatarBroken(true);
+                  void panel.refresh();
+                }}
+              />
             ) : (
               <div className="admin-sidebar-logo admin-sidebar-logo--placeholder">{brandShort.slice(0, 2).toUpperCase()}</div>
             )}
@@ -487,7 +596,7 @@ export default function DashboardLayout({
           </div>
           <SidebarNav items={visibleNav} />
           <div className="admin-sidebar-footer">
-            <AdminThemeToggle variant="sidebar" />
+            <AdminSidebarThemeDock />
             <AdminSettingsButton variant="full" onClick={() => setSettingsOpen(true)} />
           </div>
         </aside>
@@ -566,7 +675,15 @@ export default function DashboardLayout({
                         expiringSoonUsers.map((u) => (
                           <div key={u.id} className="admin-stats-popover-row">
                             <span className="admin-stats-popover-name">{u.name}</span>
-                            <span className="admin-stats-popover-meta">{formatSoonHint(u)}</span>
+                            <span className="admin-stats-popover-meta">
+                              {u.expiry_auto_notify_status && isExpirySoon(u, now) ? (
+                                <ExpiryNotifyStatusIcon
+                                  status={u.expiry_auto_notify_status}
+                                  hint={u.expiry_auto_notify_hint}
+                                />
+                              ) : null}
+                              {formatSoonHint(u)}
+                            </span>
                           </div>
                         ))
                       )}
@@ -605,6 +722,7 @@ export default function DashboardLayout({
         {sectionHiddenMsg ? (
           <div className="flash err admin-section-hidden-banner">Раздел скрыт в настройках панели</div>
         ) : null}
+        {createFlash ? <div className={`flash ${createFlash.type === "ok" ? "ok" : "err"}`}>{createFlash.text}</div> : null}
 
         <main className="admin-main">{children}</main>
       </div>
@@ -646,8 +764,18 @@ export default function DashboardLayout({
         >
           <div className="admin-drawer-head">
             <div className="admin-sidebar-brand admin-sidebar-brand--drawer">
-              {avatarSrc ? (
-                <img src={avatarSrc} alt="" className="admin-sidebar-logo" width={36} height={36} />
+              {avatarSrc && !avatarBroken ? (
+                <img
+                  src={avatarSrc}
+                  alt=""
+                  className="admin-sidebar-logo"
+                  width={36}
+                  height={36}
+                  onError={() => {
+                    setAvatarBroken(true);
+                    void panel.refresh();
+                  }}
+                />
               ) : (
                 <div className="admin-sidebar-logo admin-sidebar-logo--placeholder">{brandShort.slice(0, 2).toUpperCase()}</div>
               )}
@@ -662,7 +790,7 @@ export default function DashboardLayout({
           </div>
           <SidebarNav items={visibleNav} onNavigate={() => setDrawerOpen(false)} />
           <div className="admin-drawer-footer">
-            <AdminThemeToggle variant="sidebar" className="admin-theme-toggle--drawer" />
+            <AdminSidebarThemeDock />
             <AdminSettingsButton variant="full" onClick={() => setSettingsOpen(true)} />
             <button type="button" className="primary admin-drawer-logout" onClick={() => void doLogout()}>
               Выйти

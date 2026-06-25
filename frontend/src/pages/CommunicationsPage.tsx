@@ -1,7 +1,10 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { subscriptionLabel } from "../subscriptionLabel";
 import DashboardLayout from "../components/DashboardLayout";
+import ClientPickerModal from "../components/ClientPickerModal";
 import SurveysPanel from "../components/SurveysPanel";
+import AutoBroadcastsPanel from "../components/AutoBroadcastsPanel";
+import { usePanelSettings } from "../panelSettingsContext";
 import {
   createCommunicationSegment,
   deleteCommunicationSegment,
@@ -22,6 +25,23 @@ type Mode = "global" | "single" | "selected" | "segment";
 const MAX_REQUEST_IMAGE_BYTES = 750_000;
 const LS_KEY_MARK_ENABLED = "comms_mark_enabled";
 const LS_KEY_MARK_TEXT = "comms_mark_text";
+
+function ymdInTimezone(ts: number, timeZone: string): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date(ts));
+}
+
+function defaultHistoryDateRange(timeZone: string): { from: string; to: string } {
+  const to = ymdInTimezone(Date.now(), timeZone);
+  const [y, m, d] = to.split("-").map((x) => Number(x));
+  const prev = Date.UTC(y, m - 1, d) - 86_400_000;
+  const from = ymdInTimezone(prev, timeZone);
+  return { from, to };
+}
 
 function isTestSubscriptionSystemSegment(s: Pick<CommunicationSegmentDto, "id" | "system_key">): boolean {
   return s.system_key === "test_subscriptions" || s.id === "sys_test_subscriptions";
@@ -98,9 +118,11 @@ async function prepareCompressedPhoto(file: File): Promise<{ base64: string; mim
   };
 }
 
-type CommsTab = "broadcasts" | "surveys";
+type CommsTab = "broadcasts" | "surveys" | "history" | "auto";
 
 export default function CommunicationsPage({ onLogout }: { onLogout: () => void }) {
+  const { settings: panelSettings } = usePanelSettings();
+  const panelTz = panelSettings?.ui.timezone?.trim() || "Asia/Yekaterinburg";
   const [commsTab, setCommsTab] = useState<CommsTab>("broadcasts");
   const [targets, setTargets] = useState<CommunicationTargetDto[]>([]);
   const [segments, setSegments] = useState<CommunicationSegmentDto[]>([]);
@@ -108,9 +130,6 @@ export default function CommunicationsPage({ onLogout }: { onLogout: () => void 
   const [userId, setUserId] = useState<number>(0);
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
   const [pickerOpen, setPickerOpen] = useState(false);
-  const [pickerLeft, setPickerLeft] = useState<number[]>([]);
-  const [pickerRight, setPickerRight] = useState<number[]>([]);
-  const [query, setQuery] = useState("");
   const [usersQuery, setUsersQuery] = useState("");
   const [text, setText] = useState("");
   const [photo, setPhoto] = useState<File | null>(null);
@@ -148,18 +167,30 @@ export default function CommunicationsPage({ onLogout }: { onLogout: () => void 
   const [history, setHistory] = useState<CommunicationMessageLogDto[]>([]);
   const [historyLoading, setHistoryLoading] = useState(true);
   const [historyRecipients, setHistoryRecipients] = useState<CommunicationMessageLogDto | null>(null);
+  const [historyFrom, setHistoryFrom] = useState(() => defaultHistoryDateRange(panelTz).from);
+  const [historyTo, setHistoryTo] = useState(() => defaultHistoryDateRange(panelTz).to);
 
-  async function reloadHistory() {
+  const reloadHistory = useCallback(async () => {
     setHistoryLoading(true);
     try {
-      const data = await listCommunicationHistory(100);
+      const data = await listCommunicationHistory({
+        limit: 200,
+        from: historyFrom,
+        to: historyTo,
+      });
       setHistory(data.items);
     } catch {
       setHistory([]);
     } finally {
       setHistoryLoading(false);
     }
-  }
+  }, [historyFrom, historyTo]);
+
+  useEffect(() => {
+    const range = defaultHistoryDateRange(panelTz);
+    setHistoryFrom(range.from);
+    setHistoryTo(range.to);
+  }, [panelTz]);
 
   useEffect(() => {
     void (async () => {
@@ -172,8 +203,12 @@ export default function CommunicationsPage({ onLogout }: { onLogout: () => void 
         setMsg({ type: "err", text: String(e) });
       }
     })();
-    void reloadHistory();
   }, []);
+
+  useEffect(() => {
+    if (commsTab !== "history") return;
+    void reloadHistory();
+  }, [commsTab, reloadHistory]);
 
   const reachable = useMemo(() => {
     return targets.filter((u) => Number.isFinite(Number(u.tg_id)) && Number(u.tg_id) > 0);
@@ -186,15 +221,6 @@ export default function CommunicationsPage({ onLogout }: { onLogout: () => void 
     () => selectedIds.map((id) => reachableById.get(id)).filter((x): x is CommunicationTargetDto => Boolean(x)),
     [reachableById, selectedIds],
   );
-  const pickerLeftList = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    const rows = pickerLeft.map((id) => reachableById.get(id)).filter((x): x is CommunicationTargetDto => Boolean(x));
-    if (!q) return rows;
-    return rows.filter((u) => `${u.id} ${u.name}`.toLowerCase().includes(q));
-  }, [pickerLeft, reachableById, query]);
-  const pickerRightList = useMemo(() => {
-    return pickerRight.map((id) => reachableById.get(id)).filter((x): x is CommunicationTargetDto => Boolean(x));
-  }, [pickerRight, reachableById]);
   const usersRightList = useMemo(() => {
     const q = usersQuery.trim().toLowerCase();
     if (!q) return targets;
@@ -356,32 +382,7 @@ export default function CommunicationsPage({ onLogout }: { onLogout: () => void 
   }, [segmentId]);
 
   function openPicker() {
-    const chosen = selectedIds.filter((id) => reachableById.has(id));
-    const chosenSet = new Set(chosen);
-    const left = reachable.map((u) => u.id).filter((id) => !chosenSet.has(id));
-    setPickerRight(chosen);
-    setPickerLeft(left);
-    setQuery("");
     setPickerOpen(true);
-  }
-
-  function moveToRight(ids: number[]) {
-    const s = new Set(ids);
-    if (s.size === 0) return;
-    setPickerLeft((prev) => prev.filter((id) => !s.has(id)));
-    setPickerRight((prev) => [...prev, ...ids.filter((id) => !prev.includes(id))]);
-  }
-
-  function moveToLeft(ids: number[]) {
-    const s = new Set(ids);
-    if (s.size === 0) return;
-    setPickerRight((prev) => prev.filter((id) => !s.has(id)));
-    setPickerLeft((prev) => [...prev, ...ids.filter((id) => !prev.includes(id))]);
-  }
-
-  function savePicker() {
-    setSelectedIds(pickerRight.filter((id) => reachableById.has(id)));
-    setPickerOpen(false);
   }
 
   async function submit() {
@@ -484,6 +485,24 @@ export default function CommunicationsPage({ onLogout }: { onLogout: () => void 
           >
             Опросы
           </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={commsTab === "auto"}
+            className={commsTab === "auto" ? "primary" : "ghost"}
+            onClick={() => setCommsTab("auto")}
+          >
+            Авто-рассылки
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={commsTab === "history"}
+            className={commsTab === "history" ? "primary" : "ghost"}
+            onClick={() => setCommsTab("history")}
+          >
+            История отправок
+          </button>
         </div>
         {commsTab === "broadcasts" && msg ? <div className={`flash ${msg.type === "ok" ? "ok" : "err"}`}>{msg.text}</div> : null}
         {commsTab === "broadcasts" && photoNotice ? <div className="flash ok">{photoNotice}</div> : null}
@@ -492,6 +511,12 @@ export default function CommunicationsPage({ onLogout }: { onLogout: () => void 
       {commsTab === "surveys" ? (
         <section className="panel comms-panel">
           <SurveysPanel />
+        </section>
+      ) : null}
+
+      {commsTab === "auto" ? (
+        <section className="panel comms-panel auto-broadcasts-wrap">
+          <AutoBroadcastsPanel />
         </section>
       ) : null}
 
@@ -916,163 +941,131 @@ export default function CommunicationsPage({ onLogout }: { onLogout: () => void 
         </div>
       </section>
 
-      {pickerOpen ? (
-        <div className="modal-backdrop" onClick={() => setPickerOpen(false)}>
-          <div className="modal comms-picker-modal" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-head">
-              <h2>Выбор клиентов</h2>
-              <button type="button" className="ghost modal-close" onClick={() => setPickerOpen(false)}>
-                ×
-              </button>
-            </div>
-            <div className="modal-body">
-              <input
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder="Поиск"
-                className="comms-picker-search"
-              />
-              <div className="comms-picker-grid">
-                <div className="comms-picker-col">
-                  <label>Доступные клиенты</label>
-                  <select
-                    multiple
-                    size={14}
-                    className="comms-picker-list"
-                    onChange={(e) => {
-                      const ids = Array.from(e.currentTarget.selectedOptions).map((o) => Number(o.value));
-                      moveToRight(ids);
-                    }}
-                  >
-                    {pickerLeftList.map((u) => (
-                      <option key={u.id} value={u.id}>
-                        {subscriptionLabel(u)}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div className="comms-picker-actions">
-                  <button type="button" className="ghost" onClick={() => moveToRight(pickerLeftList.map((u) => u.id))}>
-                    {">>"}
-                  </button>
-                  <button type="button" className="ghost" onClick={() => moveToLeft(pickerRightList.map((u) => u.id))}>
-                    {"<<"}
-                  </button>
-                </div>
-                <div className="comms-picker-col">
-                  <label>Выбранные клиенты</label>
-                  <select
-                    multiple
-                    size={14}
-                    className="comms-picker-list"
-                    onChange={(e) => {
-                      const ids = Array.from(e.currentTarget.selectedOptions).map((o) => Number(o.value));
-                      moveToLeft(ids);
-                    }}
-                  >
-                    {pickerRightList.map((u) => (
-                      <option key={u.id} value={u.id}>
-                        {subscriptionLabel(u)}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-            </div>
-            <div className="modal-footer">
-              <button type="button" className="ghost" onClick={() => setPickerOpen(false)}>
-                Отмена
-              </button>
-              <button type="button" className="primary" onClick={savePicker}>
-                Ок
-              </button>
-            </div>
-          </div>
-        </div>
+      <ClientPickerModal
+        open={pickerOpen}
+        users={reachable}
+        selectedIds={selectedIds}
+        onClose={() => setPickerOpen(false)}
+        onConfirm={setSelectedIds}
+      />
+      </>
       ) : null}
 
-      <section className="panel comms-history-panel">
-        <h2 className="user-modal-section-title">История отправок</h2>
-        <p className="field-hint" style={{ marginTop: "0.25rem", marginBottom: "0.75rem" }}>
-          Все исходящие сообщения в Telegram: рассылки из панели и автоматические уведомления.
-        </p>
-        {historyLoading ? (
-          <p className="sub">Загрузка истории…</p>
-        ) : history.length === 0 ? (
-          <p className="sub">Пока нет записей — отправьте сообщение или дождитесь автоматического уведомления.</p>
-        ) : (
-          <div className="comms-history-list" role="log">
-            {history.map((item) => {
-              const when = new Date(item.sent_at);
-              const whenLabel = Number.isFinite(when.getTime())
-                ? when.toLocaleString("ru-RU", {
-                    day: "2-digit",
-                    month: "2-digit",
-                    year: "numeric",
-                    hour: "2-digit",
-                    minute: "2-digit",
-                  })
-                : item.sent_at;
-              const many = item.recipients.length > 3;
-              return (
-                <article key={item.id} className="comms-history-item">
-                  <div className="comms-history-head">
-                    <time className="comms-history-time" dateTime={item.sent_at}>
-                      {whenLabel}
-                    </time>
-                    {item.automatic ? <span className="comms-history-badge">Авто</span> : null}
-                    <span className="comms-history-source">{item.source_label}</span>
-                    {item.segment_name ? (
-                      <span className="comms-history-segment" title={item.segment_id}>
-                        · {item.segment_name}
-                      </span>
-                    ) : null}
-                    {item.has_photo ? <span className="comms-history-photo" title="С фото">фото</span> : null}
-                    <span className="comms-history-stats">
-                      {item.sent}/{item.attempted}
-                      {item.failed > 0 ? ` · ошибок: ${item.failed}` : ""}
-                    </span>
-                  </div>
-                  <p className="comms-history-text">{item.text}</p>
-                  <div className="comms-history-recipients">
-                    {item.recipients.length === 0 ? (
-                      <span className="field-hint">Получатели не указаны</span>
-                    ) : many ? (
-                      <>
-                        <span className="comms-history-recipients-summary">
-                          {item.recipients.length} получателей
-                        </span>
-                        <button
-                          type="button"
-                          className="comms-recipients-eye"
-                          title="Показать список получателей"
-                          aria-label="Показать список получателей"
-                          onClick={() => setHistoryRecipients(item)}
-                        >
-                          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden>
-                            <path
-                              d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12Z"
-                              stroke="currentColor"
-                              strokeWidth="1.6"
-                            />
-                            <circle cx="12" cy="12" r="3" stroke="currentColor" strokeWidth="1.6" />
-                          </svg>
-                        </button>
-                      </>
-                    ) : (
-                      item.recipients.map((r) => (
-                        <span key={`${item.id}-${r.user_id}-${r.user_name}`} className="comms-chip">
-                          {r.user_name}
-                        </span>
-                      ))
-                    )}
-                  </div>
-                </article>
-              );
-            })}
+      {commsTab === "history" ? (
+        <section className="panel comms-history-panel comms-history-panel--tab">
+          <div className="comms-history-panel__head">
+            <div>
+              <h2 className="user-modal-section-title">История отправок</h2>
+              <p className="field-hint" style={{ marginTop: "0.25rem" }}>
+                Все исходящие сообщения в Telegram: рассылки из панели и автоматические уведомления.
+              </p>
+            </div>
+            <div className="comms-history-panel__actions">
+              <div className="comms-history-filters">
+                <label className="comms-history-filter">
+                  <span>С</span>
+                  <input
+                    className="input"
+                    type="date"
+                    value={historyFrom}
+                    max={historyTo}
+                    onChange={(e) => setHistoryFrom(e.target.value)}
+                  />
+                </label>
+                <label className="comms-history-filter">
+                  <span>По</span>
+                  <input
+                    className="input"
+                    type="date"
+                    value={historyTo}
+                    min={historyFrom}
+                    onChange={(e) => setHistoryTo(e.target.value)}
+                  />
+                </label>
+              </div>
+              <button type="button" className="ghost" disabled={historyLoading} onClick={() => void reloadHistory()}>
+                {historyLoading ? "Обновление…" : "Обновить"}
+              </button>
+            </div>
           </div>
-        )}
-      </section>
+          {historyLoading ? (
+            <p className="sub">Загрузка истории…</p>
+          ) : history.length === 0 ? (
+            <p className="sub">За выбранный период записей нет.</p>
+          ) : (
+            <div className="comms-history-list" role="log">
+              {history.map((item) => {
+                const when = new Date(item.sent_at);
+                const whenLabel = Number.isFinite(when.getTime())
+                  ? when.toLocaleString("ru-RU", {
+                      day: "2-digit",
+                      month: "2-digit",
+                      year: "numeric",
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    })
+                  : item.sent_at;
+                const many = item.recipients.length > 3;
+                return (
+                  <article key={item.id} className="comms-history-item">
+                    <div className="comms-history-head">
+                      <time className="comms-history-time" dateTime={item.sent_at}>
+                        {whenLabel}
+                      </time>
+                      {item.automatic ? <span className="comms-history-badge">Авто</span> : null}
+                      <span className="comms-history-source">{item.source_label}</span>
+                      {item.segment_name ? (
+                        <span className="comms-history-segment" title={item.segment_id}>
+                          · {item.segment_name}
+                        </span>
+                      ) : null}
+                      {item.has_photo ? <span className="comms-history-photo" title="С фото">фото</span> : null}
+                      <span className="comms-history-stats">
+                        {item.sent}/{item.attempted}
+                        {item.failed > 0 ? ` · ошибок: ${item.failed}` : ""}
+                      </span>
+                    </div>
+                    <p className="comms-history-text">{item.text}</p>
+                    <div className="comms-history-recipients">
+                      {item.recipients.length === 0 ? (
+                        <span className="field-hint">Получатели не указаны</span>
+                      ) : many ? (
+                        <>
+                          <span className="comms-history-recipients-summary">
+                            {item.recipients.length} получателей
+                          </span>
+                          <button
+                            type="button"
+                            className="comms-recipients-eye"
+                            title="Показать список получателей"
+                            aria-label="Показать список получателей"
+                            onClick={() => setHistoryRecipients(item)}
+                          >
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden>
+                              <path
+                                d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12Z"
+                                stroke="currentColor"
+                                strokeWidth="1.6"
+                              />
+                              <circle cx="12" cy="12" r="3" stroke="currentColor" strokeWidth="1.6" />
+                            </svg>
+                          </button>
+                        </>
+                      ) : (
+                        item.recipients.map((r) => (
+                          <span key={`${item.id}-${r.user_id}-${r.user_name}`} className="comms-chip">
+                            {r.user_name}
+                          </span>
+                        ))
+                      )}
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+          )}
+        </section>
+      ) : null}
 
       {historyRecipients ? (
         <div className="modal-backdrop" onClick={() => setHistoryRecipients(null)}>
@@ -1102,8 +1095,6 @@ export default function CommunicationsPage({ onLogout }: { onLogout: () => void 
             </div>
           </div>
         </div>
-      ) : null}
-      </>
       ) : null}
 
     </DashboardLayout>

@@ -2,6 +2,7 @@ import { Router } from "express";
 import { v4 as uuidv4 } from "uuid";
 import {
   addServerToAllSubscriptions,
+  removeServerFromAllSubscriptions,
   clientUuidsForServer,
   createServer,
   deleteServer,
@@ -13,6 +14,7 @@ import {
   updateServer,
   type ServerRow,
 } from "../db.js";
+import { softDeleteProxiesForServer } from "../telegramProxiesDb.js";
 import { pushClientListToAllDeployedServers } from "../userSync.js";
 import { countryFlagEmoji } from "../serverDisplay.js";
 import { encryptSecret } from "../crypto.js";
@@ -200,8 +202,9 @@ router.patch("/:id(\\d+)", (req, res) => {
 
 router.delete("/:id", (req, res) => {
   const id = Number(req.params.id);
+  const removed_proxies = softDeleteProxiesForServer(id);
   deleteServer(id);
-  res.json({ ok: true });
+  res.json({ ok: true, removed_proxies });
 });
 
 router.post("/:id(\\d+)/add-to-all-subscriptions", async (req, res) => {
@@ -214,6 +217,28 @@ router.post("/:id(\\d+)/add-to-all-subscriptions", async (req, res) => {
   try {
     const { updated_users } = addServerToAllSubscriptions(id);
     await pushClientListToAllDeployedServers();
+    const next = getServer(id);
+    res.json({
+      ok: true,
+      updated_users,
+      server: next ? serverToJson(next) : null,
+    });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    const code = msg === "server_not_deployed" ? 400 : 500;
+    res.status(code).json({ error: msg });
+  }
+});
+
+router.post("/:id(\\d+)/remove-from-all-subscriptions", async (req, res) => {
+  const id = Number(req.params.id);
+  const row = getServer(id);
+  if (!row) {
+    res.status(404).json({ error: "not_found" });
+    return;
+  }
+  try {
+    const { updated_users } = removeServerFromAllSubscriptions(id);
     const next = getServer(id);
     res.json({
       ok: true,

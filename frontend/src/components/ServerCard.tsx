@@ -9,7 +9,7 @@ import { COUNTRY_CODES_ALPHA2, countryCodeLabel } from "../countryCodes";
 import { countryFlagEmoji } from "../flagEmoji";
 import Spinner from "./Spinner";
 
-export type ServerBusyAction = "ssh" | "xray" | "vless" | "save" | "addSubs" | null;
+export type ServerBusyAction = "ssh" | "xray" | "vless" | "save" | "addSubs" | "removeSubs" | null;
 
 type Props = {
   server: ServerDto;
@@ -22,6 +22,7 @@ type Props = {
   onDeployVless: () => void;
   onDelete: () => Promise<void>;
   onAddToAllSubscriptions?: () => void;
+  onRemoveFromAllSubscriptions?: () => void;
   onNotify?: (type: "ok" | "err", text: string) => void;
 };
 
@@ -248,6 +249,7 @@ export default function ServerCard({
   onDeployVless,
   onDelete,
   onAddToAllSubscriptions,
+  onRemoveFromAllSubscriptions,
   onNotify,
 }: Props) {
   const navigate = useNavigate();
@@ -298,6 +300,10 @@ export default function ServerCard({
   const xray = xrayBadge(s);
   const vless = vlessBadge(s);
   const usersInSubs = (s.subscription_users_total ?? 0) > 0;
+  const usersWithThisServer = Math.max(
+    0,
+    (s.subscription_users_total ?? 0) - (s.subscription_users_missing ?? 0),
+  );
   const xrayInstalled = s.vless_deployed;
 
   function flashCopied(key: string, okMsg: string) {
@@ -603,6 +609,19 @@ export default function ServerCard({
                       </>
                     ) : (
                       `Во все подписки (${s.subscription_users_missing})`
+                    )}
+                  </button>
+                ) : null}
+                {onRemoveFromAllSubscriptions &&
+                s.vless_deployed &&
+                usersWithThisServer > 0 ? (
+                  <button type="button" className="ghost" disabled={isBusy} onClick={onRemoveFromAllSubscriptions}>
+                    {busyAction === "removeSubs" ? (
+                      <>
+                        <Spinner /> Убираем…
+                      </>
+                    ) : (
+                      `Убрать из подписок (${usersWithThisServer})`
                     )}
                   </button>
                 ) : null}

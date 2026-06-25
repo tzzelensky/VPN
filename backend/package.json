@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/index.ts",
-    "build": "tsc",
+    "build": "node scripts/generate-openapi-spec.mjs && tsc && node scripts/copy-openapi-spec.mjs",
     "start": "node dist/index.js"
   },
   "dependencies": {
@@ -17,6 +17,7 @@
     "express-session": "^1.18.1",
     "google-auth-library": "^10.6.2",
     "ssh2": "^1.16.0",
+    "swagger-ui-express": "^5.0.1",
     "uuid": "^11.0.5",
     "xlsx": "^0.18.5"
   },
@@ -27,6 +28,7 @@
     "@types/express-session": "^1.18.1",
     "@types/node": "^22.10.5",
     "@types/ssh2": "^1.15.5",
+    "@types/swagger-ui-express": "^4.1.8",
     "tsx": "^4.19.2",
     "typescript": "^5.7.3"
   }

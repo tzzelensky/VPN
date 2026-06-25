@@ -26,6 +26,7 @@ export function getAdminThemeSetting(): AdminThemeSetting {
 
 export function setAdminThemeSetting(setting: AdminThemeSetting): void {
   const resolved = resolveThemeSetting(setting);
+  if (getAdminThemeSetting() === setting && getAdminTheme() === resolved) return;
   try {
     localStorage.setItem(STORAGE_KEY_SETTING, setting);
     localStorage.setItem(STORAGE_KEY, resolved);

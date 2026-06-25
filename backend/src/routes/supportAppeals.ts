@@ -155,10 +155,6 @@ router.delete("/:id", (req, res) => {
     res.status(404).json({ error: "not_found" });
     return;
   }
-  if (cur.status === "in_progress") {
-    res.status(409).json({ error: "in_progress", status: cur.status });
-    return;
-  }
   if (!deleteSupportAppeal(id)) {
     res.status(404).json({ error: "not_found" });
     return;

@@ -75,12 +75,22 @@ router.get("/avatar", (_req, res) => {
   }
   const file = readPanelAvatar(s.panel.avatarPath);
   if (!file) {
+    savePanelSettings({ ...s, panel: { ...s.panel, avatarPath: null } });
     res.status(404).end();
     return;
   }
   res.setHeader("Content-Type", file.mime);
-  res.setHeader("Cache-Control", "private, max-age=300");
+  res.setHeader("Cache-Control", "private, no-cache");
   res.send(file.bytes);
+});
+
+router.get("/telegram-bot-token", (_req, res) => {
+  const token = getPanelBotToken();
+  if (!token) {
+    res.status(404).json({ error: "token_not_configured" });
+    return;
+  }
+  res.json({ botToken: token });
 });
 
 router.get("/export", (_req, res) => {
@@ -131,6 +141,22 @@ router.patch("/", (req, res) => {
   next.panel.subtitle = String(next.panel.subtitle ?? "").trim().slice(0, 240);
   next.panel.brandName = String(next.panel.brandName ?? "").trim().slice(0, 80);
   next.panel.telegramFooter = String(next.panel.telegramFooter ?? "").trim().slice(0, 500);
+  const prevBanner = prev.panel.subscriptionBanner ?? defaultPanelSettings().panel.subscriptionBanner;
+  const bannerIn = body.settings?.panel?.subscriptionBanner;
+  if (bannerIn) {
+    let tgUrl = String(bannerIn.telegramUrl ?? prevBanner.telegramUrl ?? "").trim();
+    if (tgUrl.startsWith("@")) tgUrl = `https://t.me/${tgUrl.slice(1)}`;
+    next.panel.subscriptionBanner = {
+      enabled: bannerIn.enabled === true,
+      text: String(bannerIn.text ?? prevBanner.text ?? "").trim().slice(0, 2000),
+      telegramUrl: tgUrl.slice(0, 500),
+      telegramLinkText:
+        String(bannerIn.telegramLinkText ?? prevBanner.telegramLinkText ?? "тех. поддержку").trim().slice(0, 120) ||
+        "тех. поддержку",
+    };
+  } else if (!next.panel.subscriptionBanner) {
+    next.panel.subscriptionBanner = { ...prevBanner };
+  }
   try {
     validateSections(next.sections);
   } catch {
@@ -141,6 +167,9 @@ router.patch("/", (req, res) => {
     next.telegram.adminIds = body.settings.telegram.adminIds
       .map((x) => Math.floor(Number(x)))
       .filter((n) => Number.isFinite(n) && n > 0);
+  }
+  if (body.settings?.ui && "webAppNewDesign" in body.settings.ui) {
+    next.ui.webAppNewDesign = body.settings.ui.webAppNewDesign === true;
   }
   if (body.botToken != null && String(body.botToken).trim()) {
     const token = String(body.botToken).trim();

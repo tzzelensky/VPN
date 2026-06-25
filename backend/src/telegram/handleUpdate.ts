@@ -23,7 +23,7 @@ import {
   sendTelegramPhoto,
   type TelegramScreenRef,
 } from "./api.js";
-import { escHtml, formatStatsHtml, subscriptionPublicName } from "./format.js";
+import { escHtml, subscriptionPublicName } from "./format.js";
 import { formatBotSubscriptionInfoHtml } from "./subscriptionInfo.js";
 import {
   backHomeRow,
@@ -49,10 +49,12 @@ import {
   sendWhitelistInstructionMenu,
   sendWhitelistPurchaseMenu,
   onWhitelistPurchaseStart,
+  onDeviceSlotPurchaseStart,
   vpnPlansKeyboardPromo,
   gbTopUpPlansKeyboardPromo,
   setPromoPendingCodeForChat,
 } from "./paymentFlow.js";
+import { tgUserCanBuyDeviceSlot, isDeviceLimitActiveForUser } from "../deviceLimitEffective.js";
 import { isTestSubscriptionEligible } from "../testSubscription.js";
 import { isWhitelistPurchaseVisible } from "../whitelistVaultDb.js";
 import {
@@ -174,12 +176,13 @@ function adminDeleteConfirmKeyboard(userId: number) {
 
 function paymentTargetKeyboard(
   users: ReturnType<typeof linkedUsers>,
-  kind: "pay" | "gb",
+  kind: "pay" | "gb" | "device",
 ): { inline_keyboard: Array<Array<{ text: string; callback_data: string }>> } {
   const rows = users.map((u) => [
     {
       text: subscriptionPublicName(u).slice(0, 58),
-      callback_data: kind === "pay" ? `psel:${u.id}` : `gsel:${u.id}`,
+      callback_data:
+        kind === "pay" ? `psel:${u.id}` : kind === "gb" ? `gsel:${u.id}` : `dsel:${u.id}`,
     },
   ]);
   rows.push([{ text: "« В меню", callback_data: "home" }]);
@@ -247,14 +250,22 @@ function linkedUsers(fromId: number) {
 }
 
 function menuFlags(fromId: number) {
+  const panelSettings = getPanelSettings();
   const linked = linkedUsers(fromId);
   return {
     referral: getReferralProgram().enabled,
     support: isSupportAppealsEnabled(),
     admin: isAdminTg(fromId),
+    adminClientsButton: panelSettings.telegram.adminClientsButtonEnabled !== false,
     buyGb: linked.length > 0 && linked.some((u) => u.is_test_subscription !== 1),
+    buyDevice: tgUserCanBuyDeviceSlot(fromId),
     whitelist: isWhitelistPurchaseVisible(),
   };
+}
+
+function inlineMenuFor(fromId: number) {
+  const f = menuFlags(fromId);
+  return mainMenuInline(f.admin, f.referral, f.support, f.buyGb, f.whitelist, f.buyDevice, f.adminClientsButton);
 }
 
 function linkedWelcomeHtml(from: TgUser): string {
@@ -278,7 +289,11 @@ function guestWelcomeHtml(from: TgUser): string {
 
 async function sendMainMenuLinked(chatId: number, from: TgUser): Promise<void> {
   const f = menuFlags(from.id);
-  await sendTelegramHtml(chatId, linkedWelcomeHtml(from), mainMenuReply(f.admin, f.referral, f.support, f.buyGb, f.whitelist));
+  await sendTelegramHtml(
+    chatId,
+    linkedWelcomeHtml(from),
+    mainMenuReply(f.admin, f.referral, f.support, f.buyGb, f.whitelist, f.buyDevice, f.adminClientsButton),
+  );
 }
 
 /** /start и «Меню»: без привязки — экран покупки; с привязкой — основное меню. */
@@ -376,7 +391,7 @@ export async function handleTelegramUpdate(body: unknown): Promise<void> {
       await sendTelegramHtml(
         chatId,
         "Создание новой подписки отменено.",
-        mainMenuInline(menuFlags(from.id).admin, menuFlags(from.id).referral, menuFlags(from.id).support, menuFlags(from.id).buyGb, menuFlags(from.id).whitelist),
+        inlineMenuFor(from.id),
       );
       return;
     }
@@ -408,7 +423,11 @@ export async function handleTelegramUpdate(body: unknown): Promise<void> {
     if (!promoCodeRaw || cancel) {
       promoAwaitByChat.delete(chatId);
       const f = menuFlags(from.id);
-      await sendTelegramHtml(chatId, "Применение промокода отменено.", mainMenuInline(f.admin, f.referral, f.support, f.buyGb, f.whitelist));
+      await sendTelegramHtml(
+        chatId,
+        "Применение промокода отменено.",
+        mainMenuInline(f.admin, f.referral, f.support, f.buyGb, f.whitelist, f.buyDevice, f.adminClientsButton),
+      );
       return;
     }
     const ctx = getPromoContext(chatId);
@@ -480,7 +499,12 @@ export async function handleTelegramUpdate(body: unknown): Promise<void> {
     const target = getUser(pendingTarget);
     if (!target) {
       adminComposeTargetByChat.delete(chatId);
-      await sendTelegramHtml(chatId, "Клиент не найден.", mainMenuInline(true, getReferralProgram().enabled, isSupportAppealsEnabled()));
+      const f = menuFlags(from.id);
+      await sendTelegramHtml(
+        chatId,
+        "Клиент не найден.",
+        mainMenuInline(f.admin, f.referral, f.support, f.buyGb, f.whitelist, f.buyDevice, f.adminClientsButton),
+      );
       return;
     }
     const toChat = Number(String(target.tg_id ?? "").trim());
@@ -516,7 +540,12 @@ export async function handleTelegramUpdate(body: unknown): Promise<void> {
         failed: 0,
       });
       adminComposeTargetByChat.delete(chatId);
-      await sendTelegramHtml(chatId, "Сообщение отправлено пользователю.", mainMenuInline(true, getReferralProgram().enabled, isSupportAppealsEnabled()));
+      const f = menuFlags(from.id);
+      await sendTelegramHtml(
+        chatId,
+        "Сообщение отправлено пользователю.",
+        mainMenuInline(f.admin, f.referral, f.support, f.buyGb, f.whitelist, f.buyDevice, f.adminClientsButton),
+      );
     } catch (e) {
       const friendly = describeAdminForwardError(e);
       if (friendly.clearCompose) {
@@ -550,12 +579,30 @@ export async function handleTelegramUpdate(body: unknown): Promise<void> {
     .replace(/[^\p{L}\p{N}\s/]/gu, " ")
     .replace(/\s+/g, " ")
     .trim();
-  if (normalized === "статистика по подписке") {
-    const html = formatStatsHtml(linkedUsers(from.id));
-    await sendTelegramHtml(chatId, html, backHomeRow);
+  if (normalized === "подписка") {
+    const linked = linkedUsers(from.id);
+    if (linked.length === 0) {
+      await sendTelegramHtml(
+        chatId,
+        "<b>Подписка не привязана.</b>\nПопросите администратора указать ваш <b>Telegram Chat ID</b> в карточке клиента.",
+        backHomeRow,
+      );
+      return;
+    }
+    if (linked.length === 1) {
+      const u = linked[0]!;
+      const url = publicSubscriptionUrl(u.sub_token);
+      await sendTelegramHtml(chatId, formatBotSubscriptionInfoHtml(u, url), backHomeRow);
+      return;
+    }
+    await sendTelegramHtml(
+      chatId,
+      "<b>Выберите подписку:</b>",
+      pickSubscriptionKeyboard(linked.map((x) => ({ id: x.id, name: x.name }))),
+    );
     return;
   }
-  if (normalized === "подписка") {
+  if (normalized === "статистика по подписке") {
     const linked = linkedUsers(from.id);
     if (linked.length === 0) {
       await sendTelegramHtml(
@@ -591,6 +638,23 @@ export async function handleTelegramUpdate(body: unknown): Promise<void> {
     await sendTestSubscriptionIntro(chatId, from.id);
     return;
   }
+  if (normalized === "купить устройство" || normalized === "докупить устройство") {
+    const deviceTargets = linkedUsers(from.id).filter((u) => isDeviceLimitActiveForUser(u));
+    if (deviceTargets.length === 0) {
+      await sendTelegramHtml(chatId, "<b>Лимит устройств не включён</b> для ваших подписок.", inlineMenuFor(from.id));
+      return;
+    }
+    if (deviceTargets.length > 1) {
+      await sendTelegramHtml(
+        chatId,
+        "<b>Выберите подписку для покупки места под устройство:</b>",
+        paymentTargetKeyboard(deviceTargets, "device"),
+      );
+      return;
+    }
+    await onDeviceSlotPurchaseStart(chatId, from.id, deviceTargets[0]!.id, from);
+    return;
+  }
   if (normalized === "докупить гб") {
     const linked = linkedUsers(from.id).filter((u) => u.is_test_subscription !== 1);
     if (linked.length > 1) {
@@ -618,7 +682,7 @@ export async function handleTelegramUpdate(body: unknown): Promise<void> {
     });
     return;
   }
-  if (normalized === "клиенты" && isAdminTg(from.id)) {
+  if (normalized === "клиенты" && isAdminTg(from.id) && getPanelSettings().telegram.adminClientsButtonEnabled !== false) {
     await sendTelegramHtml(chatId, "<b>Клиенты</b>\n\nВыберите клиента:", adminClientsKeyboard());
     return;
   }
@@ -642,7 +706,7 @@ export async function handleTelegramUpdate(body: unknown): Promise<void> {
 }
 
 async function handleCallback(q: CallbackQuery, rawUpdate?: unknown): Promise<void> {
-  const data = (q.data ?? "").trim();
+  let data = (q.data ?? "").trim();
   const fromId = q.from.id;
   const chatId = q.message?.chat.id;
   if (chatId == null) {
@@ -687,12 +751,7 @@ async function handleCallback(q: CallbackQuery, rawUpdate?: unknown): Promise<vo
       return;
     }
 
-    if (data === "stats") {
-      await answerCallbackQuery(q.id);
-      const html = formatStatsHtml(linked);
-      await sendTelegramHtml(chatId, html, backHomeRow);
-      return;
-    }
+    if (data === "stats") data = "sub";
 
     if (data === "pay") {
       await answerCallbackQuery(q.id);
@@ -742,6 +801,25 @@ async function handleCallback(q: CallbackQuery, rawUpdate?: unknown): Promise<vo
         "Введите текст промокода одним сообщением.\n\nДля отмены отправьте «Отмена».",
         backHomeRow,
       );
+      return;
+    }
+
+    if (data === "buydevice") {
+      await answerCallbackQuery(q.id);
+      const deviceTargets = linked.filter((u) => isDeviceLimitActiveForUser(u));
+      if (deviceTargets.length === 0) {
+        await sendTelegramHtml(chatId, "<b>Лимит устройств не включён</b> для ваших подписок.", inlineMenuFor(fromId));
+        return;
+      }
+      if (deviceTargets.length > 1) {
+        await sendTelegramHtml(
+          chatId,
+          "<b>Выберите подписку для покупки места под устройство:</b>",
+          paymentTargetKeyboard(deviceTargets, "device"),
+        );
+        return;
+      }
+      await onDeviceSlotPurchaseStart(chatId, fromId, deviceTargets[0]!.id, q.from);
       return;
     }
 
@@ -808,7 +886,7 @@ async function handleCallback(q: CallbackQuery, rawUpdate?: unknown): Promise<vo
       await sendTelegramHtml(
         chatId,
         "Создание новой подписки отменено.",
-        mainMenuInline(menuFlags(fromId).admin, menuFlags(fromId).referral, menuFlags(fromId).support, menuFlags(fromId).buyGb, menuFlags(fromId).whitelist),
+        inlineMenuFor(fromId),
       );
       return;
     }
@@ -816,7 +894,7 @@ async function handleCallback(q: CallbackQuery, rawUpdate?: unknown): Promise<vo
     if (data === "pdel_menu") {
       await answerCallbackQuery(q.id);
       if (linked.length === 0) {
-        await sendTelegramHtml(chatId, "У вас нет подписок для удаления.", mainMenuInline(menuFlags(fromId).admin, menuFlags(fromId).referral, menuFlags(fromId).support, menuFlags(fromId).buyGb, menuFlags(fromId).whitelist));
+        await sendTelegramHtml(chatId, "У вас нет подписок для удаления.", inlineMenuFor(fromId));
         return;
       }
       await sendTelegramHtml(chatId, "<b>Выберите подписку для удаления:</b>", payDeletePickerKeyboard(linked));
@@ -862,7 +940,7 @@ async function handleCallback(q: CallbackQuery, rawUpdate?: unknown): Promise<vo
       }
       deleteUser(userId);
       await answerCallbackQuery(q.id, { text: "Подписка удалена." });
-      await sendTelegramHtml(chatId, "Подписка удалена.", mainMenuInline(menuFlags(fromId).admin, menuFlags(fromId).referral, menuFlags(fromId).support, menuFlags(fromId).buyGb, menuFlags(fromId).whitelist));
+      await sendTelegramHtml(chatId, "Подписка удалена.", inlineMenuFor(fromId));
       return;
     }
 
@@ -909,6 +987,20 @@ async function handleCallback(q: CallbackQuery, rawUpdate?: unknown): Promise<vo
       return;
     }
 
+    const dsel = /^dsel:(\d+)$/.exec(data);
+    if (dsel) {
+      const userId = Number(dsel[1]);
+      const row = getUser(userId);
+      const tgKey = String(fromId).trim();
+      if (!row || String(row.tg_id ?? "").trim() !== tgKey) {
+        await answerCallbackQuery(q.id, { text: "Нет доступа к этой подписке.", show_alert: true });
+        return;
+      }
+      await answerCallbackQuery(q.id);
+      await onDeviceSlotPurchaseStart(chatId, fromId, userId, q.from);
+      return;
+    }
+
     const gsel = /^gsel:(\d+)$/.exec(data);
     if (gsel) {
       const userId = Number(gsel[1]);
@@ -924,7 +1016,7 @@ async function handleCallback(q: CallbackQuery, rawUpdate?: unknown): Promise<vo
     }
 
     if (data === "admin_clients") {
-      if (!isAdminTg(fromId)) {
+      if (!isAdminTg(fromId) || getPanelSettings().telegram.adminClientsButtonEnabled === false) {
         await answerCallbackQuery(q.id, { text: "Нет прав.", show_alert: true });
         return;
       }

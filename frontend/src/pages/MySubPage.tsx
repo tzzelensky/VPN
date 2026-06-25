@@ -1,13 +1,20 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import DropperGame from "../components/DropperGame";
 import RouletteGame from "../components/RouletteGame";
 import DropperLobbyHero from "../components/DropperLobbyHero";
 import MySubProfileStats from "../components/MySubProfileStats";
 import MySubBottomNav, { type MySubNavTabId } from "../components/MySubBottomNav";
+import MySubLoadingScreen from "../mysub-new/components/MySubLoadingScreen";
+import { prefetchDailyGiftImages } from "../mysub-new/dailyGiftPrefetch";
+import MySubWebAppNew from "../mysub-new/MySubWebAppNew";
+import type { MySubWebAppController } from "../mysub-new/types";
 import {
   claimMySubReferralReward,
   loadMySubWebAppProfile,
+  mySubAddDevice,
+  mySubRemoveDevice,
+  mySubRenameDevice,
   previewMySubPromoCode,
   sendMySubPaymentProof,
   sendMySubSupportAppeal,
@@ -108,11 +115,13 @@ export default function MySubPage() {
   const [showInstruction, setShowInstruction] = useState(false);
   const [showWhitelistInstruction, setShowWhitelistInstruction] = useState(false);
   const [showPickModal, setShowPickModal] = useState(false);
-  const [payProduct, setPayProduct] = useState<"subscription" | "topup" | "white_lists">("subscription");
+  const [payProduct, setPayProduct] = useState<"subscription" | "topup" | "white_lists" | "device_slot">("subscription");
   const [payPlanId, setPayPlanId] = useState<number>(1);
   const [payIsTest, setPayIsTest] = useState(false);
   const [payPhoto, setPayPhoto] = useState<File | null>(null);
   const [busyPay, setBusyPay] = useState(false);
+  const [busyDevicePay, setBusyDevicePay] = useState(false);
+  const deviceSlotFileRef = useRef<HTMLInputElement>(null);
   const [payTargetId, setPayTargetId] = useState<number>(0); // 0 = "Новая подписка"
   const [newSubName, setNewSubName] = useState("");
   const [profileSubModalId, setProfileSubModalId] = useState<number>(0);
@@ -215,6 +224,8 @@ export default function MySubPage() {
       tgWebApp?.expand?.();
       try {
         const profile = await loadMySubWebAppProfile(initData);
+        const firstSubId = profile.subscriptions[0]?.id;
+        prefetchDailyGiftImages(profile, firstSubId);
         setData({
           ...profile,
           support_appeals: profile.support_appeals ?? { enabled: false },
@@ -316,18 +327,36 @@ export default function MySubPage() {
     setTab("subscription");
   }
 
-  function switchPayProduct(next: "subscription" | "topup" | "white_lists") {
+  function switchPayProduct(next: "subscription" | "topup" | "white_lists" | "device_slot") {
     setPayIsTest(false);
     setPromoApplied(null);
     setPromoFeedback(null);
     setPromoCodeInput("");
     setPayPlanId(1);
-    if ((next === "topup" || next === "white_lists") && data?.subscriptions.length) {
+    if ((next === "topup" || next === "white_lists" || next === "device_slot") && data?.subscriptions.length) {
       const wlId = next === "white_lists" ? data.whitelist?.purchase_user_id : null;
       if (wlId && wlId > 0) setPayTargetId(wlId);
-      else setPayTargetId((prev) => (prev <= 0 ? data.subscriptions[0]!.id : prev));
+      else if (next === "topup") {
+        const limited = data.subscriptions.find((s) => s.total_gb > 0 && !s.stats.unlimited_traffic);
+        setPayTargetId(limited?.id ?? data.subscriptions[0]!.id);
+      } else if (next === "device_slot") {
+        setPayTargetId(homeSubId > 0 ? homeSubId : data.subscriptions[0]!.id);
+      } else setPayTargetId((prev) => (prev <= 0 ? data.subscriptions[0]!.id : prev));
     }
     setPayProduct(next);
+  }
+
+  function openDeviceSlotPay(subId: number) {
+    const sub = data?.subscriptions.find((s) => s.id === subId);
+    if (!sub?.devices?.enabled) return;
+    setPayTargetId(subId);
+    setPayIsTest(false);
+    setPromoApplied(null);
+    setPromoFeedback(null);
+    setPromoCodeInput("");
+    setPayPlanId(1);
+    setPayProduct("device_slot");
+    setTab("subscription");
   }
 
   useEffect(() => {
@@ -394,7 +423,16 @@ export default function MySubPage() {
       setMsg("Оформление новых подписок временно недоступно.");
       return;
     }
-    if (payProduct === "white_lists") {
+    if (payProduct === "device_slot") {
+      if (!payTargetId) {
+        setMsg("Выберите подписку для докупки места.");
+        return;
+      }
+      if (!payPhoto) {
+        setMsg("Прикрепите фото чека об оплате.");
+        return;
+      }
+    } else if (payProduct === "white_lists") {
       if (!data.whitelist?.can_buy) {
         setMsg(
           data.whitelist?.status === "connected"
@@ -414,6 +452,10 @@ export default function MySubPage() {
       }
       if (payTargetId <= 0 || !payTargetSub) {
         setMsg("Выберите подписку, к которой докупаете ГБ.");
+        return;
+      }
+      if (payTargetSub.total_gb <= 0 || payTargetSub.stats.unlimited_traffic) {
+        setMsg("Докупка ГБ недоступна для безлимитной подписки.");
         return;
       }
       if (!selectedTopUpPlan) {
@@ -441,8 +483,15 @@ export default function MySubPage() {
       await sendMySubPaymentProof({
         init_data: initData,
         pay_kind: payIsTest ? "test" : payProduct,
-        user_id: payTargetId > 0 ? payTargetId : payProduct === "white_lists" ? data.subscriptions[0]?.id : undefined,
-        plan_id: payIsTest || payProduct === "white_lists" ? 1 : payPlanId,
+        user_id:
+          payProduct === "device_slot"
+            ? payTargetId
+            : payTargetId > 0
+              ? payTargetId
+              : payProduct === "white_lists"
+                ? data.subscriptions[0]?.id
+                : undefined,
+        plan_id: payIsTest || payProduct === "white_lists" || payProduct === "device_slot" ? 1 : payPlanId,
         photo_base64: compressed.base64,
         photo_mime: compressed.mime,
         photo_name: compressed.name,
@@ -453,6 +502,8 @@ export default function MySubPage() {
       setMsg(
         payIsTest
           ? "Чек получен. Администратор проверит оплату и активирует тестовую подписку."
+          : payProduct === "device_slot"
+            ? "Чек получен. После подтверждения оплаты место для устройства будет добавлено."
           : payProduct === "white_lists"
             ? "Чек получен. После подтверждения оплаты белые списки будут добавлены в подписку."
           : payProduct === "topup"
@@ -468,6 +519,29 @@ export default function MySubPage() {
       else setMsg(m);
     } finally {
       setBusyPay(false);
+    }
+  }
+
+  async function submitDeviceSlotPayment(file: File, subId: number) {
+    if (!data || !initData) return;
+    setBusyDevicePay(true);
+    setMsg("");
+    try {
+      const compressed = await compressImage(file);
+      await sendMySubPaymentProof({
+        init_data: initData,
+        pay_kind: "device_slot",
+        user_id: subId,
+        plan_id: 1,
+        photo_base64: compressed.base64,
+        photo_mime: compressed.mime,
+        photo_name: compressed.name,
+      });
+      setMsg("Чек получен. После подтверждения оплаты место для устройства будет добавлено.");
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusyDevicePay(false);
     }
   }
 
@@ -719,6 +793,24 @@ export default function MySubPage() {
     return data.subscriptions.find((s) => s.id === id) ?? data.subscriptions[0];
   }, [data?.subscriptions, pickedSubId]);
 
+  async function refreshProfile() {
+    try {
+      const profile = await loadMySubWebAppProfile(initData);
+      prefetchDailyGiftImages(profile, homeSubId > 0 ? homeSubId : profile.subscriptions[0]?.id);
+      setData({
+        ...profile,
+        support_appeals: profile.support_appeals ?? { enabled: false },
+      });
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  useEffect(() => {
+    if (!data || homeSubId <= 0) return;
+    prefetchDailyGiftImages(data, homeSubId);
+  }, [data, homeSubId]);
+
   const bottomNavItems = useMemo(() => {
     if (!data) return [];
     const rows: Array<{ id: MySubNavTabId; label: string; gameTickets?: number; gameEnabled?: boolean }> = [
@@ -740,16 +832,120 @@ export default function MySubPage() {
     }));
   }, [data]);
 
+  if (!err && !data) {
+    return (
+      <div className={`mysub-wrap ${theme === "light" ? "mysub-wrap--light" : ""}`}>
+        <MySubLoadingScreen theme={theme} />
+      </div>
+    );
+  }
+
+  if (data && data.web_app_new_design === true) {
+    const profile = data;
+    const ctrl: MySubWebAppController = {
+      data: profile,
+      err,
+      msg,
+      setMsg,
+      tab,
+      setTab,
+      theme,
+      applyMySubTheme,
+      initData,
+      setData,
+      homeSub,
+      homeSubId,
+      setHomeSubId,
+      pickedSubId,
+      setPickedSubId,
+      profileSub,
+      hasActiveSubscription,
+      showInstruction,
+      setShowInstruction,
+      showWhitelistInstruction,
+      setShowWhitelistInstruction,
+      showPickModal,
+      setShowPickModal,
+      payProduct,
+      switchPayProduct,
+      payPlanId,
+      setPayPlanId,
+      payIsTest,
+      setPayIsTest,
+      payPhoto,
+      setPayPhoto,
+      busyPay,
+      payTargetId,
+      setPayTargetId,
+      payTargetSub,
+      newSubName,
+      setNewSubName,
+      suggestedNewSubName,
+      selectedPlan,
+      selectedTopUpPlan,
+      testPlanAvailable,
+      salesDisabledForNew,
+      submitPaymentProof,
+      openTestPay,
+      promoCodeInput,
+      setPromoCodeInput,
+      promoApplied,
+      promoFeedback,
+      applyPromoCode,
+      activeDiscountPercent,
+      autoDiscountPercent,
+      discountedPriceForPlan,
+      copySubscription,
+      openPickForCopy,
+      busyDevicePay,
+      deviceSlotFileRef,
+      submitDeviceSlotPayment,
+      openDeviceSlotPay,
+      refreshProfile,
+      shareReferralInTelegram,
+      friendRewardId,
+      setFriendRewardId,
+      friendRewardBusy,
+      claimFriendReward,
+      supportOpen,
+      setSupportOpen,
+      supportText,
+      setSupportText,
+      supportPhotos,
+      setSupportPhotos,
+      supportBusy,
+      openSupportProfile,
+      submitSupportAppeal,
+      profileSubModalId,
+      setProfileSubModalId,
+      gameVisible,
+      activeGame,
+      gameTickets,
+      dropperPlaying,
+      isGameTab,
+      dropperTargetUserId,
+      dropperSession,
+      dropperInstructionOpen,
+      setDropperInstructionOpen,
+      dropperPracticeModalOpen,
+      setDropperPracticeModalOpen,
+      dropperPracticeSkipNextHint,
+      setDropperPracticeSkipNextHint,
+      dropperNoTickets,
+      dropperStartBusy,
+      startDropperPlay,
+      openDropperPracticeIntro,
+      confirmDropperPracticePlay,
+      finishDropperAndRefresh,
+      bottomNavItems,
+    };
+    return <MySubWebAppNew ctrl={ctrl} />;
+  }
+
   return (
     <div
       className={`mysub-wrap ${theme === "light" ? "mysub-wrap--light" : ""} ${dropperPlaying ? "mysub-wrap--dropper-play" : ""} ${isGameTab ? "mysub-wrap--game-tab" : ""}`.trim()}
     >
-      {!err && !data ? (
-        <div className="mysub-loading-screen" aria-live="polite">
-          <div className="mysub-loader-ring" />
-          <p className="sub">Загрузка...</p>
-        </div>
-      ) : null}
       <div className={`mysub-card ${dropperPlaying ? "mysub-card--dropper-play" : ""}`.trim()}>
         {err ? <div className="flash err">{err}</div> : null}
         {data ? (
@@ -845,6 +1041,143 @@ export default function MySubPage() {
                           📘 Инструкция
                         </button>
                       </div>
+                      {homeSub && homeSub.devices && homeSub.devices.enabled ? (
+                        <div className="mysub-sub-box mysub-devices-box">
+                          {(() => {
+                            const dev = homeSub.devices!;
+                            const limitN = Math.max(dev.limit, data.device_limit?.default_slots ?? dev.limit);
+                            const freeN = Math.max(0, limitN - dev.used);
+                            return (
+                              <>
+                          <div className="mysub-devices-head">
+                            <h3 className="mysub-title">Подключенные устройства</h3>
+                            <p className="sub mysub-devices-summary">
+                              {dev.used} из {limitN} занято
+                              {freeN > 0 ? ` · можно добавить ещё ${freeN}` : " · лимит исчерпан"}
+                            </p>
+                          </div>
+                          <div className="mysub-device-metrics">
+                            <div className="mysub-device-metric">
+                              <span className="mysub-device-metric__val">{dev.used}</span>
+                              <span className="mysub-device-metric__lbl">Используется</span>
+                            </div>
+                            <div className="mysub-device-metric">
+                              <span className="mysub-device-metric__val">{limitN}</span>
+                              <span className="mysub-device-metric__lbl">Лимит</span>
+                            </div>
+                            <div className="mysub-device-metric mysub-device-metric--accent">
+                              <span className="mysub-device-metric__val">{freeN}</span>
+                              <span className="mysub-device-metric__lbl">Свободно</span>
+                            </div>
+                          </div>
+                          {homeSub.devices.devices.length === 0 ? (
+                            <p className="sub mysub-devices-empty">
+                              Устройства пока не подключены. Скопируйте ссылку VPN — первое устройство привяжется автоматически.
+                            </p>
+                          ) : (
+                            <ul className="mysub-device-list">
+                              {homeSub.devices.devices.map((d) => (
+                                <li key={d.id} className="mysub-device-item">
+                                  <div className="mysub-device-item__head">
+                                    <span className="mysub-device-item__icon">{d.device_icon}</span>
+                                    <div className="mysub-device-item__title">
+                                      <b>{d.device_name}</b>
+                                      <span className="mysub-device-item__type">
+                                        {d.device_type ? d.device_type : "Устройство"}
+                                      </span>
+                                      <span className="mysub-device-item__meta">
+                                        {new Date(d.last_seen_at).toLocaleString("ru-RU")}
+                                        {d.last_ip ? ` · ${d.last_ip}` : ""}
+                                      </span>
+                                    </div>
+                                  </div>
+                                  <div className="mysub-device-item__actions">
+                                    <button type="button" className="ghost" onClick={() => void copySubscription(d.subscription_url)}>
+                                      Ссылка
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className="ghost"
+                                      onClick={() => {
+                                        const name = window.prompt("Название устройства", d.device_name);
+                                        if (!name || !homeSub) return;
+                                        void mySubRenameDevice({ init_data: initData, user_id: homeSub.id, device_id: d.id, name })
+                                          .then(() => loadMySubWebAppProfile(initData))
+                                          .then(setData)
+                                          .catch((e) => setMsg(e instanceof Error ? e.message : String(e)));
+                                      }}
+                                    >
+                                      Имя
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className="ghost mysub-device-item__danger"
+                                      onClick={() => {
+                                        if (!homeSub || !window.confirm(`Удалить ${d.device_name}?`)) return;
+                                        void mySubRemoveDevice({ init_data: initData, user_id: homeSub.id, device_id: d.id })
+                                          .then(() => loadMySubWebAppProfile(initData))
+                                          .then(setData)
+                                          .catch((e) => setMsg(e instanceof Error ? e.message : String(e)));
+                                      }}
+                                    >
+                                      Удалить
+                                    </button>
+                                  </div>
+                                </li>
+                              ))}
+                            </ul>
+                          )}
+                          <div className="mysub-device-footer">
+                            {freeN > 0 ? (
+                              <button
+                                type="button"
+                                className="ghost"
+                                disabled={busyDevicePay}
+                                onClick={() => {
+                                  void mySubAddDevice({ init_data: initData, user_id: homeSub!.id })
+                                    .then((r) => {
+                                      void copySubscription(r.device.subscription_url);
+                                      return loadMySubWebAppProfile(initData);
+                                    })
+                                    .then(setData)
+                                    .catch((e) => setMsg(e instanceof Error ? e.message : String(e)));
+                                }}
+                              >
+                                + Добавить устройство
+                              </button>
+                            ) : null}
+                            {homeSub.devices.can_buy_slot && homeSub.devices.purchase_enabled ? (
+                              <>
+                                <input
+                                  ref={deviceSlotFileRef}
+                                  type="file"
+                                  accept="image/*"
+                                  style={{ display: "none" }}
+                                  disabled={busyDevicePay}
+                                  onChange={(e) => {
+                                    const f = e.target.files?.[0];
+                                    if (f && homeSub) void submitDeviceSlotPayment(f, homeSub.id);
+                                    e.target.value = "";
+                                  }}
+                                />
+                                <button
+                                  type="button"
+                                  className="primary"
+                                  disabled={busyDevicePay}
+                                  onClick={() => deviceSlotFileRef.current?.click()}
+                                >
+                                  {busyDevicePay
+                                    ? "Отправка…"
+                                    : `Купить место · ${homeSub.devices.purchase_price_rub} ₽`}
+                                </button>
+                              </>
+                            ) : null}
+                          </div>
+                              </>
+                            );
+                          })()}
+                        </div>
+                      ) : null}
                     </>
                   )}
                 </div>

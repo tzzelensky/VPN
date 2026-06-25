@@ -1,5 +1,6 @@
 import { Router } from "express";
 import {
+  addUserDeviceSlot,
   applyUsersTrafficSnapshot,
   backfillDeployedServerRealityFromUser,
   coerceExpiryTimeMs,
@@ -8,27 +9,34 @@ import {
   dropperWinsForClientRow,
   findUserByVlessUuid,
   getUser,
+  listDeployedServers,
   listUsers,
+  removeUserDeviceSlot,
   updateUserRow,
   userAllowedOnServers,
   type CreateUserInput,
   type UserRow,
 } from "../db.js";
+import { primarySubscriptionUrl, publicSubUrl } from "../subscriptionUrl.js";
 import { requireAuth } from "../middleware/requireAuth.js";
 import { pushClientListToAllDeployedServers, refreshSpeedLimitsOnAllDeployedServers, removeUserUuidFromAllServers } from "../userSync.js";
 import { initNdjsonStream, ndjsonLine, wantsNdjsonStream } from "../streamUtil.js";
-import { buildSubscriptionPayload } from "../vlessLink.js";
-import { subscriptionVlessLinksForUser } from "../subscriptionLinks.js";
+import { resolveSubscriptionBase64, resolveSubscriptionLinks } from "../subscriptionResolve.js";
+import { countOnlineIpsForUserOnServer, peekUserTrafficForSubscription } from "../xrayStatsPull.js";
 import { generateX25519RealityKeyPair } from "../realityKeygen.js";
 import { logCommunicationMessage } from "../communicationLog.js";
 import { sendTelegramMessage } from "../telegram/api.js";
 import { sendExpiredSubscriptionReminder, sendExpiryRenewalReminder } from "../telegram/expiryNotify.js";
+import { expiryAutoNotifyStatusForUser } from "../expiryAutoNotifyStatus.js";
 import { runAutoTrafficNotificationsOnce } from "../telegram/trafficNotify.js";
 import { pullTrafficFromAllDeployedServers } from "../xrayStatsPull.js";
 import { refreshMissingSubscriptionHintsIfDue } from "../subscriptionHintsRefresh.js";
 import { resetUserTrafficCounters } from "../trafficReset.js";
 import { coerceExtraVlessLinksInput, isValidVlessUri } from "../extraVless.js";
 import { userHasPaidWhitelistProduct } from "../whitelistVaultDb.js";
+import { isDeviceLimitGloballyEnabled, isDeviceLimitActiveForUser } from "../deviceLimitEffective.js";
+import { activeDeviceSlots, userDeviceTotalLimit } from "../userDeviceSlots.js";
+import { migrateUserDeviceSlotsFromOnline } from "../deviceLimitMigration.js";
 
 const router = Router();
 
@@ -80,15 +88,28 @@ router.post("/sync-stats", async (_req, res) => {
       traffic_down: number;
       online_count: number;
     }> = [];
+    const servers = listDeployedServers();
     for (const u of listUsers()) {
       const k = u.vless_uuid.trim().toLowerCase();
       const agg = byUuid.get(k) ?? byUuid.get(u.vless_uuid);
-      if (agg) {
+      let onlineCount = Math.max(0, Math.floor(Number(agg?.online) || 0));
+      if (isDeviceLimitActiveForUser(u)) {
+        let maxIps = 0;
+        for (const row of servers) {
+          try {
+            maxIps = Math.max(maxIps, await countOnlineIpsForUserOnServer(row, u));
+          } catch {
+            /* skip */
+          }
+        }
+        onlineCount = Math.max(onlineCount, maxIps);
+      }
+      if (agg || onlineCount > 0) {
         rows.push({
           vless_uuid: u.vless_uuid,
-          traffic_up: agg.up,
-          traffic_down: agg.down,
-          online_count: Math.max(0, Math.floor(Number(agg.online) || 0)),
+          traffic_up: Math.max(0, Math.floor(Number(agg?.up) || 0)),
+          traffic_down: Math.max(0, Math.floor(Number(agg?.down) || 0)),
+          online_count: onlineCount,
         });
       }
     }
@@ -126,19 +147,26 @@ router.post("/sync-stats", async (_req, res) => {
   }
 });
 
-function publicSubUrl(subToken: string): string {
-  const base = (process.env.PUBLIC_API_URL ?? "http://localhost:4000").replace(/\/$/, "");
-  return `${base}/sub/${subToken}`;
+function deviceSlotDto(u: UserRow, slot: UserRow["device_slots"][number]) {
+  return {
+    id: slot.id,
+    label: slot.label,
+    created_at: slot.created_at,
+    last_seen_at: slot.last_seen_at,
+    last_ip: slot.last_ip,
+    subscription_url: publicSubUrl(u.sub_token, slot.id),
+  };
 }
 
 function userDto(u: UserRow) {
+  const expiryAuto = expiryAutoNotifyStatusForUser(u);
   return {
     id: u.id,
     name: u.name,
     email: u.email,
     vless_uuid: u.vless_uuid,
     sub_token: u.sub_token,
-    subscription_url: publicSubUrl(u.sub_token),
+    subscription_url: primarySubscriptionUrl(u),
     flow: u.flow,
     total_gb: u.total_gb,
     expiry_time: u.expiry_time,
@@ -156,7 +184,12 @@ function userDto(u: UserRow) {
     subscription_server_count: u.subscription_server_count,
     subscription_server_ids: u.subscription_server_ids,
     device_limit_enabled: u.device_limit_enabled === 1,
+    device_limit_global_enabled: isDeviceLimitGloballyEnabled(),
+    device_limit_active: isDeviceLimitActiveForUser(u),
     device_limit_count: u.device_limit_count,
+    device_limit_total: isDeviceLimitActiveForUser(u) ? userDeviceTotalLimit(u) : 0,
+    devices_registered: activeDeviceSlots(u.device_slots ?? []).length,
+    device_slots: (u.device_slots ?? []).map((s) => deviceSlotDto(u, s)),
     speed_limit_mbps: u.speed_limit_mbps,
     whitelist_happ_enabled: u.whitelist_happ_enabled === 1,
     whitelist_purchased: userHasPaidWhitelistProduct(u),
@@ -167,6 +200,8 @@ function userDto(u: UserRow) {
     dropper_tickets: u.dropper_tickets,
     dropper_wins: dropperWinsForClientRow(u),
     extra_vless_links: u.extra_vless_links ?? [],
+    expiry_auto_notify_status: expiryAuto.status,
+    expiry_auto_notify_hint: expiryAuto.hint,
     created_at: u.created_at,
     updated_at: u.updated_at,
   };
@@ -290,18 +325,34 @@ router.patch("/:id(\\d+)", async (req, res) => {
   const id = Number(req.params.id);
   const patch = parseCreateBody(req) as Partial<CreateUserInput> & { name?: string };
   assertExtraVlessValid(patch.extra_vless_links);
-  const u = updateUserRow(id, patch);
+  const before = getUser(id);
+  if (!before) {
+    res.status(404).json({ error: "not_found" });
+    return;
+  }
+  let u = updateUserRow(id, patch);
   if (!u) {
     res.status(404).json({ error: "not_found" });
     return;
   }
   backfillDeployedServerRealityFromUser(u);
-  try {
-    await pushClientListToAllDeployedServers();
-    res.json({ user: userDto(u) });
-  } catch (e) {
-    res.status(500).json({ error: e instanceof Error ? e.message : String(e) });
+
+  const explicitlyEnabledNow = patch.device_limit_enabled === 1;
+  const turnedOnInPatch = before.device_limit_enabled !== 1 && explicitlyEnabledNow;
+  const becameLimitActive = !isDeviceLimitActiveForUser(before) && isDeviceLimitActiveForUser(u);
+  if ((turnedOnInPatch || becameLimitActive) && isDeviceLimitActiveForUser(u)) {
+    try {
+      const migrated = await migrateUserDeviceSlotsFromOnline(id);
+      if (migrated.user) u = migrated.user;
+    } catch (e) {
+      console.error("[users] migrate slots after enabling limit:", e instanceof Error ? e.message : e);
+    }
   }
+
+  res.json({ user: userDto(u) });
+  void pushClientListToAllDeployedServers().catch((e) => {
+    console.error("[users] push after patch:", e);
+  });
 });
 
 router.post("/:id(\\d+)/notify-expiry", async (req, res) => {
@@ -471,7 +522,50 @@ router.get("/:id(\\d+)/subscription", (req, res) => {
     res.status(404).json({ error: "not_found" });
     return;
   }
-  res.json({ url: publicSubUrl(u.sub_token) });
+  res.json({ url: primarySubscriptionUrl(u) });
+});
+
+router.post("/:id(\\d+)/device-slots", (req, res) => {
+  const id = Number(req.params.id);
+  const u = getUser(id);
+  if (!u) {
+    res.status(404).json({ error: "not_found" });
+    return;
+  }
+  const label = String((req.body as { label?: unknown })?.label ?? "").trim();
+  const result = addUserDeviceSlot(id, label || undefined);
+  if (result.error === "not_found") {
+    res.status(404).json({ error: "not_found" });
+    return;
+  }
+  if (result.error === "device_limit_disabled") {
+    res.status(400).json({ error: "device_limit_disabled" });
+    return;
+  }
+  if (result.error === "device_limit_full") {
+    res.status(409).json({ error: "device_limit_full", user: userDto(result.user!) });
+    return;
+  }
+  res.status(201).json({
+    slot: deviceSlotDto(result.user!, result.slot!),
+    user: userDto(result.user!),
+  });
+});
+
+router.delete("/:id(\\d+)/device-slots/:deviceId", (req, res) => {
+  const id = Number(req.params.id);
+  const u = getUser(id);
+  if (!u) {
+    res.status(404).json({ error: "not_found" });
+    return;
+  }
+  const deviceId = decodeURIComponent(String(req.params.deviceId ?? "").trim());
+  const next = removeUserDeviceSlot(id, deviceId);
+  if (!next) {
+    res.status(404).json({ error: "not_found" });
+    return;
+  }
+  res.json({ user: userDto(next) });
 });
 
 router.get("/:id(\\d+)/preview", async (req, res) => {
@@ -481,19 +575,29 @@ router.get("/:id(\\d+)/preview", async (req, res) => {
     res.status(404).json({ error: "not_found" });
     return;
   }
-  if (!userAllowedOnServers(u)) {
-    res.json({ count: 0, links: [], base64: buildSubscriptionPayload([]) });
-    return;
-  }
   try {
     await refreshMissingSubscriptionHintsIfDue();
   } catch {
     /* ignore */
   }
   backfillDeployedServerRealityFromUser(u);
-  const fresh = getUser(id) ?? u;
-  const links = subscriptionVlessLinksForUser(fresh);
-  res.json({ count: links.length, links, base64: buildSubscriptionPayload(links) });
+  let fresh = getUser(id) ?? u;
+  try {
+    const peek = await peekUserTrafficForSubscription(fresh);
+    fresh = {
+      ...fresh,
+      online_devices: Math.max(0, Math.floor(Number(peek.online) || 0)),
+      online_snapshot: Number(peek.online) > 0 ? 1 : 0,
+    };
+  } catch {
+    /* ignore */
+  }
+  const links = resolveSubscriptionLinks(fresh, { apply_device_limit: false });
+  res.json({
+    count: links.length,
+    links,
+    base64: resolveSubscriptionBase64(fresh, { apply_device_limit: false }),
+  });
 });
 
 router.delete("/:id(\\d+)", async (req, res) => {

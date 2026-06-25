@@ -1,0 +1,17 @@
+{
+  "settings": {
+    "enabled": true,
+    "limit_scope": "selected",
+    "default_slots": 2,
+    "auto_bind": true,
+    "on_limit_exceeded": "stub",
+    "purchase_enabled": true,
+    "purchase_price_rub": 99,
+    "purchase_validity": "subscription_end",
+    "purchase_max_extra": 3,
+    "updated_at": "2026-06-22T11:37:01.781Z"
+  },
+  "purchases": [],
+  "events": [],
+  "recent_sub_hits": {}
+}

@@ -13,7 +13,17 @@ export type PanelSectionKey =
   | "promo_codes"
   | "config_vault"
   | "whitelist_vault"
-  | "dropper_game";
+  | "telegram_proxies"
+  | "dropper_game"
+  | "device_limit"
+  | "daily_gift";
+
+export type PanelSubscriptionBanner = {
+  enabled: boolean;
+  text: string;
+  telegramUrl: string;
+  telegramLinkText: string;
+};
 
 export type PanelSettings = {
   panel: {
@@ -22,6 +32,7 @@ export type PanelSettings = {
     avatarPath: string | null;
     brandName: string;
     telegramFooter: string;
+    subscriptionBanner: PanelSubscriptionBanner;
   };
   ui: {
     theme: PanelTheme;
@@ -29,17 +40,22 @@ export type PanelSettings = {
     compactMode: boolean;
     showHints: boolean;
     timezone: string;
+    /** Новый дизайн Telegram Mini App для пользователей. */
+    webAppNewDesign: boolean;
   };
   sections: Record<PanelSectionKey, boolean>;
   /** Порядок пунктов меню (перетаскивание в настройках «Разделы»). */
   sectionOrder: PanelSectionKey[];
   telegram: {
     adminIds: number[];
+    adminClientsButtonEnabled: boolean;
     notifyNewUsers: boolean;
     notifySurveyResponses: boolean;
     notifyBroadcastErrors: boolean;
     notifyServerErrors: boolean;
     testMode: boolean;
+    /** Код входа в панель через Telegram (по умолчанию включено). */
+    login2faEnabled: boolean;
   };
   security: {
     maskSecrets: boolean;
@@ -67,7 +83,7 @@ export const PANEL_SECTION_META: Array<{
   { key: "communications", path: "/communications", label: "Коммуникации", description: "Рассылки и опросы" },
   { key: "support_appeals", path: "/support-appeals", label: "Обращения", description: "Обращения в поддержку" },
   { key: "referral_program", path: "/referral-program", label: "Реферальная программа", description: "Рефералы и награды" },
-  { key: "promo_codes", path: "/promo-codes", label: "Промокоды", description: "Скидки и промокоды" },
+  { key: "promo_codes", path: "/promo-codes", label: "Промоакции", description: "Промокоды и очередь скидок" },
   {
     key: "config_vault",
     path: "/config-vault",
@@ -80,7 +96,25 @@ export const PANEL_SECTION_META: Array<{
     label: "Белые списки",
     description: "VLESS-ключи белых списков, назначение и проверка",
   },
+  {
+    key: "telegram_proxies",
+    path: "/telegram-proxies",
+    label: "Прокси",
+    description: "Развертывание и управление прокси для Telegram на добавленных серверах",
+  },
   { key: "dropper_game", path: "/dropper-game", label: "Игра", description: "Мини-игра в боте" },
+  {
+    key: "device_limit",
+    path: "/device-limit",
+    label: "Ограничение по устройствам",
+    description: "Лимиты устройств, докупка мест и журнал",
+  },
+  {
+    key: "daily_gift",
+    path: "/daily-gift",
+    label: "Ежедневный подарок",
+    description: "Ежедневные награды и напоминания в WebApp",
+  },
 ];
 
 export const DEFAULT_SECTION_ORDER: PanelSectionKey[] = PANEL_SECTION_META.map((s) => s.key);
@@ -117,23 +151,32 @@ export function defaultPanelSettings(): PanelSettings {
       avatarPath: null,
       brandName: "HSN",
       telegramFooter: "",
+      subscriptionBanner: {
+        enabled: false,
+        text: "",
+        telegramUrl: "",
+        telegramLinkText: "тех. поддержку",
+      },
     },
     ui: {
       theme: "system",
       accentColor: "blue",
       compactMode: false,
       showHints: true,
-      timezone: "Europe/Moscow",
+      timezone: "Asia/Yekaterinburg",
+      webAppNewDesign: false,
     },
     sections,
     sectionOrder: [...DEFAULT_SECTION_ORDER],
     telegram: {
       adminIds: [],
+      adminClientsButtonEnabled: true,
       notifyNewUsers: false,
       notifySurveyResponses: true,
       notifyBroadcastErrors: true,
       notifyServerErrors: true,
       testMode: false,
+      login2faEnabled: true,
     },
     security: {
       maskSecrets: true,

@@ -125,7 +125,7 @@ function fallbackSubStats(sub: Sub): SubStats {
   };
 }
 
-function SubscriptionStatsCard({ sub }: { sub: Sub }) {
+function SubscriptionStatsCard({ sub, title }: { sub: Sub; title?: string }) {
   const st = fallbackSubStats(sub);
   const tone = st.subscription_active ? (st.access_ok ? "ok" : "warn") : "bad";
   const timeValue = st.unlimited_time
@@ -146,7 +146,7 @@ function SubscriptionStatsCard({ sub }: { sub: Sub }) {
           📡
         </span>
         <div>
-          <h4>Основная подписка</h4>
+          <h4>{title?.trim() || "Основная подписка"}</h4>
           <p className="mysub-profile-stat-card__badge">
             {st.subscription_active ? (st.access_ok ? "Активна" : "Ограничена") : "Неактивна"}
           </p>
@@ -271,9 +271,11 @@ function WhitelistStatsCard({ wl, sub }: { wl: Whitelist; sub?: Sub }) {
 export default function MySubProfileStats({
   subscription,
   whitelist,
+  subscriptionTitle,
 }: {
   subscription: Sub | undefined;
   whitelist: Whitelist | undefined;
+  subscriptionTitle?: string;
 }) {
   if (!subscription && (!whitelist || whitelist.status === "hidden")) {
     return (
@@ -285,7 +287,7 @@ export default function MySubProfileStats({
 
   return (
     <div className="mysub-profile-stats">
-      {subscription ? <SubscriptionStatsCard sub={subscription} /> : null}
+      {subscription ? <SubscriptionStatsCard sub={subscription} title={subscriptionTitle} /> : null}
       {whitelist ? <WhitelistStatsCard wl={whitelist} sub={subscription} /> : null}
     </div>
   );

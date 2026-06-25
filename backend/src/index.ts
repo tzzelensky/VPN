@@ -10,7 +10,9 @@ import communicationsRouter from "./routes/communications.js";
 import subscriptionShopRouter from "./routes/subscriptionShop.js";
 import referralProgramRouter from "./routes/referralProgram.js";
 import promoCodesRouter from "./routes/promoCodes.js";
+import purchaseDiscountsRouter from "./routes/purchaseDiscounts.js";
 import configVaultRouter from "./routes/configVault.js";
+import telegramProxiesRouter from "./routes/telegramProxies.js";
 import whitelistVaultRouter from "./routes/whitelistVault.js";
 import dropperGameRouter from "./routes/dropperGame.js";
 import rouletteGameRouter from "./routes/rouletteGame.js";
@@ -18,13 +20,16 @@ import supportAppealsRouter from "./routes/supportAppeals.js";
 import pushRouter from "./routes/push.js";
 import mySubRouter from "./routes/mySub.js";
 import subscriptionRouter from "./routes/subscription.js";
+import deviceLimitRouter from "./routes/deviceLimit.js";
+import dailyGiftRouter from "./routes/dailyGift.js";
 import experimentsRouter from "./routes/experiments.js";
 import experimentSubscriptionRouter from "./routes/experimentSubscription.js";
 import telegramRouter from "./routes/telegram.js";
 import { SUBSCRIPTION_DECOY_HTML } from "./subscriptionLanding.js";
-import { initDb } from "./db.js";
+import { initDb, syncAllUsersDeviceLimitFromGlobal } from "./db.js";
 import { initSurveyDb } from "./surveyDb.js";
 import { initPanelSettings } from "./panelSettings.js";
+import { getDeviceLimitSettings, setDeviceLimitSettings } from "./deviceLimitStore.js";
 import settingsRouter from "./routes/settings.js";
 import {
   getTelegramBotToken,
@@ -36,11 +41,31 @@ import { startTelegramLongPolling } from "./telegram/polling.js";
 import { startAutoTrafficNotifyLoop } from "./telegram/trafficNotify.js";
 import { startAutoExpiryNotifyLoop } from "./telegram/expiryNotify.js";
 import { startConfigVaultAutoCheckLoop } from "./configVaultAutoCheck.js";
+import { startTelegramProxyAutoCheckLoop } from "./telegramProxyAutoCheck.js";
 import { startWhitelistVaultAutoCheckLoop } from "./whitelistVaultAutoCheck.js";
+import { startXrayLogsAutoCleanLoop } from "./xrayLogsAutoClean.js";
+import { initDailyGiftStore } from "./dailyGiftStore.js";
+import { initAutoCommunicationsStore } from "./autoCommunicationsStore.js";
+import { startDailyGiftNotifyLoop } from "./telegram/dailyGiftNotify.js";
+import { mountAdminSwagger } from "./swaggerAdmin.js";
 
 initDb();
 initSurveyDb();
 initPanelSettings();
+initDailyGiftStore();
+initAutoCommunicationsStore();
+
+{
+  let dl = getDeviceLimitSettings();
+  if (!dl.enabled && dl.default_slots > 1) {
+    dl = setDeviceLimitSettings({ enabled: true });
+    console.log(`[device-limit] auto-enabled (default_slots=${dl.default_slots})`);
+  }
+  if (dl.enabled && dl.limit_scope === "all") {
+    const n = syncAllUsersDeviceLimitFromGlobal(dl.default_slots);
+    if (n > 0) console.log(`[device-limit] synced ${n} subscriptions to default_slots=${dl.default_slots}`);
+  }
+}
 
 {
   const tgToken = getTelegramBotToken();
@@ -127,7 +152,9 @@ app.use("/api/settings", settingsRouter);
 app.use("/api/subscription-shop", subscriptionShopRouter);
 app.use("/api/referral-program", referralProgramRouter);
 app.use("/api/promo-codes", promoCodesRouter);
+app.use("/api/purchase-discounts", purchaseDiscountsRouter);
 app.use("/api/config-vault", configVaultRouter);
+app.use("/api/telegram-proxies", telegramProxiesRouter);
 app.use("/api/whitelist-vault", whitelistVaultRouter);
 app.use("/api/dropper-game", dropperGameRouter);
 app.use("/api/roulette-game", rouletteGameRouter);
@@ -137,6 +164,8 @@ app.use("/api/mysub", mySubRouter);
 app.use("/sub", subscriptionRouter);
 app.use("/api/sub", subscriptionRouter);
 app.use("/api/subscription", subscriptionRouter);
+app.use("/api/device-limit", deviceLimitRouter);
+app.use("/api/daily-gift", dailyGiftRouter);
 app.use("/api/experiments", experimentsRouter);
 app.use("/exp-sub", experimentSubscriptionRouter);
 app.use("/api/exp-sub", experimentSubscriptionRouter);
@@ -144,8 +173,11 @@ if (isTelegramWebhookEnabled()) {
   app.use("/api/telegram", telegramRouter);
 }
 
+mountAdminSwagger(app);
+
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`API http://127.0.0.1:${PORT}  (и http://localhost:${PORT})`);
+  console.log(`[swagger] Admin API docs: /panel/swagger/admin (Basic: ADMIN_USER / ADMIN_PASSWORD)`);
   if (isTelegramWebhookEnabled()) {
     const hint = process.env.PUBLIC_API_URL ?? `http://127.0.0.1:${PORT}`;
     console.log(
@@ -160,7 +192,10 @@ app.listen(PORT, "0.0.0.0", () => {
   if (getTelegramBotToken()) {
     startAutoTrafficNotifyLoop();
     startAutoExpiryNotifyLoop();
+    startDailyGiftNotifyLoop();
   }
   startConfigVaultAutoCheckLoop();
+  startTelegramProxyAutoCheckLoop();
   startWhitelistVaultAutoCheckLoop();
+  startXrayLogsAutoCleanLoop();
 });

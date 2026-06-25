@@ -17,8 +17,11 @@ import {
   type CommunicationSegmentRow,
 } from "../db.js";
 import { requireAuth } from "../middleware/requireAuth.js";
+import { getAutoCommunicationsConfig, setAutoCommunicationsConfig } from "../autoCommunicationsStore.js";
+import { normalizeAutoCommunicationsConfig } from "../autoCommunicationsTypes.js";
 import { sendTelegramHtml, sendTelegramPhotoBinary, telegramHasDialog } from "../telegram/api.js";
 import { getTelegramBotToken, getTelegramWebAppUrl } from "../telegram/env.js";
+import { runAutoExpiryNotificationsOnce } from "../telegram/expiryNotify.js";
 
 const router = Router();
 router.use(requireAuth);
@@ -83,6 +86,32 @@ router.get("/targets", async (_req, res) => {
   res.json({ users });
 });
 
+router.get("/auto-broadcasts", (_req, res) => {
+  res.json(getAutoCommunicationsConfig());
+});
+
+router.put("/auto-broadcasts", (req, res) => {
+  try {
+    const next = setAutoCommunicationsConfig(normalizeAutoCommunicationsConfig(req.body));
+    res.json(next);
+  } catch (e) {
+    res.status(400).json({ error: e instanceof Error ? e.message : String(e) });
+  }
+});
+
+router.post("/auto-broadcasts/run-expiry", async (_req, res) => {
+  try {
+    if (!getTelegramBotToken()) {
+      res.status(503).json({ error: "telegram_not_configured" });
+      return;
+    }
+    await runAutoExpiryNotificationsOnce({ force: true });
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e instanceof Error ? e.message : String(e) });
+  }
+});
+
 function parseSegmentBody(body: SegmentBody): Omit<CommunicationSegmentRow, "id" | "created_at" | "updated_at"> {
   return {
     name: String(body.name ?? "").trim().slice(0, 120),
@@ -138,7 +167,12 @@ router.get("/segments", (_req, res) => {
 
 router.get("/history", (req, res) => {
   const limit = Number(req.query.limit);
-  const rows = listCommunicationMessageLog(Number.isFinite(limit) ? limit : 200);
+  const from = String(req.query.from ?? "").trim();
+  const to = String(req.query.to ?? "").trim();
+  const rows = listCommunicationMessageLog(Number.isFinite(limit) ? limit : 200, {
+    fromYmd: from || undefined,
+    toYmd: to || undefined,
+  });
   res.json({ items: rows });
 });
 

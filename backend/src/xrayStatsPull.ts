@@ -1,5 +1,6 @@
 import type { ServerRow, UserRow } from "./db.js";
 import { applyUsersTrafficSnapshot, getUser, listDeployedServers, updateServer, updateUserRow } from "./db.js";
+import { isDeviceLimitActiveForUser } from "./deviceLimitEffective.js";
 import {
   TZADMIN_VLESS_TAG,
   sshExecCommand,
@@ -9,7 +10,7 @@ import {
 } from "./ssh.js";
 import { resolveConfigPath } from "./userSync.js";
 
-export type UserTrafficAgg = { up: number; down: number; online: number };
+export type UserTrafficAgg = { up: number; down: number; online: number; online_ips?: string[] };
 
 function shellQuote(s: string): string {
   return `'${s.replace(/'/g, `'\\''`)}'`;
@@ -205,6 +206,94 @@ function buildStatsQueryCommand(apiListen: string): string {
 }
 
 /** Один вызов на узел: список онлайн-аккаунтов (Xray ≥ с RPC GetAllOnlineUsers). */
+function buildOnlineIpListCommand(apiListen: string, email: string): string {
+  const srv = shellQuote(apiListen);
+  const em = shellQuote(email);
+  return [
+    "PATH=/usr/local/bin:/usr/bin:/usr/local/x-ui/bin:$PATH",
+    "X=$(command -v xray 2>/dev/null || true)",
+    '[ -z "$X" ] && [ -x /usr/local/x-ui/bin/xray-linux-amd64 ] && X=/usr/local/x-ui/bin/xray-linux-amd64',
+    '[ -z "$X" ] && [ -x /usr/local/x-ui/bin/xray ] && X=/usr/local/x-ui/bin/xray',
+    '[ -z "$X" ] && [ -x /usr/local/bin/xray ] && X=/usr/local/bin/xray',
+    '[ -z "$X" ] && [ -x /usr/bin/xray ] && X=/usr/bin/xray',
+    '[ -n "$X" ] || exit 0',
+    `"$X" api statsonlineiplist --server=${srv} --email=${em} 2>/dev/null || true`,
+  ].join("; ");
+}
+
+function parseOnlineIpList(stdout: string): string[] {
+  const trimmed = stdout.trim();
+  if (!trimmed || /unknown command|not found|No help topic/i.test(trimmed)) return [];
+  try {
+    const raw = firstJsonObject(trimmed) as Record<string, unknown>;
+    const ips = raw.ips ?? raw.Ips;
+    if (ips && typeof ips === "object" && !Array.isArray(ips)) {
+      return Object.keys(ips as Record<string, unknown>).map((x) => x.trim()).filter(Boolean);
+    }
+  } catch {
+    return [];
+  }
+  return [];
+}
+
+function parseOnlineIpCount(stdout: string): number {
+  return parseOnlineIpList(stdout).length;
+}
+
+function mergeOnlineIpLists(into: string[], add: string[]): void {
+  const seen = new Set(into.map((x) => x.toLowerCase()));
+  for (const ip of add) {
+    const n = ip.trim();
+    if (!n) continue;
+    const key = n.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    into.push(n);
+  }
+}
+
+function emailsForUuid(config: Record<string, unknown>, uuid: string): string[] {
+  const want = uuid.trim().toLowerCase();
+  if (!want) return [];
+  const out = new Set<string>();
+  const inbounds = config.inbounds;
+  if (!Array.isArray(inbounds)) return [];
+  for (const raw of inbounds) {
+    const ib = raw as Record<string, unknown>;
+    if (String(ib.protocol ?? "").toLowerCase() !== "vless") continue;
+    const clients = ((ib.settings as Record<string, unknown> | undefined)?.clients as Array<Record<string, unknown>>) ?? [];
+    for (const c of clients) {
+      const id = String(c.id ?? "").trim();
+      if (id.toLowerCase() !== want) continue;
+      const em = String(c.email ?? id).trim() || id;
+      out.add(em);
+    }
+  }
+  return [...out];
+}
+
+export async function listOnlineIpsForUserOnServer(row: ServerRow, user: UserRow, log?: SshLog): Promise<string[]> {
+  const path = await resolveConfigPath(row, log);
+  const cfg = sshCfg(row);
+  const raw = await sshReadRemoteFile(cfg, path, log);
+  const config = JSON.parse(raw.toString("utf8")) as Record<string, unknown>;
+  const apiSrv = parseXrayApiServerForStatsQuery(config);
+  if (!apiSrv) return [];
+  const emails = emailsForUuid(config, user.vless_uuid);
+  if (emails.length === 0) emails.push(user.vless_uuid);
+  const out: string[] = [];
+  for (const email of emails) {
+    const r = await sshExecCommand(cfg, buildOnlineIpListCommand(apiSrv, email), log);
+    mergeOnlineIpLists(out, parseOnlineIpList(r.stdout));
+  }
+  return out;
+}
+
+export async function countOnlineIpsForUserOnServer(row: ServerRow, user: UserRow, log?: SshLog): Promise<number> {
+  const ips = await listOnlineIpsForUserOnServer(row, user, log);
+  return ips.length;
+}
+
 function buildOnlineUsersCommand(apiListen: string): string {
   const srv = shellQuote(apiListen);
   return [
@@ -355,34 +444,88 @@ export async function pullTrafficFromAllDeployedServers(log?: SshLog): Promise<{
   return { byUuid: merged, errors, warns };
 }
 
+/** Собрать уникальные IP онлайн-сессий клиента со всех узлов. */
+export async function collectOnlineIpsForUser(user: UserRow, log?: SshLog): Promise<string[]> {
+  const ips: string[] = [];
+  for (const row of listDeployedServers()) {
+    try {
+      mergeOnlineIpLists(ips, await listOnlineIpsForUserOnServer(row, user, log));
+    } catch {
+      /* skip node */
+    }
+  }
+  return ips;
+}
+
 /** Суммарный трафик/онлайн с узлов для одного клиента (только чтение, без записи в БД). */
 export async function peekUserTrafficFromServers(user: UserRow, log?: SshLog): Promise<UserTrafficAgg> {
   const uuid = user.vless_uuid;
   const uuidKey = uuid.trim().toLowerCase();
   const merged = new Map<string, UserTrafficAgg>();
+  const onlineIps: string[] = [];
   for (const row of listDeployedServers()) {
     try {
       const { byUuid } = await pullTrafficFromServer(row, log);
       const hit = byUuid.get(uuidKey) ?? byUuid.get(uuid);
-      if (!hit) continue;
-      const cur = merged.get(uuidKey) ?? { up: 0, down: 0, online: 0 };
-      cur.up += hit.up;
-      cur.down += hit.down;
-      cur.online += Math.max(0, Math.floor(Number(hit.online) || 0));
-      merged.set(uuidKey, cur);
+      if (hit) {
+        const cur = merged.get(uuidKey) ?? { up: 0, down: 0, online: 0 };
+        cur.up += hit.up;
+        cur.down += hit.down;
+        cur.online += Math.max(0, Math.floor(Number(hit.online) || 0));
+        merged.set(uuidKey, cur);
+      }
+      if (isDeviceLimitActiveForUser(user)) {
+        mergeOnlineIpLists(onlineIps, await listOnlineIpsForUserOnServer(row, user, log));
+      }
     } catch {
       /* skip */
     }
   }
-  return merged.get(uuidKey) ?? { up: 0, down: 0, online: 0 };
+  const out = merged.get(uuidKey) ?? { up: 0, down: 0, online: 0 };
+  if (isDeviceLimitActiveForUser(user) && onlineIps.length > 0) {
+    out.online = Math.max(out.online, onlineIps.length);
+    out.online_ips = onlineIps;
+  }
+  return out;
 }
 
 const subPeekCache = new Map<string, { at: number; peek: UserTrafficAgg }>();
 const SUB_PEEK_TTL_MS = 28_000;
+const subPeekRefreshInflight = new Set<string>();
+
+function subscriptionPeekCacheKey(user: Pick<UserRow, "sub_token" | "id">): string {
+  return String(user.sub_token ?? "").trim() || String(user.id);
+}
+
+/** Синхронный peek для GET подписки: только кэш, без SSH на критическом пути. */
+export function getCachedSubscriptionPeek(user: UserRow): UserTrafficAgg | null {
+  const key = subscriptionPeekCacheKey(user);
+  const slot = subPeekCache.get(key);
+  if (!slot || Date.now() - slot.at >= SUB_PEEK_TTL_MS) return null;
+  return slot.peek;
+}
+
+/** Фоновое обновление кэша peek (не блокирует ответ /sub). */
+export function scheduleSubscriptionPeekRefresh(user: UserRow, log?: SshLog): void {
+  const key = subscriptionPeekCacheKey(user);
+  const now = Date.now();
+  const slot = subPeekCache.get(key);
+  if (slot && now - slot.at < SUB_PEEK_TTL_MS) return;
+  if (subPeekRefreshInflight.has(key)) return;
+  subPeekRefreshInflight.add(key);
+  void peekUserTrafficFromServers(user, log)
+    .then((peek) => {
+      subPeekCache.set(key, { at: Date.now(), peek });
+    })
+    .catch(() => {})
+    .finally(() => {
+      subPeekRefreshInflight.delete(key);
+    });
+}
 
 /** Кэшированный peek для GET подписки — не SSH на каждый запрос клиента. */
 export async function peekUserTrafficForSubscription(user: UserRow, log?: SshLog): Promise<UserTrafficAgg> {
-  const key = user.sub_token;
+  const key = subscriptionPeekCacheKey(user);
   const now = Date.now();
   const slot = subPeekCache.get(key);
   if (slot && now - slot.at < SUB_PEEK_TTL_MS) return slot.peek;

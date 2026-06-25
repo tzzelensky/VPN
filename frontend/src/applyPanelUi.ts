@@ -1,5 +1,5 @@
 import type { PanelSettings } from "./panelSettingsTypes";
-import { syncThemeFromPanelSetting, type AdminThemeSetting } from "./adminTheme";
+import { getAdminThemeSetting, syncThemeFromPanelSetting, type AdminThemeSetting } from "./adminTheme";
 
 const ACCENT_VARS: Record<string, { accent: string; dim: string }> = {
   blue: { accent: "#3d9eff", dim: "#2a7fd4" },
@@ -9,22 +9,42 @@ const ACCENT_VARS: Record<string, { accent: string; dim: string }> = {
   red: { accent: "#ef4444", dim: "#dc2626" },
 };
 
-export function applyPanelUiSettings(settings: PanelSettings): void {
-  syncThemeFromPanelSetting(settings.ui.theme as AdminThemeSetting);
+let lastAppliedKey = "";
 
+function panelUiKey(settings: PanelSettings): string {
+  return JSON.stringify({
+    theme: settings.ui.theme,
+    accent: settings.ui.accentColor,
+    compact: settings.ui.compactMode,
+    hints: settings.ui.showHints,
+    tz: settings.ui.timezone,
+  });
+}
+
+export function applyPanelUiSettings(settings: PanelSettings): void {
+  const key = panelUiKey(settings);
+  if (key === lastAppliedKey) return;
+  lastAppliedKey = key;
+
+  const themeSetting = settings.ui.theme as AdminThemeSetting;
+  if (getAdminThemeSetting() !== themeSetting) {
+    syncThemeFromPanelSetting(themeSetting);
+  }
+
+  const root = document.documentElement;
   const accentKey = String(settings.ui.accentColor ?? "blue");
   const preset = ACCENT_VARS[accentKey];
   if (preset) {
-    document.documentElement.style.setProperty("--accent", preset.accent);
-    document.documentElement.style.setProperty("--accent-dim", preset.dim);
-    document.documentElement.removeAttribute("data-accent-custom");
+    root.style.setProperty("--accent", preset.accent);
+    root.style.setProperty("--accent-dim", preset.dim);
+    root.removeAttribute("data-accent-custom");
   } else if (/^#[0-9a-f]{6}$/i.test(accentKey)) {
-    document.documentElement.style.setProperty("--accent", accentKey);
-    document.documentElement.style.setProperty("--accent-dim", accentKey);
-    document.documentElement.setAttribute("data-accent-custom", "1");
+    root.style.setProperty("--accent", accentKey);
+    root.style.setProperty("--accent-dim", accentKey);
+    root.setAttribute("data-accent-custom", "1");
   }
 
-  document.documentElement.classList.toggle("admin-compact", settings.ui.compactMode);
-  document.documentElement.classList.toggle("admin-no-hints", !settings.ui.showHints);
-  document.documentElement.dataset.panelTimezone = settings.ui.timezone || "Europe/Moscow";
+  root.classList.toggle("admin-compact", settings.ui.compactMode);
+  root.classList.toggle("admin-no-hints", !settings.ui.showHints);
+  root.dataset.panelTimezone = settings.ui.timezone || "Europe/Moscow";
 }

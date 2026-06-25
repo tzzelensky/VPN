@@ -3,17 +3,26 @@ import {
   backfillDeployedServerRealityFromUser,
   getUserBySubToken,
   listUsers,
+  touchDeviceLimitForUser,
   userAllowedOnServers,
   type UserRow,
 } from "../db.js";
-import { buildSubscriptionPayload } from "../vlessLink.js";
-import { subscriptionVlessLinksForUser } from "../subscriptionLinks.js";
+import { getRequestClientIp } from "../deviceLimitSubscription.js";
+import { getDeviceLimitSubscriptionPressure } from "../deviceLimitHappPush.js";
+import { setRecentSubscriptionDeviceHit } from "../deviceLimitStore.js";
+import { parseDeviceFromRequest, isUsefulDeviceName } from "../deviceNameFromUa.js";
+import { resolveSubscriptionBase64 } from "../subscriptionResolve.js";
+import { isDeviceLimitActiveForUser } from "../deviceLimitEffective.js";
+import { activeDeviceSlots, allowedDeviceSlots, resolveDeviceIdFromRequest, resolveSubscriptionDeviceId } from "../userDeviceSlots.js";
 import { setSubscriptionUserHeaders } from "../subscriptionMeta.js";
-import { peekUserTrafficForSubscription, refreshUserTrafficFromServersIfDue } from "../xrayStatsPull.js";
-import { pushClientListToAllDeployedServers } from "../userSync.js";
+import { getCachedSubscriptionPeek, refreshUserTrafficFromServersIfDue, scheduleSubscriptionPeekRefresh } from "../xrayStatsPull.js";
 import { refreshMissingSubscriptionHintsIfDue } from "../subscriptionHintsRefresh.js";
 
 const router = Router();
+
+function activeDeviceCount(user: UserRow): number {
+  return allowedDeviceSlots(user.device_slots ?? []).length;
+}
 
 function deriveUsageForHeader(
   base: UserRow,
@@ -61,42 +70,89 @@ router.get("/:token", async (req, res) => {
     }
 
     const base = getUserBySubToken(user.sub_token) ?? user;
-    await refreshMissingSubscriptionHintsIfDue();
+    void refreshMissingSubscriptionHintsIfDue().catch((err) => {
+      console.error("[subscription] hints refresh:", err instanceof Error ? err.message : err);
+    });
     backfillDeployedServerRealityFromUser(base);
+    const cachedPeek = getCachedSubscriptionPeek(base);
+    scheduleSubscriptionPeekRefresh(base);
     let headerUser: UserRow = base;
-    try {
-      const peek = await peekUserTrafficForSubscription(user);
-      const headerUsage = deriveUsageForHeader(base, peek);
+    if (cachedPeek) {
+      const headerUsage = deriveUsageForHeader(base, cachedPeek);
       headerUser = {
         ...base,
         traffic_up: headerUsage.up,
         traffic_down: headerUsage.down,
-        online_devices: Math.max(0, Math.floor(Number(peek.online) || 0)),
-        online_snapshot: Number(peek.online) > 0 ? 1 : 0,
+        online_devices: Math.max(0, Math.floor(Number(cachedPeek.online) || 0)),
+        online_snapshot: Number(cachedPeek.online) > 0 ? 1 : 0,
       };
-    } catch (e) {
-      console.error("[subscription] peek traffic:", e instanceof Error ? e.message : e);
     }
+    const requestIp = getRequestClientIp(req);
+    const parsedClient = parseDeviceFromRequest(req);
+    const userAgent = String(req.headers?.["user-agent"] ?? "").trim();
+    const resolvedForHit = resolveDeviceIdFromRequest(req);
+    const hitDid =
+      resolvedForHit.deviceId ||
+      (userAgent ? resolveSubscriptionDeviceId(base, resolvedForHit, userAgent) : "");
+    if (userAgent || parsedClient.device_name !== "Устройство") {
+      setRecentSubscriptionDeviceHit(base.id, {
+        ip: requestIp,
+        ua: userAgent || parsedClient.device_name,
+        did: hitDid,
+      });
+    }
+    let subUser = headerUser;
+    let deviceLimitDenied = false;
+    let deviceLimitReason: string | undefined;
+    let deviceLimitRegistered = activeDeviceCount(headerUser);
+    if (isDeviceLimitActiveForUser(headerUser)) {
+      const resolved = resolveDeviceIdFromRequest(req);
+      const deviceId = resolveSubscriptionDeviceId(headerUser, resolved, userAgent);
+      const access = touchDeviceLimitForUser(headerUser.id, deviceId, {
+        requestIp,
+        userAgent,
+        deviceName: isUsefulDeviceName(parsedClient.device_name) ? parsedClient.device_name : undefined,
+        matchedBy: resolved.matchedBy,
+        autoBind: true,
+      });
+      if (access.user) {
+        subUser = {
+          ...access.user,
+          // Для subscription-userinfo оставляем подсчитанные значения трафика из headerUser.
+          traffic_up: headerUser.traffic_up,
+          traffic_down: headerUser.traffic_down,
+          online_devices: headerUser.online_devices,
+          online_snapshot: headerUser.online_snapshot,
+          stats_raw_up: headerUser.stats_raw_up,
+          stats_raw_down: headerUser.stats_raw_down,
+        };
+        deviceLimitRegistered = activeDeviceCount(access.user);
+      }
+      deviceLimitDenied = !access.allowed;
+      deviceLimitReason = access.reason;
+    }
+    const deviceLimitPressure = getDeviceLimitSubscriptionPressure(subUser, {
+      denied: deviceLimitDenied,
+      reason: deviceLimitReason,
+    });
     void refreshUserTrafficFromServersIfDue(user).catch((err) => {
       console.error("[subscription] traffic refresh:", err instanceof Error ? err.message : err);
     });
 
-    // Синхронизация UUID в фоне — не блокируем ответ подписки.
-    void pushClientListToAllDeployedServers().catch((err) => {
-      console.error("[subscription] pushClientListToAllDeployedServers:", err instanceof Error ? err.message : err);
-    });
-
-    setSubscriptionUserHeaders(res, headerUser);
+    setSubscriptionUserHeaders(res, headerUser, { deviceLimitPressure });
     res.setHeader("Content-Type", "text/plain; charset=utf-8");
     res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, private");
     res.setHeader("Pragma", "no-cache");
 
-    if (!userAllowedOnServers(base)) {
-      res.send(buildSubscriptionPayload([]));
-      return;
-    }
-    const links = subscriptionVlessLinksForUser(base);
-    res.send(buildSubscriptionPayload(links));
+    res.send(
+      resolveSubscriptionBase64(subUser, {
+        apply_device_limit: true,
+        device_limit_denied: deviceLimitDenied,
+        device_limit_registered: deviceLimitRegistered,
+        device_limit_reason: deviceLimitReason,
+        device_limit_pressure: deviceLimitPressure,
+      }),
+    );
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     res.status(500).send(msg);

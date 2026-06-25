@@ -42,8 +42,16 @@ function writeSecretsFile(secrets: PanelSecrets): void {
 function mergeSettings(raw: Partial<PanelSettings> | null): PanelSettings {
   const base = defaultPanelSettings();
   if (!raw) return base;
+  const rawBanner = raw.panel?.subscriptionBanner;
   return {
-    panel: { ...base.panel, ...(raw.panel ?? {}) },
+    panel: {
+      ...base.panel,
+      ...(raw.panel ?? {}),
+      subscriptionBanner: {
+        ...base.panel.subscriptionBanner,
+        ...(rawBanner ?? {}),
+      },
+    },
     ui: { ...base.ui, ...(raw.ui ?? {}) },
     sections: { ...base.sections, ...(raw.sections ?? {}) },
     sectionOrder: normalizeSectionOrder(raw.sectionOrder ?? base.sectionOrder),
@@ -84,6 +92,12 @@ export function getPanelSettings(): PanelSettings {
   return cached;
 }
 
+/** Перечитать panel_settings.json с диска (актуально для WebApp feature flags). */
+export function refreshPanelSettingsCache(): PanelSettings {
+  cached = readSettingsFile();
+  return cached;
+}
+
 export function savePanelSettings(next: PanelSettings): PanelSettings {
   const merged = mergeSettings(next);
   const out: PanelSettings = {
@@ -119,6 +133,14 @@ export function setPanelBotToken(token: string | null): void {
 export function maskSecret(value: string, visibleTail = 4): string {
   const v = String(value ?? "").trim();
   if (!v) return "";
+  const colon = v.indexOf(":");
+  if (colon > 0 && colon < v.length - 1) {
+    const prefix = v.slice(0, colon + 1);
+    const secret = v.slice(colon + 1);
+    if (secret.length <= visibleTail + 2) return `${prefix}••••••••`;
+    const hiddenLen = Math.min(10, Math.max(4, secret.length - visibleTail));
+    return `${prefix}${"•".repeat(hiddenLen)}${secret.slice(-visibleTail)}`;
+  }
   if (v.length <= visibleTail + 2) return "••••••••";
   return `${"•".repeat(Math.min(12, v.length - visibleTail))}${v.slice(-visibleTail)}`;
 }
@@ -173,7 +195,9 @@ export function exportSettingsForClient(settings: PanelSettings) {
       botTokenMasked: tokenInfo.masked,
       adminIds: getEffectiveTelegramAdminIds(settings),
     },
-    avatarUrl: settings.panel.avatarPath ? "/api/settings/avatar" : null,
+    avatarUrl: settings.panel.avatarPath
+      ? `/api/settings/avatar?v=${settings.updatedAt}`
+      : null,
   };
 }
 

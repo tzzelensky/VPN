@@ -1,5 +1,15 @@
-import { FormEvent, useEffect, useMemo, useState } from "react";
-import { notifyUserExpired, notifyUserExpiring, type CreateUserPayload, type ServerDto, type UserDto } from "../api";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import {
+  loadSubscriptionShop,
+  notifyUserExpired,
+  notifyUserExpiring,
+  type CreateUserPayload,
+  type ServerDto,
+  type SubscriptionShopPlanDto,
+  type UserDto,
+} from "../api";
+import { snapExpiryTimeToNoonLocal } from "../lib/rouletteTicketPurchase";
 import {
   formatNotifyExpiredError,
   formatNotifyExpiryError,
@@ -13,6 +23,27 @@ import ExpiryDateTimePicker from "./ExpiryDateTimePicker";
 import Spinner from "./Spinner";
 
 const FLOW_FIXED = "xtls-rprx-vision";
+const DAY_MS = 86_400_000;
+
+function planGbLabel(gb: number): string {
+  return gb > 0 ? `${gb} ГБ` : "безлимит";
+}
+
+function planOptionLabel(p: SubscriptionShopPlanDto): string {
+  return `Тариф #${p.id}: ${p.title} (${planGbLabel(p.total_gb)} / ${p.days} дн.)`;
+}
+
+function detectPlanId(totalGb: number, plans: SubscriptionShopPlanDto[]): number {
+  const gb = Math.max(0, Number(totalGb) || 0);
+  return plans.find((p) => p.total_gb === gb)?.id ?? 0;
+}
+
+function expiryAfterPlanDays(baseMs: number, days: number): number {
+  if (days <= 0) return 0;
+  const now = Date.now();
+  const base = baseMs > now ? baseMs : now;
+  return snapExpiryTimeToNoonLocal(base + days * DAY_MS);
+}
 
 export type UserModalMode = "create" | "edit";
 
@@ -30,7 +61,7 @@ type Props = {
   /** Развёрнутые серверы (порядок — как в API, обычно по id). */
   deployedServers: ServerDto[];
   onClose: () => void;
-  onCreate: (payload: CreateUserPayload) => Promise<void>;
+  onCreate: (payload: CreateUserPayload) => void | Promise<void>;
   onUpdate: (id: number, payload: CreateUserPayload) => Promise<void>;
 };
 
@@ -77,19 +108,27 @@ export default function UserModal({
   const [expiryMs, setExpiryMs] = useState(0);
   const [selectedServerIds, setSelectedServerIds] = useState<number[]>([]);
   const [serverPickerOpen, setServerPickerOpen] = useState(false);
-  const [deviceLimitEnabled, setDeviceLimitEnabled] = useState(false);
-  const [deviceLimitCount, setDeviceLimitCount] = useState("2");
   const [speedLimitMbps, setSpeedLimitMbps] = useState("");
-  const [whitelistHappEnabled, setWhitelistHappEnabled] = useState(false);
+  const [shopPlans, setShopPlans] = useState<SubscriptionShopPlanDto[]>([]);
+  const [selectedPlanId, setSelectedPlanId] = useState(0);
   const [saving, setSaving] = useState(false);
   const [expiryNotifyBusy, setExpiryNotifyBusy] = useState(false);
   const [expiryNotifyFlash, setExpiryNotifyFlash] = useState<{ type: "ok" | "err"; text: string } | null>(null);
   const [extraVlessLinks, setExtraVlessLinks] = useState<ExtraVlessLinkDto[]>([]);
   const [addVlessOpen, setAddVlessOpen] = useState(false);
   const [editingVlessLink, setEditingVlessLink] = useState<ExtraVlessLinkDto | null>(null);
+  const planTouchedRef = useRef(false);
+  const formInitKeyRef = useRef("");
 
   useEffect(() => {
     if (!open) setExpiryNotifyFlash(null);
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    void loadSubscriptionShop()
+      .then((shop) => setShopPlans(shop.plans))
+      .catch(() => setShopPlans([]));
   }, [open]);
 
   useEffect(() => {
@@ -103,9 +142,17 @@ export default function UserModal({
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [open, onClose]);
 
+  const userId = user?.id ?? 0;
+
   useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      planTouchedRef.current = false;
+      formInitKeyRef.current = "";
+      return;
+    }
     if (mode === "create") {
+      if (formInitKeyRef.current === "create") return;
+      formInitKeyRef.current = "create";
       setEnable(true);
       setEmail("");
       setRemark("");
@@ -114,14 +161,15 @@ export default function UserModal({
       setTotalGb("0");
       setExpiryMs(0);
       setSelectedServerIds(deployedIdsOrdered(deployedServers));
-      setDeviceLimitEnabled(false);
-      setDeviceLimitCount("2");
       setSpeedLimitMbps("");
-      setWhitelistHappEnabled(false);
+      setSelectedPlanId(0);
       setExtraVlessLinks([]);
       return;
     }
     if (!user) return;
+    const initKey = `edit:${userId}`;
+    if (formInitKeyRef.current === initKey) return;
+    formInitKeyRef.current = initKey;
     setEnable(user.enable);
     setEmail(user.email);
     setRemark(user.name);
@@ -132,14 +180,16 @@ export default function UserModal({
     setTotalGb(String(user.total_gb ?? 0));
     setExpiryMs(Number(user.expiry_time) > 0 ? Number(user.expiry_time) : 0);
     setSelectedServerIds(serverIdsFromUser(user, deployedServers));
-    setDeviceLimitEnabled(Boolean(user.device_limit_enabled));
-    setDeviceLimitCount(String(Math.max(1, Math.floor(Number(user.device_limit_count) || 1))));
     setSpeedLimitMbps(
       Number(user.speed_limit_mbps) > 0 ? String(Math.floor(Number(user.speed_limit_mbps))) : "",
     );
-    setWhitelistHappEnabled(Boolean(user.whitelist_happ_enabled));
     setExtraVlessLinks(user.extra_vless_links?.length ? [...user.extra_vless_links] : []);
-  }, [open, mode, user, deployedServers]);
+  }, [open, mode, userId, user, deployedServers]);
+
+  useEffect(() => {
+    if (!open || mode === "create" || !user || shopPlans.length === 0 || planTouchedRef.current) return;
+    setSelectedPlanId(detectPlanId(user.total_gb ?? 0, shopPlans));
+  }, [open, mode, userId, user?.total_gb, shopPlans]);
 
   useEffect(() => {
     if (!open || mode !== "create") return;
@@ -188,10 +238,7 @@ export default function UserModal({
       tg_id: tgId.trim(),
       comment: comment.trim(),
       subscription_server_ids: selectedServerIds,
-      device_limit_enabled: deviceLimitEnabled,
-      device_limit_count: Math.max(1, Math.floor(Number(deviceLimitCount) || 1)),
       speed_limit_mbps: parseSpeedLimitMbps(speedLimitMbps),
-      whitelist_happ_enabled: whitelistHappEnabled,
       extra_vless_links: extraVlessLinks,
     };
     if (isCreate) return base;
@@ -202,11 +249,34 @@ export default function UserModal({
     };
   }
 
+  function applyPlan(planId: number) {
+    planTouchedRef.current = true;
+    setSelectedPlanId(planId);
+    if (planId <= 0) return;
+    const plan = shopPlans.find((p) => p.id === planId);
+    if (!plan) return;
+    setTotalGb(String(plan.total_gb));
+    setExpiryMs(expiryAfterPlanDays(expiryMs, plan.days));
+  }
+
+  const currentPlanLabel = useMemo(() => {
+    if (selectedPlanId > 0) {
+      const plan = shopPlans.find((p) => p.id === selectedPlanId);
+      if (plan) return planOptionLabel(plan);
+    }
+    const gb = Math.max(0, Number.parseFloat(String(totalGb).replace(",", ".")) || 0);
+    return `Индивидуальный (${planGbLabel(gb)})`;
+  }, [selectedPlanId, shopPlans, totalGb]);
+
   async function save() {
+    if (isCreate) {
+      onClose();
+      void onCreate(buildPayload());
+      return;
+    }
     setSaving(true);
     try {
-      if (isCreate) await onCreate(buildPayload());
-      else if (user) await onUpdate(user.id, buildPayload());
+      if (user) await onUpdate(user.id, buildPayload());
       onClose();
     } finally {
       setSaving(false);
@@ -290,10 +360,10 @@ export default function UserModal({
     );
   }
 
-  return (
+  return createPortal(
     <>
     <div
-      className="modal-backdrop"
+      className="modal-backdrop modal-backdrop--admin"
       role="presentation"
     >
       <div
@@ -428,11 +498,39 @@ export default function UserModal({
           <section className="user-modal-card user-modal-card-highlight">
             <h3 className="user-modal-section-title">Лимиты и подписка</h3>
             <div className="user-form-grid">
+              <div className="form-field form-field-span-2">
+                <label>Тариф</label>
+                <p className="field-hint" style={{ marginTop: 0, marginBottom: "0.45rem" }}>
+                  Сейчас: <b>{currentPlanLabel}</b>
+                </p>
+                <select
+                  value={String(selectedPlanId)}
+                  onChange={(e) => applyPlan(Number(e.target.value) || 0)}
+                  disabled={saving || shopPlans.length === 0}
+                >
+                  <option value="0">Индивидуальный (ручные лимиты)</option>
+                  {shopPlans.map((p) => (
+                    <option key={p.id} value={String(p.id)}>
+                      {planOptionLabel(p)}
+                    </option>
+                  ))}
+                </select>
+                <p className="field-hint">
+                  Список и параметры тарифов — из раздела «Подписки». При выборе тарифа обновляются лимит ГБ и срок
+                  подписки.
+                </p>
+              </div>
               <div className="form-field">
                 <label>Общий лимит трафика (GB)</label>
                 <input
                   value={totalGb}
-                  onChange={(e) => setTotalGb(e.target.value)}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setTotalGb(v);
+                    planTouchedRef.current = true;
+                    const gb = Math.max(0, Number.parseFloat(v.replace(",", ".")) || 0);
+                    setSelectedPlanId(detectPlanId(gb, shopPlans));
+                  }}
                   inputMode="decimal"
                   placeholder="0 = без лимита"
                 />
@@ -473,30 +571,6 @@ export default function UserModal({
                 </p>
               </div>
               <div className="form-field form-field-span-2">
-                <label>Ограничение по устройствам</label>
-                <div style={{ display: "flex", alignItems: "center", gap: "0.65rem" }}>
-                  <button
-                    type="button"
-                    className={`toggle ${deviceLimitEnabled ? "on" : ""}`}
-                    onClick={() => setDeviceLimitEnabled((v) => !v)}
-                    disabled={saving}
-                    aria-pressed={deviceLimitEnabled}
-                    title={deviceLimitEnabled ? "Отключить лимит устройств" : "Включить лимит устройств"}
-                  />
-                  <input
-                    value={deviceLimitCount}
-                    onChange={(e) => setDeviceLimitCount(sanitizePositiveIntInput(e.target.value))}
-                    onBlur={() => setDeviceLimitCount((v) => (v ? sanitizePositiveIntInput(v) : "1"))}
-                    inputMode="numeric"
-                    pattern="[1-9][0-9]*"
-                    placeholder="Количество"
-                    disabled={!deviceLimitEnabled || saving}
-                    style={{ width: "130px" }}
-                  />
-                </div>
-                <p className="field-hint">По умолчанию выключено. При превышении клиент получает заглушку вместо серверов.</p>
-              </div>
-              <div className="form-field form-field-span-2">
                 <label>Ограничение скорости, Мбит/с</label>
                 <input
                   value={speedLimitMbps}
@@ -511,24 +585,6 @@ export default function UserModal({
                 <p className="field-hint">
                   По умолчанию выключено. Пусто или 0 — без ограничения. Лимит применяется на узлах Xray только к этому
                   пользователю.
-                </p>
-              </div>
-              <div className="form-field form-field-span-2">
-                <label>Включить белые списки</label>
-                <div style={{ display: "flex", alignItems: "center", gap: "0.65rem" }}>
-                  <button
-                    type="button"
-                    className={`toggle ${whitelistHappEnabled ? "on" : ""}`}
-                    onClick={() => setWhitelistHappEnabled((v) => !v)}
-                    disabled={saving}
-                    aria-pressed={whitelistHappEnabled}
-                    title={whitelistHappEnabled ? "Отключить режим белых списков" : "Включить режим белых списков"}
-                  />
-                </div>
-                <p className="field-hint">
-                  По умолчанию выключено. Если включено: к обычной подписке в конце добавляются <b>последние 4</b> узла
-                  (те же VLESS-строки, что соответствуют блоку белых списков) и строка <span className="mono">happ://…</span>
-                  с конфигом Happ.
                 </p>
               </div>
             </div>
@@ -646,6 +702,7 @@ export default function UserModal({
       onClose={closeVlessModal}
       onSave={(uri, editId) => saveExtraVlessUri(uri, editId)}
     />
-    </>
+    </>,
+    document.body,
   );
 }

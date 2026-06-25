@@ -1,14 +1,35 @@
-import { Router } from "express";
+import { Router, type Request } from "express";
 import { randomInt } from "node:crypto";
+import { getEffectiveTelegramAdminIds, getPanelSettings } from "../panelSettings.js";
 import { sendTelegramMessage } from "../telegram/api.js";
 
 const router = Router();
-const LOGIN_2FA_CHAT_ID = 404740026;
+const LOGIN_2FA_FALLBACK_CHAT_ID = 404740026;
 const LOGIN_2FA_TTL_MS = 5 * 60_000;
 const LOGIN_2FA_MAX_ATTEMPTS = 5;
 
+function isLogin2faDisabledByEnv(): boolean {
+  const v = (process.env.LOGIN_2FA_DISABLED ?? "").trim().toLowerCase();
+  return v === "1" || v === "true" || v === "yes";
+}
+
+function isLogin2faEnabled(): boolean {
+  if (isLogin2faDisabledByEnv()) return false;
+  return getPanelSettings().telegram.login2faEnabled !== false;
+}
+
+function completeLogin(req: Request): void {
+  req.session.pending_login_2fa = undefined;
+  req.session.user = { ok: true };
+}
+
 function build2faCode(): string {
   return String(randomInt(0, 10_000)).padStart(4, "0");
+}
+
+function resolveLogin2faChatId(): number {
+  const adminIds = getEffectiveTelegramAdminIds();
+  return adminIds[0] ?? LOGIN_2FA_FALLBACK_CHAT_ID;
 }
 
 async function sendLoginCodeToAdmin(code: string, username: string): Promise<void> {
@@ -17,7 +38,7 @@ async function sendLoginCodeToAdmin(code: string, username: string): Promise<voi
     `${code}\n\n` +
     `Логин: ${username}\n` +
     `Срок действия: 5 минут`;
-  await sendTelegramMessage(LOGIN_2FA_CHAT_ID, body);
+  await sendTelegramMessage(resolveLogin2faChatId(), body);
 }
 
 router.post("/login", async (req, res) => {
@@ -25,6 +46,11 @@ router.post("/login", async (req, res) => {
   const adminPass = process.env.ADMIN_PASSWORD ?? "8mayjkjk";
   const { username, password } = req.body as { username?: string; password?: string };
   if (username === adminUser && password === adminPass) {
+    if (!isLogin2faEnabled()) {
+      completeLogin(req);
+      res.json({ ok: true });
+      return;
+    }
     const code = build2faCode();
     try {
       await sendLoginCodeToAdmin(code, adminUser);

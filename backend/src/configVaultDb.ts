@@ -4,16 +4,42 @@ import { fileURLToPath } from "node:url";
 import {
   DEFAULT_CONFIG_VAULT_SETTINGS,
   type ConfigVaultSettings,
+  type ConfigVaultSubscriptionMode,
   type VlessCheckStatus,
   type VlessKeyCheckRow,
   type VlessKeyRow,
 } from "./configVaultTypes.js";
 import { defaultNameFromUri, maskProxyUri, parseProxyUri } from "./configVaultUri.js";
 import { isValidConfigVaultUri } from "./extraVless.js";
+import type { UserRow } from "./db.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const dataFile = process.env.DATA_PATH ?? path.join(__dirname, "..", "data.json");
 const vaultPath = process.env.CONFIG_VAULT_PATH ?? path.join(path.dirname(dataFile), "config_vault.json");
+
+function normalizeSubscriptionMode(raw: unknown): ConfigVaultSubscriptionMode {
+  const v = String(raw ?? "all").trim().toLowerCase();
+  return v === "selected" ? "selected" : "all";
+}
+
+function normalizeUserIds(raw: unknown): number[] {
+  if (!Array.isArray(raw)) return [];
+  const out: number[] = [];
+  for (const x of raw) {
+    const id = Math.floor(Number(x));
+    if (Number.isFinite(id) && id > 0 && !out.includes(id)) out.push(id);
+  }
+  return out;
+}
+
+function usersCountLabel(n: number): string {
+  if (n === 0) return "0 пользователей";
+  const mod10 = n % 10;
+  const mod100 = n % 100;
+  if (mod10 === 1 && mod100 !== 11) return `${n} пользователь`;
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 10 || mod100 >= 20)) return `${n} пользователя`;
+  return `${n} пользователей`;
+}
 
 type VaultFile = {
   next_key_id: number;
@@ -76,6 +102,8 @@ function normalizeKey(raw: unknown): VlessKeyRow | null {
     notifiedRaw === "available" || notifiedRaw === "unavailable" || notifiedRaw === "unstable"
       ? notifiedRaw
       : null;
+  const subscription_mode = normalizeSubscriptionMode(o.subscription_mode);
+  const subscription_user_ids = normalizeUserIds(o.subscription_user_ids);
   return {
     id,
     name: String(o.name ?? "").trim().slice(0, 120) || defaultNameFromUri(raw_uri),
@@ -84,6 +112,8 @@ function normalizeKey(raw: unknown): VlessKeyRow | null {
     active: !(o.active === false || o.active === 0 || o.active === "0"),
     added_to_subscriptions:
       o.added_to_subscriptions === true || o.added_to_subscriptions === 1 || o.added_to_subscriptions === "1",
+    subscription_mode,
+    subscription_user_ids: subscription_mode === "selected" ? subscription_user_ids : [],
     last_check_at: o.last_check_at != null ? String(o.last_check_at) : null,
     last_check_status,
     last_check_latency_ms: Number.isFinite(Number(o.last_check_latency_ms))
@@ -228,14 +258,55 @@ export function subscriptionUrisFromVault(): string[] {
   return out;
 }
 
+export function userReceivesConfigVaultKey(userId: number, key: VlessKeyRow): boolean {
+  if (!key.active || !key.added_to_subscriptions) return false;
+  if (key.subscription_mode === "all") return true;
+  return key.subscription_user_ids.includes(userId);
+}
+
+export function subscriptionVaultUrisForUser(user: UserRow): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const k of listConfigVaultKeys()) {
+    if (!userReceivesConfigVaultKey(user.id, k)) continue;
+    const uri = k.raw_uri.trim();
+    const key = uri.toLowerCase();
+    if (!uri || seen.has(key)) continue;
+    seen.add(key);
+    out.push(uri);
+  }
+  return out;
+}
+
+export function subscriptionUsersCount(key: VlessKeyRow): number {
+  if (!key.added_to_subscriptions) return 0;
+  if (key.subscription_mode === "all") return 0;
+  return key.subscription_user_ids.length;
+}
+
+export function configVaultSubscriptionLabel(key: VlessKeyRow): string {
+  if (!key.added_to_subscriptions) return "—";
+  if (key.subscription_mode === "all") return "Всем пользователям";
+  return usersCountLabel(key.subscription_user_ids.length);
+}
+
 function rowFromUri(
   id: number,
   name: string,
   raw_uri: string,
-  opts: { active?: boolean; notify_on_fail?: boolean; added_to_subscriptions?: boolean },
+  opts: {
+    active?: boolean;
+    notify_on_fail?: boolean;
+    added_to_subscriptions?: boolean;
+    subscription_mode?: ConfigVaultSubscriptionMode;
+    subscription_user_ids?: number[];
+  },
 ): VlessKeyRow {
   const parsed = parseProxyUri(raw_uri)!;
   const now = new Date().toISOString();
+  const subscription_mode = opts.subscription_mode ?? "all";
+  const subscription_user_ids =
+    subscription_mode === "selected" ? normalizeUserIds(opts.subscription_user_ids) : [];
   return {
     id,
     name: name.trim().slice(0, 120) || defaultNameFromUri(raw_uri),
@@ -243,6 +314,8 @@ function rowFromUri(
     masked_uri: maskProxyUri(raw_uri),
     active: opts.active !== false,
     added_to_subscriptions: opts.added_to_subscriptions === true,
+    subscription_mode,
+    subscription_user_ids,
     last_check_at: null,
     last_check_status: "never",
     last_check_latency_ms: null,
@@ -271,6 +344,8 @@ export function createConfigVaultKey(input: {
   raw_uri: string;
   active?: boolean;
   notify_on_fail?: boolean;
+  subscription_mode?: ConfigVaultSubscriptionMode;
+  subscription_user_ids?: number[];
 }): VlessKeyRow {
   const uri = input.raw_uri.trim();
   const existing = listConfigVaultKeys().map((k) => k.raw_uri);
@@ -285,6 +360,8 @@ export function createConfigVaultKey(input: {
     created = rowFromUri(id, input.name, uri, {
       active: input.active,
       notify_on_fail: input.notify_on_fail,
+      subscription_mode: input.subscription_mode,
+      subscription_user_ids: input.subscription_user_ids,
     });
     v.keys.push(created);
   });
@@ -298,6 +375,8 @@ export function updateConfigVaultKey(
     raw_uri?: string;
     active?: boolean;
     notify_on_fail?: boolean;
+    subscription_mode?: ConfigVaultSubscriptionMode;
+    subscription_user_ids?: number[];
   },
 ): VlessKeyRow {
   let updated!: VlessKeyRow;
@@ -313,6 +392,15 @@ export function updateConfigVaultKey(
       if (!parsed) throw new Error("Некорректная ссылка");
     }
     const parsed = parseProxyUri(raw_uri)!;
+    let subscription_mode = patch.subscription_mode ?? cur.subscription_mode;
+    let subscription_user_ids = cur.subscription_user_ids;
+    if (patch.subscription_mode !== undefined || patch.subscription_user_ids !== undefined) {
+      subscription_mode = patch.subscription_mode ?? cur.subscription_mode;
+      subscription_user_ids =
+        subscription_mode === "selected"
+          ? normalizeUserIds(patch.subscription_user_ids ?? cur.subscription_user_ids)
+          : [];
+    }
     updated = {
       ...cur,
       name: patch.name != null ? patch.name.trim().slice(0, 120) || cur.name : cur.name,
@@ -320,6 +408,8 @@ export function updateConfigVaultKey(
       masked_uri: maskProxyUri(raw_uri),
       active: patch.active !== undefined ? patch.active !== false : cur.active,
       notify_on_fail: patch.notify_on_fail !== undefined ? patch.notify_on_fail !== false : cur.notify_on_fail,
+      subscription_mode,
+      subscription_user_ids,
       parsed_address: parsed.address,
       parsed_port: parsed.port,
       parsed_uuid: parsed.uuid,
@@ -357,6 +447,17 @@ export function setConfigVaultKeyInSubscriptions(id: number, added: boolean): Vl
     row = v.keys[idx]!;
   });
   return row!;
+}
+
+export function setConfigVaultSubscriptionTargets(
+  id: number,
+  mode: ConfigVaultSubscriptionMode,
+  userIds?: number[],
+): VlessKeyRow {
+  return updateConfigVaultKey(id, {
+    subscription_mode: mode,
+    subscription_user_ids: userIds,
+  });
 }
 
 export function setConfigVaultKeyChecking(id: number): void {
@@ -515,7 +616,11 @@ export function importConfigVaultKeys(
 
 /** Ответ API: без raw_uri по умолчанию. */
 export function vaultKeyForApi(k: VlessKeyRow, includeRaw = false): Record<string, unknown> {
-  const base: Record<string, unknown> = { ...k };
+  const base: Record<string, unknown> = {
+    ...k,
+    subscription_users_count: subscriptionUsersCount(k),
+    subscription_label: configVaultSubscriptionLabel(k),
+  };
   if (!includeRaw) {
     delete base.raw_uri;
     delete base.parsed_uuid;

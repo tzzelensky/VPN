@@ -1,10 +1,9 @@
-import { useCallback, useEffect, useMemo, useState, type CSSProperties, type SVGProps } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type SVGProps } from "react";
 import {
   bulkDeleteInactiveUsers,
   createUser,
   deleteUser,
-  listServers,
-  listUsers,
+  loadAutoCommunicationsConfig,
   notifyUserExpired,
   notifyUserExpiring,
   patchUser,
@@ -19,6 +18,7 @@ import {
 import {
   formatNotifyExpiredError,
   formatNotifyExpiryError,
+  setExpiryDaysBefore,
   userExpiredNotifyEligible,
   userExpiryBellEligible,
 } from "../expiryNotify";
@@ -27,12 +27,16 @@ import { subscriptionLabel } from "../subscriptionLabel";
 import DashboardLayout from "../components/DashboardLayout";
 import Spinner from "../components/Spinner";
 import UserModal from "../components/UserModal";
-import { USERS_CHANGED_EVENT } from "../usersEvents";
+import { notifyUsersChanged, USERS_CHANGED_EVENT } from "../usersEvents";
 import { readUsersListCache, writeUsersListCache } from "../usersListCache";
+import { prefetchUsersInBackground, USERS_CACHE_UPDATED_EVENT } from "../usersPrefetch";
 import { hideUserId, pruneHiddenUserIds, readHiddenUserIds, unhideUserId } from "../usersHidden";
 
 const BYTES_PER_GB = 1073741824;
 const DAY_MS = 24 * 60 * 60 * 1000;
+const SYNC_STATS_TIMEOUT_MS = 45_000;
+const PREVIEW_CONCURRENCY = 2;
+const PREVIEW_TIMEOUT_MS = 12_000;
 
 function startOfLocalDay(ts: number): number {
   const d = new Date(ts);
@@ -46,6 +50,14 @@ function usedBytes(u: UserDto): number {
 
 function formatUsedGb(u: UserDto): string {
   return `${(usedBytes(u) / BYTES_PER_GB).toFixed(2)} GB`;
+}
+
+function nodesCountLabel(u: UserDto, previewCount: number | undefined, deployedTotal: number): string {
+  if (previewCount != null) return String(previewCount);
+  if (u.subscription_server_ids?.length) return String(u.subscription_server_ids.length);
+  if (u.subscription_server_count > 0) return String(u.subscription_server_count);
+  if (deployedTotal > 0) return String(deployedTotal);
+  return "—";
 }
 
 function trafficPercent(u: UserDto): number {
@@ -183,7 +195,7 @@ function IconPower(p: SVGProps<SVGSVGElement>) {
   );
 }
 
-type UserModalState = { kind: "closed" } | { kind: "create" } | { kind: "edit"; user: UserDto };
+type UserModalState = { kind: "closed" } | { kind: "create" } | { kind: "edit"; userId: number };
 type UsersTab = "active" | "inactive";
 
 export default function UsersPage({ onLogout }: { onLogout: () => void }) {
@@ -220,6 +232,9 @@ export default function UsersPage({ onLogout }: { onLogout: () => void }) {
   const [searchQuery, setSearchQuery] = useState("");
   const [hiddenUserIds, setHiddenUserIds] = useState<number[]>(() => readHiddenUserIds());
   const [showHiddenUsers, setShowHiddenUsers] = useState(false);
+  const previewAbortRef = useRef<AbortController | null>(null);
+  const previewTimerRef = useRef<number | null>(null);
+  const statsSyncRunningRef = useRef(false);
 
   const sortedUsers = useMemo(() => {
     const arr = [...users];
@@ -265,6 +280,12 @@ export default function UsersPage({ onLogout }: { onLogout: () => void }) {
     () => inactiveSelectedUsers.filter((u) => !String(u.tg_id ?? "").trim()),
     [inactiveSelectedUsers],
   );
+
+  useEffect(() => {
+    void loadAutoCommunicationsConfig()
+      .then((cfg) => setExpiryDaysBefore(cfg.expiry.days_before))
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     if (expiryTipUserId == null) return;
@@ -323,32 +344,53 @@ export default function UsersPage({ onLogout }: { onLogout: () => void }) {
     );
   }
 
-  const loadUsersSnapshot = useCallback(async () => {
-    const [u, servers] = await Promise.all([listUsers(), listServers()]);
-    const deployed = servers.filter((s) => s.vless_deployed);
-    setUsers(u);
-    setDeployedServers(deployed);
-    writeUsersListCache({
-      users: u,
-      previews: readUsersListCache()?.previews ?? {},
-      deployedServers: deployed,
-    });
-    return { users: u, deployedServers: deployed };
+  const applyUsersSnapshot = useCallback((users: UserDto[], deployedServers: ServerDto[]) => {
+    setUsers(users);
+    setDeployedServers(deployedServers);
   }, []);
 
+  const loadUsersSnapshot = useCallback(async () => {
+    const data = await prefetchUsersInBackground({ force: true });
+    applyUsersSnapshot(data.users, data.deployedServers);
+    return { users: data.users, deployedServers: data.deployedServers };
+  }, [applyUsersSnapshot]);
+
   const loadPreviewCounts = useCallback(async (nextUsers: UserDto[], nextDeployedServers: ServerDto[]) => {
-    const pv: Record<number, { count: number }> = {};
+    previewAbortRef.current?.abort();
+    const ac = new AbortController();
+    previewAbortRef.current = ac;
+    const prev = readUsersListCache()?.previews ?? {};
+    const pv: Record<number, { count: number }> = { ...prev };
+    const queue = [...nextUsers];
+
+    async function fetchCount(id: number): Promise<number> {
+      if (ac.signal.aborted) return pv[id]?.count ?? 0;
+      try {
+        const p = await Promise.race([
+          userPreview(id),
+          new Promise<never>((_, reject) => window.setTimeout(() => reject(new Error("timeout")), PREVIEW_TIMEOUT_MS)),
+        ]);
+        return p.count;
+      } catch {
+        return pv[id]?.count ?? 0;
+      }
+    }
+
+    async function worker() {
+      while (queue.length > 0 && !ac.signal.aborted) {
+        const u = queue.shift();
+        if (!u) break;
+        const count = await fetchCount(u.id);
+        if (ac.signal.aborted) return;
+        pv[u.id] = { count };
+        setPreviews((cur) => ({ ...cur, [u.id]: { count } }));
+      }
+    }
+
     await Promise.all(
-      nextUsers.map(async (x) => {
-        try {
-          const p = await userPreview(x.id);
-          pv[x.id] = { count: p.count };
-        } catch {
-          pv[x.id] = { count: 0 };
-        }
-      }),
+      Array.from({ length: Math.min(PREVIEW_CONCURRENCY, Math.max(1, nextUsers.length)) }, () => worker()),
     );
-    setPreviews(pv);
+    if (ac.signal.aborted) return;
     writeUsersListCache({
       users: nextUsers,
       previews: pv,
@@ -356,47 +398,94 @@ export default function UsersPage({ onLogout }: { onLogout: () => void }) {
     });
   }, []);
 
+  const schedulePreviewCounts = useCallback(
+    (nextUsers: UserDto[], nextDeployedServers: ServerDto[]) => {
+      if (previewTimerRef.current != null) window.clearTimeout(previewTimerRef.current);
+      previewTimerRef.current = window.setTimeout(() => {
+        previewTimerRef.current = null;
+        void loadPreviewCounts(nextUsers, nextDeployedServers);
+      }, 800);
+    },
+    [loadPreviewCounts],
+  );
+
+  const runBackgroundStatsSync = useCallback(async () => {
+    if (statsSyncRunningRef.current) return;
+    statsSyncRunningRef.current = true;
+    setStatsRefreshing(true);
+    try {
+      const result = await Promise.race([
+        syncUserStatsFromServers(),
+        new Promise<"timeout">((resolve) => window.setTimeout(() => resolve("timeout"), SYNC_STATS_TIMEOUT_MS)),
+      ]);
+      if (result !== "timeout" && result.errors?.length) {
+        const errs = result.errors.filter((e) => e !== "timeout");
+        if (errs.length) {
+          setMsg({ type: "err", text: `Статистика с узлов: ${errs.join("; ")}` });
+        }
+      }
+      if (result !== "timeout") {
+        const synced = await loadUsersSnapshot();
+        schedulePreviewCounts(synced.users, synced.deployedServers);
+      }
+    } catch {
+      /* список уже показан */
+    } finally {
+      statsSyncRunningRef.current = false;
+      setStatsRefreshing(false);
+    }
+  }, [loadUsersSnapshot, schedulePreviewCounts]);
+
   const refresh = useCallback(
     async (opts?: { silent?: boolean; skipSync?: boolean }) => {
       if (!opts?.silent) setRefreshing(true);
       try {
         const snapshot = await loadUsersSnapshot();
-        void loadPreviewCounts(snapshot.users, snapshot.deployedServers);
+        schedulePreviewCounts(snapshot.users, snapshot.deployedServers);
         if (!opts?.skipSync) {
-          void (async () => {
-            setStatsRefreshing(true);
-            try {
-              const st = await syncUserStatsFromServers();
-              if (st.errors?.length) {
-                setMsg({ type: "err", text: `Статистика с узлов: ${st.errors.join("; ")}` });
-              }
-            } catch {
-              /* базовый список уже показан */
-            } finally {
-              try {
-                const synced = await loadUsersSnapshot();
-                void loadPreviewCounts(synced.users, synced.deployedServers);
-              } finally {
-                setStatsRefreshing(false);
-              }
-            }
-          })();
+          void runBackgroundStatsSync();
         }
       } finally {
         if (!opts?.silent) setRefreshing(false);
       }
     },
-    [loadPreviewCounts, loadUsersSnapshot],
+    [loadUsersSnapshot, runBackgroundStatsSync, schedulePreviewCounts],
   );
 
   useEffect(() => {
-    const hasCache = Boolean(readUsersListCache());
-    refresh({ silent: hasCache }).catch((e) => setMsg({ type: "err", text: String(e) }));
-  }, [refresh]);
+    const cached = readUsersListCache();
+    if (cached?.users?.length) {
+      applyUsersSnapshot(cached.users, cached.deployedServers);
+      if (Object.keys(cached.previews).length > 0) setPreviews(cached.previews);
+    }
+
+    void (async () => {
+      try {
+        const data = await prefetchUsersInBackground({ force: !cached?.users?.length });
+        applyUsersSnapshot(data.users, data.deployedServers);
+        schedulePreviewCounts(data.users, data.deployedServers);
+        void runBackgroundStatsSync();
+      } catch (e) {
+        setMsg({ type: "err", text: String(e) });
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- начальная загрузка один раз
+  }, []);
+
+  useEffect(() => {
+    const onCache = (e: Event) => {
+      const detail = (e as CustomEvent<{ users: UserDto[]; deployedServers: ServerDto[]; previews: Record<number, { count: number }> }>).detail;
+      if (!detail?.users) return;
+      applyUsersSnapshot(detail.users, detail.deployedServers);
+      if (Object.keys(detail.previews ?? {}).length > 0) setPreviews(detail.previews);
+    };
+    window.addEventListener(USERS_CACHE_UPDATED_EVENT, onCache);
+    return () => window.removeEventListener(USERS_CACHE_UPDATED_EVENT, onCache);
+  }, [applyUsersSnapshot]);
 
   useEffect(() => {
     const onUsersChanged = () => {
-      void refresh().catch((e) => setMsg({ type: "err", text: String(e) }));
+      void refresh({ silent: true, skipSync: true }).catch((e) => setMsg({ type: "err", text: String(e) }));
     };
     window.addEventListener(USERS_CHANGED_EVENT, onUsersChanged);
     return () => window.removeEventListener(USERS_CHANGED_EVENT, onUsersChanged);
@@ -426,14 +515,26 @@ export default function UsersPage({ onLogout }: { onLogout: () => void }) {
 
   async function onSubmitEdit(id: number, payload: CreateUserPayload) {
     const { user } = await patchUser(id, payload);
+    setUsers((prev) => {
+      const next = prev.map((u) => (u.id === user.id ? user : u));
+      writeUsersListCache({ users: next, previews, deployedServers });
+      return next;
+    });
     setMsg({ type: "ok", text: `Сохранено: «${user.name}».` });
-    await refresh();
   }
 
-  async function onCreateUser(payload: CreateUserPayload) {
-    const { user } = await createUser(payload);
-    setMsg({ type: "ok", text: `Создан клиент «${user.name}». Подписка: ${user.subscription_url}` });
-    await refresh();
+  function onCreateUser(payload: CreateUserPayload) {
+    setMsg({ type: "ok", text: "Создаём клиента в фоне…" });
+    void (async () => {
+      try {
+        const { user } = await createUser(payload);
+        await prefetchUsersInBackground({ force: true });
+        notifyUsersChanged();
+        setMsg({ type: "ok", text: `Создан клиент «${user.name}». Подписка: ${user.subscription_url}` });
+      } catch (e) {
+        setMsg({ type: "err", text: String(e) });
+      }
+    })();
   }
 
   async function onPushAll() {
@@ -598,7 +699,7 @@ export default function UsersPage({ onLogout }: { onLogout: () => void }) {
           title="Изменить"
           aria-label="Изменить"
           disabled={tableLocked}
-          onClick={() => setModal({ kind: "edit", user: u })}
+          onClick={() => setModal({ kind: "edit", userId: u.id })}
         >
           <IconPencil />
         </button>
@@ -780,7 +881,7 @@ export default function UsersPage({ onLogout }: { onLogout: () => void }) {
       <UserModal
         open={modal.kind !== "closed"}
         mode={modal.kind === "edit" ? "edit" : "create"}
-        user={modal.kind === "edit" ? modal.user : null}
+        user={modal.kind === "edit" ? users.find((u) => u.id === modal.userId) ?? null : null}
         deployedServers={deployedServers}
         onClose={() => setModal({ kind: "closed" })}
         onCreate={async (p) => {
@@ -1230,7 +1331,7 @@ export default function UsersPage({ onLogout }: { onLogout: () => void }) {
                             title="Изменить"
                             aria-label="Изменить"
                             disabled={tableLocked}
-                            onClick={() => setModal({ kind: "edit", user: u })}
+                            onClick={() => setModal({ kind: "edit", userId: u.id })}
                           >
                             <IconPencil />
                           </button>
@@ -1433,15 +1534,22 @@ export default function UsersPage({ onLogout }: { onLogout: () => void }) {
                       </td>
                       <td className="ud-td-expiry">{renderExpiryControl(u, ex)}</td>
                       <td>
-                        <span className="ud-pill ud-pill-total" title={u.device_limit_enabled ? `Лимит: ${u.device_limit_count}` : "Лимит устройств выключен"}>
-                          {u.online_devices}
-                          {u.device_limit_enabled ? ` / ${u.device_limit_count}` : ""}
+                        <span
+                          className="ud-pill ud-pill-total"
+                          title={
+                            u.device_limit_active
+                              ? `Подключено устройств: ${u.devices_registered ?? 0} из ${u.device_limit_total ?? u.device_limit_count}`
+                              : "Лимит устройств выключен"
+                          }
+                        >
+                          {u.device_limit_active ? (u.devices_registered ?? 0) : u.online_devices}
+                          {u.device_limit_active ? ` / ${u.device_limit_total ?? u.device_limit_count}` : ""}
                         </span>
                       </td>
                       <td className="ud-td-nodes">
                         <div className="ud-nodes-cell">
                           <div className="ud-nodes-body">
-                            <div className="ud-nodes-main">{previews[u.id]?.count ?? "—"}</div>
+                            <div className="ud-nodes-main">{nodesCountLabel(u, previews[u.id]?.count, deployedServers.length)}</div>
                             <div className="muted ud-nodes-sub">
                               {u.subscription_server_ids?.length
                                 ? u.subscription_server_count === 0

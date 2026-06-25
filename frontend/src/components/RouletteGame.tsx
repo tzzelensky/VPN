@@ -37,6 +37,22 @@ import {
 } from "../roulettePrizeDisplay";
 
 const SPIN_MS = 4200;
+const SPIN_API_TIMEOUT_MS = 45_000;
+
+function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = window.setTimeout(() => reject(new Error(message)), ms);
+    promise
+      .then((value) => {
+        window.clearTimeout(timer);
+        resolve(value);
+      })
+      .catch((err) => {
+        window.clearTimeout(timer);
+        reject(err);
+      });
+  });
+}
 
 type TicketPurchaseHistoryItem = {
   kind: "ticket_purchase";
@@ -155,8 +171,11 @@ export default function RouletteGame({
   const spinInFlightRef = useRef(false);
   const pendingSpinRef = useRef(false);
   const autoSpinRef = useRef(false);
+  const pendingSpinRafRef = useRef(0);
+  const spinFinishTimerRef = useRef(0);
   const [wheelPx, setWheelPx] = useState(260);
   const [spinning, setSpinning] = useState(false);
+  const [spinRequesting, setSpinRequesting] = useState(false);
   const [rotation, setRotation] = useState(0);
   const [winModal, setWinModal] = useState<WinModalState | null>(null);
   const [ticketsHelpOpen, setTicketsHelpOpen] = useState(false);
@@ -220,13 +239,104 @@ export default function RouletteGame({
     return () => ro.disconnect();
   }, []);
 
+  const stopSpinSound = useCallback(() => {
+    const stop = stopSoundRef.current;
+    stopSoundRef.current = null;
+    stop?.();
+  }, []);
+
   useEffect(() => {
     return () => {
-      stopSoundRef.current?.();
+      stopSpinSound();
+      if (pendingSpinRafRef.current) {
+        window.cancelAnimationFrame(pendingSpinRafRef.current);
+        pendingSpinRafRef.current = 0;
+      }
+      if (spinFinishTimerRef.current) {
+        window.clearTimeout(spinFinishTimerRef.current);
+        spinFinishTimerRef.current = 0;
+      }
+      spinInFlightRef.current = false;
     };
+  }, [stopSpinSound]);
+
+  const stopPendingWheelSpin = useCallback(() => {
+    if (pendingSpinRafRef.current) {
+      window.cancelAnimationFrame(pendingSpinRafRef.current);
+      pendingSpinRafRef.current = 0;
+    }
+  }, []);
+
+  const startPendingWheelSpin = useCallback(() => {
+    stopPendingWheelSpin();
+    let lastTs = performance.now();
+    const tick = (now: number) => {
+      const dt = Math.min(48, now - lastTs);
+      lastTs = now;
+      const next = rotationRef.current + dt * 0.14;
+      rotationRef.current = next;
+      setRotation(next);
+      pendingSpinRafRef.current = window.requestAnimationFrame(tick);
+    };
+    pendingSpinRafRef.current = window.requestAnimationFrame(tick);
+  }, [stopPendingWheelSpin]);
+
+  const animateWheelToFinal = useCallback((finalRotation: number, onSpinVisualStart?: () => void) => {
+    return new Promise<void>((resolve) => {
+      let settled = false;
+      let visualStarted = false;
+      const startVisual = () => {
+        if (visualStarted) return;
+        visualStarted = true;
+        onSpinVisualStart?.();
+      };
+      const done = () => {
+        if (settled) return;
+        settled = true;
+        if (spinFinishTimerRef.current) {
+          window.clearTimeout(spinFinishTimerRef.current);
+          spinFinishTimerRef.current = 0;
+        }
+        resolve();
+      };
+
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          const el = wheelRef.current;
+          const startRot = rotationRef.current;
+          let visualStartTimer = 0;
+          if (el) {
+            const onStart = (e: TransitionEvent) => {
+              if (e.propertyName !== "transform") return;
+              el.removeEventListener("transitionstart", onStart);
+              if (visualStartTimer) window.clearTimeout(visualStartTimer);
+              startVisual();
+            };
+            el.addEventListener("transitionstart", onStart);
+            const onEnd = (e: TransitionEvent) => {
+              if (e.propertyName !== "transform") return;
+              el.removeEventListener("transitionend", onEnd);
+              done();
+            };
+            el.addEventListener("transitionend", onEnd);
+            el.style.transition = "none";
+            el.style.transform = `rotate(${startRot}deg)`;
+            void el.offsetHeight;
+            el.style.removeProperty("transition");
+            el.style.removeProperty("transform");
+            visualStartTimer = window.setTimeout(startVisual, 120);
+          } else {
+            visualStartTimer = window.setTimeout(startVisual, 0);
+          }
+          setRotation(finalRotation);
+          spinFinishTimerRef.current = window.setTimeout(done, SPIN_MS + 160);
+        });
+      });
+    });
   }, []);
 
   const ticketCount = Math.max(0, localTickets);
+  const spinBusy = spinning || spinRequesting;
   const labelRadiusPx = Math.round(wheelPx * 0.36);
   const shop = ticketShop;
   const shopVisible = !!shop?.visible;
@@ -394,30 +504,59 @@ export default function RouletteGame({
     }
   }, [initData, localPiggy, onRefreshProfile, patchSelectedSub, piggyExchanging, selectedSub]);
 
+  const resetSpinState = useCallback(
+    (opts?: { stopAuto?: boolean }) => {
+      stopPendingWheelSpin();
+      if (spinFinishTimerRef.current) {
+        window.clearTimeout(spinFinishTimerRef.current);
+        spinFinishTimerRef.current = 0;
+      }
+      stopSpinSound();
+      spinInFlightRef.current = false;
+      setSpinRequesting(false);
+      setSpinning(false);
+      if (opts?.stopAuto) {
+        setAutoSpin(false);
+        autoSpinRef.current = false;
+        setAutoSpinToast(null);
+      }
+    },
+    [stopPendingWheelSpin, stopSpinSound],
+  );
+
   const spin = useCallback(async (opts?: { fromAuto?: boolean }) => {
     const fromAuto = opts?.fromAuto === true;
     if (!selectedSub) {
       setError("Нет подписки для игры.");
       return;
     }
-    if (spinInFlightRef.current || ticketCount <= 0 || activePrizes.length === 0) {
+    if (spinInFlightRef.current) {
       if (fromAuto) {
-        setAutoSpin(false);
-        autoSpinRef.current = false;
-        setAutoSpinToast(null);
+        window.setTimeout(() => void spin({ fromAuto: true }), 320);
       }
       return;
     }
+    if (ticketCount <= 0 || activePrizes.length === 0) {
+      if (fromAuto) resetSpinState({ stopAuto: true });
+      return;
+    }
+
     spinInFlightRef.current = true;
-    setSpinning(true);
+    setSpinRequesting(true);
     setError(null);
     if (fromAuto) {
       setAutoSpinToast(`Автопрокрутка… билетов: ${ticketCount}`);
     }
-    stopSoundRef.current?.();
-    stopSoundRef.current = playRouletteSpinSound(SPIN_MS);
+    startPendingWheelSpin();
+
     try {
-      const result = await spinMySubRoulette(initData, selectedSub.id);
+      const result = await withTimeout(
+        spinMySubRoulette(initData, selectedSub.id),
+        SPIN_API_TIMEOUT_MS,
+        "Сервер не ответил вовремя. Попробуйте ещё раз.",
+      );
+      stopPendingWheelSpin();
+
       let idx = Math.max(0, Math.min(activePrizes.length - 1, result.prize_index ?? 0));
       if (result.prize?.id) {
         const found = activePrizes.findIndex((p) => p.id === result.prize!.id);
@@ -427,74 +566,73 @@ export default function RouletteGame({
       const prize = prizeDto ? toDisplayPrize(prizeDto) : catalog[idx]!;
       const lose = isRouletteLosePrize(prize);
       const extraTurns = 5 + Math.floor(Math.random() * 3);
-      const startRot = rotationRef.current;
-      const finalRotation = rotationForPrizeIndex(startRot, idx, activePrizes.length, extraTurns);
-      requestAnimationFrame(() => {
-        const el = wheelRef.current;
-        if (el) {
-          el.style.transition = "none";
-          el.style.transform = `rotate(${startRot}deg)`;
-          void el.offsetHeight;
-          el.style.removeProperty("transition");
-          el.style.removeProperty("transform");
-        }
-        setRotation(finalRotation);
+      const finalRotation = rotationForPrizeIndex(rotationRef.current, idx, activePrizes.length, extraTurns);
+
+      setSpinRequesting(false);
+      setSpinning(true);
+      stopSpinSound();
+      await animateWheelToFinal(finalRotation, () => {
+        stopSoundRef.current = playRouletteSpinSound(SPIN_MS);
       });
+
       const appliedTitle = result.spin?.prize_title?.trim();
       const appliedMessage = result.spin?.prize_display_message?.trim();
       const remaining = result.tickets_remaining ?? Math.max(0, ticketCount - 1);
       const spinId = result.spin?.id;
-      window.setTimeout(() => {
-        stopSoundRef.current?.();
-        stopSoundRef.current = null;
-        setSpinning(false);
-        spinInFlightRef.current = false;
-        setLocalTickets(remaining);
-        patchSelectedSub({ tickets: remaining });
-        if (result.gb_piggy) applyPiggyFromResult(result.gb_piggy);
-        if (spinId) {
-          void notifyMySubRouletteSpin(initData, spinId).catch(() => undefined);
-        }
-        const keepAuto = autoSpinRef.current;
-        if (!lose) playRouletteWinChime();
-        if (!keepAuto) {
-          setWinModal({
-            prize,
-            lose,
-            winText: lose
-              ? getRouletteLoseMessage()
-              : appliedMessage
-                ? appliedTitle || "+7 дней в подарок"
-                : prizeDto?.win_text ?? getPrizeFullTitle(prize),
-            winSub: lose
-              ? "Билет списан. Попробуйте ещё раз!"
-              : appliedMessage ?? "Приз уже начислен в вашу подписку",
-          });
-        } else if (appliedMessage && prize.type === "traffic_gb") {
-          setAutoSpinToast(`+${prize.value} ГБ в копилку · билетов: ${remaining}`);
-        } else {
-          setAutoSpinToast(`Билетов осталось: ${remaining}`);
-        }
-        onRefreshProfile();
-        if (keepAuto && remaining > 0) {
-          window.setTimeout(() => void spin({ fromAuto: true }), 450);
-        } else if (keepAuto && remaining <= 0) {
-          setAutoSpin(false);
-          autoSpinRef.current = false;
-          setAutoSpinToast(null);
-        }
-      }, SPIN_MS);
-    } catch (e) {
-      stopSoundRef.current?.();
-      stopSoundRef.current = null;
-      setSpinning(false);
+
+      stopSpinSound();
       spinInFlightRef.current = false;
-      setAutoSpin(false);
-      autoSpinRef.current = false;
-      setAutoSpinToast(null);
+      setSpinning(false);
+      setLocalTickets(remaining);
+      patchSelectedSub({ tickets: remaining });
+      if (result.gb_piggy) applyPiggyFromResult(result.gb_piggy);
+      if (spinId) {
+        void notifyMySubRouletteSpin(initData, spinId).catch(() => undefined);
+      }
+      const keepAuto = autoSpinRef.current;
+      if (!lose) playRouletteWinChime();
+      if (!keepAuto) {
+        setWinModal({
+          prize,
+          lose,
+          winText: lose
+            ? getRouletteLoseMessage()
+            : appliedMessage
+              ? appliedTitle || "+7 дней в подарок"
+              : prizeDto?.win_text ?? getPrizeFullTitle(prize),
+          winSub: lose
+            ? "Билет списан. Попробуйте ещё раз!"
+            : appliedMessage ?? "Приз уже начислен в вашу подписку",
+        });
+      } else if (appliedMessage && prize.type === "traffic_gb") {
+        setAutoSpinToast(`+${prize.value} ГБ в копилку · билетов: ${remaining}`);
+      } else {
+        setAutoSpinToast(`Билетов осталось: ${remaining}`);
+      }
+      onRefreshProfile();
+      if (keepAuto && remaining > 0) {
+        window.setTimeout(() => void spin({ fromAuto: true }), 450);
+      } else if (keepAuto && remaining <= 0) {
+        resetSpinState({ stopAuto: true });
+      }
+    } catch (e) {
+      resetSpinState({ stopAuto: fromAuto });
       setError(formatClientError(e));
     }
-  }, [ticketCount, activePrizes, initData, onRefreshProfile, catalog, applyPiggyFromResult, patchSelectedSub, selectedSub]);
+  }, [
+    ticketCount,
+    activePrizes,
+    initData,
+    onRefreshProfile,
+    catalog,
+    applyPiggyFromResult,
+    patchSelectedSub,
+    selectedSub,
+    startPendingWheelSpin,
+    stopPendingWheelSpin,
+    animateWheelToFinal,
+    resetSpinState,
+  ]);
 
   const requestSpin = useCallback(() => {
     if (autoSpinRef.current) {
@@ -671,10 +809,13 @@ export default function RouletteGame({
         </div>
       ) : null}
 
-      {gameTab === "buy" && buyTicketsPage ? (
-        buyTicketsPage
-      ) : (
-        <>
+      {buyTicketsPage ? (
+        <div className="roulette-game__panel" hidden={gameTab !== "buy"}>
+          {buyTicketsPage}
+        </div>
+      ) : null}
+
+      <div className="roulette-game__panel" hidden={gameTab === "buy"}>
       <section className="mysub-section roulette-game__hero">
         <h1 className="mysub-title">Рулетка подарков 🎁</h1>
         <p className="field-hint roulette-game__subtitle">
@@ -686,7 +827,7 @@ export default function RouletteGame({
               <label className="roulette-game__sub-picker-label">Подписка для игры</label>
               <select
                 value={String(selectedSubId)}
-                disabled={spinning}
+                disabled={spinBusy}
                 onChange={(e) => {
                   const id = Number(e.target.value) || 0;
                   setSelectedSubId(id);
@@ -728,7 +869,7 @@ export default function RouletteGame({
         <div className="roulette-game__wheel-frame">
           <div
             ref={wheelRef}
-            className={`roulette-game__wheel ${spinning ? "roulette-game__wheel--spinning" : ""}`}
+            className={`roulette-game__wheel ${spinRequesting ? "roulette-game__wheel--pending" : ""} ${spinning ? "roulette-game__wheel--spinning" : ""}`}
             style={{
               background: wheelGradient,
               transform: `rotate(${rotation}deg)`,
@@ -790,7 +931,7 @@ export default function RouletteGame({
           <button
             type="button"
             className={`toggle ${autoSpin ? "on" : ""}`}
-            disabled={spinning && !autoSpin}
+            disabled={spinBusy && !autoSpin}
             onClick={() => handleAutoSpinToggle(!autoSpin)}
             aria-pressed={autoSpin}
             aria-label="Автопрокрутка"
@@ -802,7 +943,7 @@ export default function RouletteGame({
         <button
           type="button"
           className="primary roulette-game__spin-btn"
-          disabled={spinning || ticketCount <= 0}
+          disabled={spinBusy || ticketCount <= 0}
           onClick={() => {
             if (autoSpin) {
               handleAutoSpinToggle(false);
@@ -811,9 +952,9 @@ export default function RouletteGame({
             requestSpin();
           }}
         >
-          {spinning ? (
+          {spinBusy ? (
             <>
-              <Spinner /> {autoSpin ? "Автокрутка…" : "Крутим…"}
+              <Spinner /> {autoSpin ? "Автокрутка…" : spinRequesting ? "Запрос…" : "Крутим…"}
             </>
           ) : ticketCount <= 0 ? (
             "Нет билетов"
@@ -878,7 +1019,7 @@ export default function RouletteGame({
               <button
                 type="button"
                 className="primary roulette-piggy__exchange-btn"
-                disabled={!localPiggy.can_exchange || piggyExchanging || spinning}
+                disabled={!localPiggy.can_exchange || piggyExchanging || spinBusy}
                 onClick={() => void exchangePiggy()}
               >
                 {piggyExchanging
@@ -891,8 +1032,7 @@ export default function RouletteGame({
           </section>
         </div>
       ) : null}
-        </>
-      )}
+      </div>
 
       {ticketsHelpOpen ? (
         <div className="modal-backdrop" onClick={() => setTicketsHelpOpen(false)}>

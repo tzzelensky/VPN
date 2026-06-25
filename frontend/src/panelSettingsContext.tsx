@@ -45,7 +45,17 @@ export function PanelSettingsProvider({ enabled, children }: { enabled: boolean;
     }
     try {
       const r = await fetchPanelSettings();
-      setData(r);
+      setData((prev) => {
+        if (
+          prev &&
+          prev.settings.updatedAt === r.settings.updatedAt &&
+          prev.settings.panel.avatarPath === r.settings.panel.avatarPath &&
+          prev.avatarUrl === r.avatarUrl
+        ) {
+          return prev;
+        }
+        return r;
+      });
       applyPanelUiSettings(r.settings);
     } catch {
       setData(null);

@@ -1,0 +1,19 @@
+{
+  "config": {
+    "enabled": false,
+    "selection_mode": "random",
+    "queue_prize_ids": [],
+    "queue_index": 0,
+    "banner_image_url": null,
+    "reset_hour": 11,
+    "reset_minute": 59,
+    "notify_hour": 12,
+    "notify_minute": 0
+  },
+  "prizes": [],
+  "schedules": [],
+  "day_assignments": [],
+  "claims": [],
+  "reminders": [],
+  "events": []
+}

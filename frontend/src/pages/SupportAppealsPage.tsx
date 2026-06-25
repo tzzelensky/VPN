@@ -246,33 +246,22 @@ export default function SupportAppealsPage({ onLogout }: { onLogout: () => void 
           {photoCount(a) > 0 ? <span className="appeals-photo-badge">{photoCount(a)}</span> : null}
         </button>
         {a.status === "new" ? (
-          <>
-            <button type="button" className="primary" disabled={takingId === a.id} onClick={() => void onTake(a.id)}>
-              {takingId === a.id ? "…" : "Взять в работу"}
-            </button>
-            <button
-              type="button"
-              className="ghost appeals-delete-btn"
-              disabled={deletingId === a.id}
-              onClick={() => void onDeleteAppeal(a.id)}
-            >
-              {deletingId === a.id ? "…" : "Удалить"}
-            </button>
-          </>
+          <button type="button" className="primary" disabled={takingId === a.id} onClick={() => void onTake(a.id)}>
+            {takingId === a.id ? "…" : "Взять в работу"}
+          </button>
         ) : a.status === "in_progress" ? (
           <button type="button" className="ghost" onClick={() => openComplete(a)}>
             Завершить
           </button>
-        ) : (
-          <button
-            type="button"
-            className="ghost appeals-delete-btn"
-            disabled={deletingId === a.id}
-            onClick={() => void onDeleteAppeal(a.id)}
-          >
-            {deletingId === a.id ? "…" : "Удалить"}
-          </button>
-        )}
+        ) : null}
+        <button
+          type="button"
+          className="ghost appeals-delete-btn"
+          disabled={deletingId === a.id}
+          onClick={() => void onDeleteAppeal(a.id)}
+        >
+          {deletingId === a.id ? "…" : "Удалить"}
+        </button>
       </div>
     );
   }
@@ -405,8 +394,8 @@ export default function SupportAppealsPage({ onLogout }: { onLogout: () => void 
                         </button>
                       </td>
                       <td className="appeals-td-actions">
-                        {a.status === "new" ? (
-                          <div className="appeals-row-actions appeals-row-actions-inline">
+                        <div className="appeals-row-actions appeals-row-actions-inline">
+                          {a.status === "new" ? (
                             <button
                               type="button"
                               className="primary"
@@ -415,20 +404,11 @@ export default function SupportAppealsPage({ onLogout }: { onLogout: () => void 
                             >
                               {takingId === a.id ? "…" : "Взять в работу"}
                             </button>
-                            <button
-                              type="button"
-                              className="ghost appeals-delete-btn"
-                              disabled={deletingId === a.id}
-                              onClick={() => void onDeleteAppeal(a.id)}
-                            >
-                              {deletingId === a.id ? "…" : "Удалить"}
+                          ) : a.status === "in_progress" ? (
+                            <button type="button" className="ghost" onClick={() => openComplete(a)}>
+                              Завершить
                             </button>
-                          </div>
-                        ) : a.status === "in_progress" ? (
-                          <button type="button" className="ghost" onClick={() => openComplete(a)}>
-                            Завершить
-                          </button>
-                        ) : (
+                          ) : null}
                           <button
                             type="button"
                             className="ghost appeals-delete-btn"
@@ -437,7 +417,7 @@ export default function SupportAppealsPage({ onLogout }: { onLogout: () => void 
                           >
                             {deletingId === a.id ? "…" : "Удалить"}
                           </button>
-                        )}
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -478,16 +458,14 @@ export default function SupportAppealsPage({ onLogout }: { onLogout: () => void 
                   Завершить обращение
                 </button>
               ) : null}
-              {viewAppeal.status !== "in_progress" ? (
-                <button
-                  type="button"
-                  className="ghost appeals-delete-btn"
-                  disabled={deletingId === viewAppeal.id}
-                  onClick={() => void onDeleteAppeal(viewAppeal.id)}
-                >
-                  {deletingId === viewAppeal.id ? "Удаление…" : "Удалить обращение"}
-                </button>
-              ) : null}
+              <button
+                type="button"
+                className="ghost appeals-delete-btn"
+                disabled={deletingId === viewAppeal.id}
+                onClick={() => void onDeleteAppeal(viewAppeal.id)}
+              >
+                {deletingId === viewAppeal.id ? "Удаление…" : "Удалить обращение"}
+              </button>
               <button type="button" className="ghost" onClick={() => setViewAppeal(null)}>
                 Закрыть
               </button>

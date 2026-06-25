@@ -1,0 +1,18 @@
+{
+  "next_proxy_id": 1,
+  "next_check_id": 1,
+  "next_event_id": 1,
+  "proxies": [],
+  "checks": [],
+  "events": [],
+  "settings": {
+    "auto_check_enabled": true,
+    "interval_minutes": 15,
+    "attempts_per_check": 2,
+    "attempt_timeout_sec": 8,
+    "notify_on_unavailable": true,
+    "notify_on_recovery": true,
+    "notify_cooldown_minutes": 30,
+    "last_auto_run_at": "2026-06-22T15:24:41.529Z"
+  }
+}

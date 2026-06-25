@@ -13,7 +13,17 @@ export type PanelSectionKey =
   | "promo_codes"
   | "config_vault"
   | "whitelist_vault"
-  | "dropper_game";
+  | "telegram_proxies"
+  | "dropper_game"
+  | "device_limit"
+  | "daily_gift";
+
+export type PanelSubscriptionBanner = {
+  enabled: boolean;
+  text: string;
+  telegramUrl: string;
+  telegramLinkText: string;
+};
 
 export type PanelSettings = {
   panel: {
@@ -22,6 +32,7 @@ export type PanelSettings = {
     avatarPath: string | null;
     brandName: string;
     telegramFooter: string;
+    subscriptionBanner: PanelSubscriptionBanner;
   };
   ui: {
     theme: PanelTheme;
@@ -29,16 +40,19 @@ export type PanelSettings = {
     compactMode: boolean;
     showHints: boolean;
     timezone: string;
+    webAppNewDesign: boolean;
   };
   sections: Record<PanelSectionKey, boolean>;
   sectionOrder: PanelSectionKey[];
   telegram: {
     adminIds: number[];
+    adminClientsButtonEnabled: boolean;
     notifyNewUsers: boolean;
     notifySurveyResponses: boolean;
     notifyBroadcastErrors: boolean;
     notifyServerErrors: boolean;
     testMode: boolean;
+    login2faEnabled: boolean;
   };
   security: {
     maskSecrets: boolean;

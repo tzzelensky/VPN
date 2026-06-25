@@ -1,4 +1,4 @@
-import { subscriptionUrisFromVault } from "./configVaultDb.js";
+import { subscriptionVaultUrisForUser } from "./configVaultDb.js";
 import { parseProxyUri } from "./configVaultUri.js";
 import { getWhitelistAccessState, subscriptionWhitelistUrisForUser } from "./whitelistVaultDb.js";
 import { getServerSubscriptionSettings, serversForUserSubscription, userHasActiveSubscription, type ServerRow, type UserRow } from "./db.js";
@@ -51,7 +51,7 @@ export function subscriptionVlessLinksForUser(user: UserRow): string[] {
   );
 
   const extras = (user.extra_vless_links ?? []).map((x) => x.uri.trim()).filter(Boolean);
-  const vault = subscriptionUrisFromVault();
+  const vault = subscriptionVaultUrisForUser(user);
   const whitelist = subscriptionWhitelistUrisForUser(user);
   appendUniqueSubscriptionUris(out, seen, [...extras, ...vault, ...whitelist]);
 

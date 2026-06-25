@@ -1,5 +1,9 @@
 import type { Response } from "express";
 import type { UserRow } from "./db.js";
+import type { DeviceLimitPressure } from "./deviceLimitHappPush.js";
+import { isDeviceLimitActiveForUser } from "./deviceLimitEffective.js";
+import { allowedDeviceSlots, reconcileUserDeviceSlots, userDeviceTotalLimit } from "./userDeviceSlots.js";
+import { subscriptionBannerAnnounceHeader, getSubscriptionBannerSettings } from "./subscriptionBannerHapp.js";
 
 type UnlimitedTotalMode = "zero" | "omit" | "maxsafe";
 const unlimitedMode = (
@@ -48,7 +52,11 @@ function profileTitleWithTrafficAndExpiry(user: UserRow): string {
   return joined.length <= 200 ? joined : joined.slice(0, 200);
 }
 
-export function setSubscriptionUserHeaders(res: Response, user: UserRow): void {
+export function setSubscriptionUserHeaders(
+  res: Response,
+  user: UserRow,
+  opts?: { deviceLimitPressure?: DeviceLimitPressure | null },
+): void {
   const rawUp = Math.max(0, Math.trunc(Number(user.traffic_up) || 0));
   const rawDown = Math.max(0, Math.trunc(Number(user.traffic_down) || 0));
   const key = String(user.sub_token ?? "").trim() || String(user.id);
@@ -77,17 +85,57 @@ export function setSubscriptionUserHeaders(res: Response, user: UserRow): void {
   res.setHeader("subscription-userinfo", plain);
 
   const rawTitle = profileTitleWithTrafficAndExpiry(user);
-  const nonAscii = [...rawTitle].some((c) => c.charCodeAt(0) > 127);
+  const pressure = opts?.deviceLimitPressure;
+  let titleWithLimit = rawTitle;
+  if (isDeviceLimitActiveForUser(user)) {
+    const slots = reconcileUserDeviceSlots(user);
+    const used = allowedDeviceSlots(slots).length;
+    const limit = userDeviceTotalLimit(user);
+    titleWithLimit = `${rawTitle} · ${used}/${limit} устр.`;
+  }
+  if (pressure?.active) {
+    titleWithLimit = `${rawTitle}${pressure.profileSuffix}`;
+  }
+  const nonAscii = [...titleWithLimit].some((c) => c.charCodeAt(0) > 127);
   if (nonAscii) {
-    res.setHeader("profile-title", `base64:${Buffer.from(rawTitle, "utf8").toString("base64")}`);
+    res.setHeader("profile-title", `base64:${Buffer.from(titleWithLimit, "utf8").toString("base64")}`);
   } else {
-    res.setHeader("profile-title", rawTitle);
+    res.setHeader("profile-title", titleWithLimit);
   }
 
-  res.setHeader("profile-update-interval", "1");
+  res.setHeader("profile-update-interval", pressure?.active ? "1" : "1");
 
-  res.setHeader(
-    "Access-Control-Expose-Headers",
-    "subscription-userinfo, profile-title, profile-update-interval",
-  );
+  const deviceLimitActive = isDeviceLimitActiveForUser(user);
+  const bannerActive = getSubscriptionBannerSettings()?.enabled === true;
+  if (deviceLimitActive || bannerActive) {
+    // Happ: автообновлять подписку при открытии приложения.
+    res.setHeader("subscription-auto-update-open-enable", "1");
+    // Чтобы клиент не зависел только от manual refresh, включаем обновления и по обычному расписанию.
+    res.setHeader("subscription-auto-update-enable", "1");
+  }
+
+  if (pressure?.active) {
+    res.setHeader("announce", `base64:${Buffer.from(pressure.message, "utf8").toString("base64")}`);
+    res.setHeader("sub-info-color", "red");
+    // NOTE: Node.js rejects non-latin1 chars in HTTP header values.
+    // Pressure texts are UTF-8 (ru), so we pass them through Happ directives/announce only.
+    // Keeping these headers unset prevents intermittent 500 on /sub/*:
+    // "Invalid character in header content".
+  } else {
+    const bannerAnnounce = subscriptionBannerAnnounceHeader();
+    if (bannerAnnounce) {
+      res.setHeader("announce", bannerAnnounce);
+    }
+  }
+
+  const exposed = [
+    "subscription-userinfo",
+    "profile-title",
+    "profile-update-interval",
+    "subscription-auto-update-enable",
+    "subscription-auto-update-open-enable",
+    "announce",
+    "sub-info-color",
+  ];
+  res.setHeader("Access-Control-Expose-Headers", exposed.join(", "));
 }

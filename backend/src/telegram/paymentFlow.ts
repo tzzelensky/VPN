@@ -5,6 +5,7 @@ import {
   consumeReferralInviteByTgUser,
   createReferralReward,
   createUser,
+  activateDeviceSlotPurchaseForUser,
   appendShopActivity,
   addUserToTestSubscriptionSegment,
   clearTestSubscriptionFlags,
@@ -43,6 +44,19 @@ import { notifyDropperTicketsAfterPurchase } from "./dropperTickets.js";
 import { escHtml, formatDaysRu, subscriptionPublicName } from "./format.js";
 import { backHomeRow, mainMenuInline, newUserKeyboard, publicSubscriptionUrl } from "./keyboards.js";
 import { getTelegramPaymentNotifyChatIds, getTelegramPaymentUrl } from "./env.js";
+import {
+  createDeviceSlotPurchaseRecord,
+  getDeviceLimitSettings,
+  updateDeviceSlotPurchase,
+  findDeviceSlotPurchaseByPaymentId,
+} from "../deviceLimitStore.js";
+import { activeDeviceSlots, userDeviceTotalLimit } from "../userDeviceSlots.js";
+import {
+  checkDeviceSlotPurchaseAllowed,
+  deviceLimitCalcSettingsForUser,
+  tgUserCanBuyDeviceSlot,
+} from "../deviceLimitEffective.js";
+
 import {
   activateWhitelistPurchaseAfterPayment,
   checkWhitelistPurchaseAllowed,
@@ -356,6 +370,7 @@ function replyKeyboardForPayer(tgUserId: number) {
       isSupportAppealsEnabled(),
       tgUserCanBuyGb(tgUserId),
       isWhitelistPurchaseVisible() && linked.some((u) => userHasActiveSubscription(u)),
+      tgUserCanBuyDeviceSlot(tgUserId),
     );
   }
   return newUserKeyboard(getSubscriptionShop().sales_disabled, isTestSubscriptionEligible(tgUserId));
@@ -803,6 +818,55 @@ export async function onWhitelistPurchaseStart(
   await sendTelegramHtml(chatId, body, backHomeRow);
 }
 
+export async function onDeviceSlotPurchaseStart(
+  chatId: number,
+  tgUserId: number,
+  targetUserId: number,
+  from?: TgFromLite,
+): Promise<void> {
+  const target = getUser(targetUserId);
+  if (!target || String(target.tg_id ?? "").trim() !== String(tgUserId).trim()) {
+    await sendTelegramHtml(chatId, "Подписка не найдена.", backHomeRow);
+    return;
+  }
+  const check = checkDeviceSlotPurchaseAllowed(target);
+  if (!check.ok) {
+    await sendTelegramHtml(chatId, check.message, backHomeRow);
+    return;
+  }
+  const dl = getDeviceLimitSettings();
+  const price = dl.purchase_price_rub;
+  const payUrl = effectivePaymentUrl();
+  const sessionId = startPaymentAwaitingProof(chatId, tgUserId, 1, "device_slot", target.id, undefined, {
+    username: from?.username,
+    first_name: from?.first_name,
+  });
+  createDeviceSlotPurchaseRecord({
+    user_id: target.id,
+    subscription_id: target.id,
+    payment_id: sessionId,
+    slots_count: 1,
+    price_per_slot: price,
+    amount_total: price,
+    status: "pending",
+    expires_at: target.expiry_time > 0 ? target.expiry_time : 0,
+    admin_comment: "",
+  });
+  const linkEsc = escHtml(payUrl);
+  const calc = deviceLimitCalcSettingsForUser(target);
+  const active = activeDeviceSlots(target.device_slots ?? []).length;
+  const limit = userDeviceTotalLimit(target, calc);
+  const body =
+    `<b>Дополнительное место для устройства</b>\n\n` +
+    `<b>Подписка:</b> ${escHtml(userTargetTitle(target))}\n` +
+    `<b>Сейчас:</b> ${active}/${limit} устройств\n` +
+    `<b>Сумма к оплате:</b> ${price} ₽\n\n` +
+    `<b>Ссылка для оплаты:</b>\n<a href="${linkEsc}">${linkEsc}</a>\n\n` +
+    `В комментарии к переводу укажите: <code>device_slot</code>\n\n` +
+    `После оплаты пришлите в этот чат <b>скриншот или фото подтверждения перевода</b>.`;
+  await sendTelegramHtml(chatId, body, backHomeRow);
+}
+
 export async function sendWhitelistInstructionMenu(chatId: number): Promise<void> {
   await sendWhitelistInstructionToChat(chatId);
 }
@@ -929,6 +993,47 @@ export async function onAdminPaymentConfirm(
   const isTopUp = sess.kind === "topup";
   const isTest = sess.kind === "test";
   const isWhiteLists = sess.kind === "white_lists";
+  const isDeviceSlot = sess.kind === "device_slot";
+  if (isDeviceSlot) {
+    const target = sess.target_user_id ? getUser(sess.target_user_id) : undefined;
+    if (!target) {
+      await answerCallbackQuery(callbackQueryId, { text: "Подписка не найдена.", show_alert: true });
+      deletePaymentSession(sessionId);
+      return;
+    }
+    const settings = getDeviceLimitSettings();
+    const price = settings.purchase_price_rub;
+    const purchase = findDeviceSlotPurchaseByPaymentId(sessionId);
+    activateDeviceSlotPurchaseForUser(target.id, purchase?.slots_count ?? 1, sessionId);
+    if (purchase) {
+      updateDeviceSlotPurchase(purchase.id, {
+        status: "paid",
+        activated_at: new Date().toISOString(),
+      });
+    }
+    const fresh = getUser(target.id) ?? target;
+    const used = activeDeviceSlots(fresh.device_slots ?? []).length;
+    const limit = userDeviceTotalLimit(fresh, deviceLimitCalcSettingsForUser(fresh));
+    appendShopActivity({
+      kind: "device_slot",
+      user_id: fresh.id,
+      user_name: fresh.name,
+      plan_id: 1,
+      plan_title: "Доп. место для устройства",
+    });
+    await answerCallbackQuery(callbackQueryId, { text: "Место для устройства добавлено." });
+    deletePaymentSession(sessionId);
+    await finalizeAdminPaymentReceipt(adminMessage, "confirmed");
+    await sendTelegramHtml(
+      sess.tg_chat_id,
+      `<b>✅ Дополнительное устройство подключено</b>\n\n` +
+        `Вы купили ещё 1 место для подписки «${escHtml(subscriptionPublicName(fresh))}».\n\n` +
+        `Теперь доступно устройств: <b>${used}/${limit}</b>.\n\n` +
+        `Чтобы подключить новое устройство, откройте приложение и скопируйте ссылку VPN для нового устройства.`,
+      backHomeRow,
+    );
+    return;
+  }
   if (isWhiteLists) {
     const target = sess.target_user_id ? getUser(sess.target_user_id) : undefined;
     if (!target) {

@@ -472,6 +472,45 @@ export function buildProxyUrisFromClientJson(
   return { uris };
 }
 
+export type ConfigVaultJsonImportItem = { uri: string; name: string; active?: boolean };
+
+/** Импорт: JSON-конфиг Xray/Happ или экспорт хранилища `{ keys: [{ name, uri }] }`. */
+export function parseConfigVaultJsonImport(
+  jsonText: string,
+): { items: ConfigVaultJsonImportItem[] } | { error: string } {
+  let root: unknown;
+  try {
+    root = JSON.parse(jsonText);
+  } catch {
+    return { error: "Некорректный JSON" };
+  }
+  const obj = asRecord(root);
+  if (!obj) return { error: "Ожидается JSON-объект" };
+
+  if (Array.isArray(obj.keys)) {
+    const items: ConfigVaultJsonImportItem[] = [];
+    for (const row of obj.keys) {
+      const k = asRecord(row);
+      if (!k) continue;
+      const uri = String(k.uri ?? k.raw_uri ?? "").trim();
+      if (!uri) continue;
+      if (!isValidConfigVaultUri(uri)) continue;
+      const name = String(k.name ?? "").trim() || defaultNameFromUri(uri, "Ключ");
+      items.push({
+        uri,
+        name: name.slice(0, 120),
+        active: !(k.active === false || k.active === 0 || k.active === "0"),
+      });
+    }
+    if (items.length > 0) return { items };
+    return { error: "В keys нет корректных ссылок (vless://, trojan://, hysteria2://)" };
+  }
+
+  const built = buildProxyUrisFromClientJson(jsonText);
+  if ("error" in built) return built;
+  return { items: built.uris.map((u) => ({ uri: u.uri, name: u.name })) };
+}
+
 /** Сборка vless:// из JSON-конфига Xray (первый vless/hysteria outbound). */
 export function buildVlessUriFromXrayJson(jsonText: string): { uri: string; name: string } | { error: string } {
   const built = buildProxyUrisFromClientJson(jsonText);

@@ -1,5 +1,7 @@
 export type VlessCheckStatus = "available" | "unavailable" | "unstable" | "never" | "checking";
 
+export type ConfigVaultSubscriptionMode = "all" | "selected";
+
 export type VlessKeyRow = {
   id: number;
   name: string;
@@ -7,6 +9,9 @@ export type VlessKeyRow = {
   masked_uri: string;
   active: boolean;
   added_to_subscriptions: boolean;
+  /** Кому отдавать ключ в подписке, если added_to_subscriptions. */
+  subscription_mode: ConfigVaultSubscriptionMode;
+  subscription_user_ids: number[];
   last_check_at: string | null;
   last_check_status: VlessCheckStatus;
   last_check_latency_ms: number | null;

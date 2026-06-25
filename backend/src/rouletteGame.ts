@@ -204,7 +204,10 @@ export function applyRoulettePrize(
         return { status: "success", applied_title: "Без приза" };
       case "promo_discount": {
         const percent = Math.min(100, Math.max(1, Math.floor(Number(prize.value) || 20)));
-        grantRoulettePurchaseDiscount(tgUserId, percent, spinId);
+        grantRoulettePurchaseDiscount(tgUserId, percent, spinId, {
+          source: "roulette",
+          source_label: prize.title.trim() || `Рулетка ${percent}%`,
+        });
         return {
           status: "success",
           applied_title: `Скидка ${percent}% на покупку`,

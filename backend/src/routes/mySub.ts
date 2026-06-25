@@ -26,6 +26,7 @@ import {
   exchangeRouletteGbPiggyForTicket,
   getRouletteGbPiggy,
   getRoulettePurchaseDiscount,
+  countRoulettePurchaseDiscounts,
   listRouletteSpinsForTgUser,
   listRouletteTicketPurchasesForTgUser,
   ROULETTE_GB_PIGGY_EXCHANGE_THRESHOLD,
@@ -33,6 +34,10 @@ import {
   updateUserRow,
   userAllowedOnServers,
   userHasActiveSubscription,
+  addUserDeviceSlot,
+  removeUserDeviceSlot,
+  renameUserDeviceSlot,
+  refreshUserDeviceSlotsReconcile,
   type UserRow,
 } from "../db.js";
 import { formatStatsHtml, fmtBytes, subscriptionPublicName } from "../telegram/format.js";
@@ -57,6 +62,18 @@ import {
   logWhitelistPurchaseOpened,
 } from "../whitelistPurchaseService.js";
 import { getWhitelistVaultSettings } from "../whitelistVaultDb.js";
+import { primarySubscriptionUrl, publicSubUrl } from "../subscriptionUrl.js";
+import { createDeviceSlotPurchaseRecord, getDeviceLimitSettings } from "../deviceLimitStore.js";
+import { isDeviceLimitActiveForUser } from "../deviceLimitEffective.js";
+import { deviceLimitSettingsForWebApp, subscriptionDeviceInfoForWebApp } from "../deviceLimitWebApp.js";
+import { refreshPlaceholderDeviceSlots } from "../deviceLimitMigration.js";
+import { refreshPanelSettingsCache } from "../panelSettings.js";
+import {
+  buildDailyGiftWebAppState,
+  claimDailyGift,
+  logDailyGiftBlockSeen,
+  setDailyGiftReminder,
+} from "../dailyGiftService.js";
 
 const router = Router();
 
@@ -142,11 +159,6 @@ function subscriptionProfileStats(u: UserRow) {
           })
         : null,
   };
-}
-
-function publicSubUrl(subToken: string): string {
-  const base = (process.env.PUBLIC_API_URL ?? "http://localhost:4000").replace(/\/$/, "");
-  return `${base}/sub/${encodeURIComponent(subToken)}`;
 }
 
 function parseTgId(raw: string): number | null {
@@ -253,7 +265,7 @@ router.post("/webapp/profile", async (req, res) => {
     res.status(401).json({ error: "tg_webapp_auth_required", reason: "bad_user_id" });
     return;
   }
-  const linked = findUsersByTelegramChatId(tgId);
+  let linked = findUsersByTelegramChatId(tgId);
   const chat = await resolveChatProfile(tgId);
   const displayName =
     `${String(ver.user.first_name ?? "").trim()} ${String(ver.user.last_name ?? "").trim()}`.trim() ||
@@ -268,29 +280,35 @@ router.post("/webapp/profile", async (req, res) => {
       avatarDataUrl = `data:${photo.mime};base64,${photo.bytes.toString("base64")}`;
     }
   }
-  const subscriptions = linked.map((u) => ({
-    id: u.id,
-    name: u.name,
-    subscription_url: publicSubUrl(u.sub_token),
-    enable: u.enable === 1,
-    allowed: userAllowedOnServers(u),
-    total_gb: u.total_gb,
-    traffic_up: u.traffic_up,
-    traffic_down: u.traffic_down,
-    used_text: fmtBytes(u.traffic_up + u.traffic_down),
-    total_text: u.total_gb > 0 ? fmtBytes(u.total_gb * 1073741824) : "∞",
-    expiry_time: u.expiry_time,
-    stats: subscriptionProfileStats(u),
-    tickets: u.dropper_tickets,
+  const subscriptions = linked.map((u) => {
+    const reconciled = refreshUserDeviceSlotsReconcile(u.id) ?? u;
+    const fresh = refreshPlaceholderDeviceSlots(reconciled.id) ?? reconciled;
+    return {
+    id: fresh.id,
+    name: fresh.name,
+    subscription_url: primarySubscriptionUrl(fresh),
+    enable: fresh.enable === 1,
+    allowed: userAllowedOnServers(fresh),
+    total_gb: fresh.total_gb,
+    traffic_up: fresh.traffic_up,
+    traffic_down: fresh.traffic_down,
+    used_text: fmtBytes(fresh.traffic_up + fresh.traffic_down),
+    total_text: fresh.total_gb > 0 ? fmtBytes(fresh.total_gb * 1073741824) : "∞",
+    expiry_time: fresh.expiry_time,
+    stats: subscriptionProfileStats(fresh),
+    tickets: fresh.dropper_tickets,
+    devices: subscriptionDeviceInfoForWebApp(fresh),
+    daily_gift: buildDailyGiftWebAppState(tgId, fresh.id),
     gb_piggy:
-      u.total_gb <= 0
+      fresh.total_gb <= 0
         ? {
-            accumulated_gb: getRouletteGbPiggy(u.id),
+            accumulated_gb: getRouletteGbPiggy(fresh.id),
             exchange_threshold: ROULETTE_GB_PIGGY_EXCHANGE_THRESHOLD,
-            can_exchange: getRouletteGbPiggy(u.id) >= ROULETTE_GB_PIGGY_EXCHANGE_THRESHOLD,
+            can_exchange: getRouletteGbPiggy(fresh.id) >= ROULETTE_GB_PIGGY_EXCHANGE_THRESHOLD,
           }
         : null,
-  }));
+  };
+  });
   const referralCfg = getReferralProgram();
   const inviterIds = linked.map((u) => u.id);
   const rewardRows = listReferralRewardsForInviterUsers(inviterIds).sort((a, b) => {
@@ -322,6 +340,7 @@ router.post("/webapp/profile", async (req, res) => {
     avatar_url: avatarDataUrl,
     stats_html: linked.length > 0 ? formatStatsHtml(linked) : "Подписок пока нет.",
     subscriptions,
+    device_limit: deviceLimitSettingsForWebApp(),
     payment_url: shop.payment_url.trim() || getTelegramPaymentUrl(),
     plans: shop.plans,
     topup_plans: shop.topup_plans,
@@ -336,7 +355,11 @@ router.post("/webapp/profile", async (req, res) => {
     sales_disabled_for_new: linked.length === 0 && shop.sales_disabled,
     roulette_purchase_discount: (() => {
       const d = getRoulettePurchaseDiscount(tgId);
-      return d ? { discount_percent: d.discount_percent } : null;
+      if (!d) return null;
+      return {
+        discount_percent: d.discount_percent,
+        queue_count: countRoulettePurchaseDiscounts(tgId),
+      };
     })(),
     active_game: activeGame,
     game_tab_visible: activeGame !== "none",
@@ -382,6 +405,9 @@ router.post("/webapp/profile", async (req, res) => {
       enabled: referralCfg.enabled,
       invite_copy_text: referralCfg.invite_copy_text,
       invite_link: inviteLink,
+      inviter_reward_gb: referralCfg.inviter_reward_gb,
+      inviter_reward_days: referralCfg.inviter_reward_days,
+      invited_discount_percent: referralCfg.invited_discount_percent,
       invited_friends: rewardRows.map((r) => ({
         reward_id: r.id,
         name: String(r.invitee_name || "Пользователь"),
@@ -399,7 +425,100 @@ router.post("/webapp/profile", async (req, res) => {
         photo_url: whitelist_instruction_photo_url,
       },
     },
+    web_app_new_design: refreshPanelSettingsCache().ui.webAppNewDesign === true,
+    daily_gift: buildDailyGiftWebAppState(
+      tgId,
+      subscriptions.find((s) => s.stats.subscription_active)?.id ?? subscriptions[0]?.id,
+    ),
   });
+});
+
+router.post("/webapp/daily-gift/claim", async (req, res) => {
+  const body = (req.body ?? {}) as { init_data?: unknown; user_id?: unknown };
+  const initData = String(body.init_data ?? "").trim();
+  const ver = verifyTelegramWebAppInitData(initData);
+  if (!ver.ok) {
+    res.status(401).json({ error: "tg_webapp_auth_required", reason: ver.reason });
+    return;
+  }
+  const tgId = parseTgId(String(ver.user.id ?? ""));
+  if (!tgId) {
+    res.status(400).json({ error: "bad_payload" });
+    return;
+  }
+  const userIdRaw = body.user_id != null ? Math.floor(Number(body.user_id)) : 0;
+  const userId = userIdRaw > 0 ? userIdRaw : undefined;
+  if (userId) {
+    const linked = findUsersByTelegramChatId(tgId);
+    if (!linked.some((u) => u.id === userId)) {
+      res.status(403).json({ error: "forbidden" });
+      return;
+    }
+  }
+  const result = await claimDailyGift(tgId, userId, {
+    tgUsername: String(ver.user.username ?? "").trim() || null,
+  });
+  const stateUserId = result.user_id ?? userId;
+  if (!result.ok) {
+    const status =
+      result.error === "disabled" || result.error === "no_prize"
+        ? 404
+        : result.error === "no_subscription" || result.error === "forbidden"
+          ? 403
+        : result.error === "subscription_required"
+          ? 400
+        : result.error === "prize_limit_reached" || result.error === "already_claimed"
+          ? 409
+          : 400;
+    res.status(status).json({
+      error: result.error,
+      gift: result.gift ?? null,
+      user_id: stateUserId ?? null,
+      daily_gift: stateUserId ? buildDailyGiftWebAppState(tgId, stateUserId) : buildDailyGiftWebAppState(tgId),
+    });
+    return;
+  }
+  res.json({
+    ok: true,
+    gift: result.gift,
+    user_id: result.user_id,
+    daily_gift: buildDailyGiftWebAppState(tgId, result.user_id),
+  });
+});
+
+router.post("/webapp/daily-gift/reminder", (req, res) => {
+  const body = (req.body ?? {}) as { init_data?: unknown; enabled?: unknown };
+  const initData = String(body.init_data ?? "").trim();
+  const ver = verifyTelegramWebAppInitData(initData);
+  if (!ver.ok) {
+    res.status(401).json({ error: "tg_webapp_auth_required", reason: ver.reason });
+    return;
+  }
+  const tgId = parseTgId(String(ver.user.id ?? ""));
+  if (!tgId) {
+    res.status(400).json({ error: "bad_payload" });
+    return;
+  }
+  const enabled = body.enabled !== false;
+  setDailyGiftReminder(tgId, enabled);
+  res.json({ ok: true, reminder_enabled: enabled, daily_gift: buildDailyGiftWebAppState(tgId) });
+});
+
+router.post("/webapp/daily-gift/seen", (req, res) => {
+  const body = (req.body ?? {}) as { init_data?: unknown };
+  const initData = String(body.init_data ?? "").trim();
+  const ver = verifyTelegramWebAppInitData(initData);
+  if (!ver.ok) {
+    res.status(401).json({ error: "tg_webapp_auth_required", reason: ver.reason });
+    return;
+  }
+  const tgId = parseTgId(String(ver.user.id ?? ""));
+  if (!tgId) {
+    res.status(400).json({ error: "bad_payload" });
+    return;
+  }
+  logDailyGiftBlockSeen(tgId);
+  res.json({ ok: true });
 });
 
 router.post("/webapp/referral-reward", async (req, res) => {
@@ -620,12 +739,19 @@ router.post("/webapp/payment-proof", async (req, res) => {
         ? "test"
         : payKindRaw === "white_lists"
           ? "white_lists"
-          : "subscription";
+          : payKindRaw === "device_slot"
+            ? "device_slot"
+            : "subscription";
   if (!tgId) {
     res.status(400).json({ error: "bad_payload" });
     return;
   }
-  if (payKind !== "test" && payKind !== "white_lists" && (!Number.isFinite(planId) || ![1, 2, 3].includes(planId))) {
+  if (
+    payKind !== "test" &&
+    payKind !== "white_lists" &&
+    payKind !== "device_slot" &&
+    (!Number.isFinite(planId) || ![1, 2, 3].includes(planId))
+  ) {
     res.status(400).json({ error: "bad_payload" });
     return;
   }
@@ -690,6 +816,84 @@ router.post("/webapp/payment-proof", async (req, res) => {
       },
     );
     createPendingWhitelistPurchase({ user: wlUser, payment_id: sessionId, amount: price });
+    markPaymentSessionPendingAdmin(sessionId, "webapp");
+    let sent = 0;
+    const admins = getTelegramPaymentNotifyChatIds();
+    for (const chatId of admins) {
+      try {
+        await sendTelegramPhotoBinary(chatId, parsed.bytes, {
+          caption,
+          filename: String(body.photo_name ?? "proof.jpg").trim() || "proof.jpg",
+          mimeType: String(body.photo_mime ?? parsed.mime) || parsed.mime,
+          parse_mode: "HTML",
+          reply_markup: adminDecisionKeyboard(sessionId),
+        });
+        sent++;
+      } catch {
+        // skip
+      }
+    }
+    if (sent === 0) {
+      res.status(502).json({ error: "send_failed" });
+      return;
+    }
+    res.json({ ok: true });
+    return;
+  }
+
+  if (payKind === "device_slot") {
+    if (promoCode) {
+      res.status(400).json({ error: "promo_not_allowed_for_device_slot", message: "Промокоды не применяются к покупке устройств." });
+      return;
+    }
+    const dlSettings = getDeviceLimitSettings();
+    if (!dlSettings.purchase_enabled) {
+      res.status(403).json({ error: "device_purchase_disabled" });
+      return;
+    }
+    const subUser = target ?? findActiveSubscriptionForTg(tgId, linked);
+    if (!subUser) {
+      res.status(403).json({ error: "no_active_subscription" });
+      return;
+    }
+    if (!isDeviceLimitActiveForUser(subUser)) {
+      res.status(403).json({ error: "device_limit_not_enabled" });
+      return;
+    }
+    const extra = Math.max(0, Math.floor(Number(subUser.device_extra_slots) || 0));
+    if (extra >= dlSettings.purchase_max_extra) {
+      res.status(403).json({ error: "device_purchase_max_reached" });
+      return;
+    }
+    const price = dlSettings.purchase_price_rub;
+    const caption =
+      `<b>Оплата из WebApp (доп. устройство)</b>\n` +
+      `Пользователь: <b>${String(ver.user.first_name ?? "").trim() || subUser.name || "Пользователь"}</b> (chat <code>${tgId}</code>)\n` +
+      `Подписка: <b>${escHtml(subscriptionPublicName(subUser))}</b>\n` +
+      `Сумма: <b>${price} ₽</b>`;
+    const sessionId = startPaymentAwaitingProof(
+      tgId,
+      tgId,
+      1,
+      "device_slot",
+      subUser.id,
+      undefined,
+      {
+        username: String(ver.user.username ?? "").trim() || undefined,
+        first_name: String(ver.user.first_name ?? "").trim() || undefined,
+      },
+    );
+    createDeviceSlotPurchaseRecord({
+      user_id: subUser.id,
+      subscription_id: subUser.id,
+      payment_id: sessionId,
+      slots_count: 1,
+      price_per_slot: price,
+      amount_total: price,
+      status: "pending",
+      expires_at: subUser.expiry_time > 0 ? subUser.expiry_time : 0,
+      admin_comment: "",
+    });
     markPaymentSessionPendingAdmin(sessionId, "webapp");
     let sent = 0;
     const admins = getTelegramPaymentNotifyChatIds();
@@ -1262,6 +1466,101 @@ router.post("/webapp/roulette/buy-tickets", async (req, res) => {
     remaining_days: result.remaining_days,
     remaining_gb: result.remaining_gb,
   });
+});
+
+router.post("/webapp/devices/add", async (req, res) => {
+  const initData = String((req.body as { init_data?: unknown })?.init_data ?? "").trim();
+  const ver = verifyTelegramWebAppInitData(initData);
+  if (!ver.ok) {
+    res.status(401).json({ error: "tg_webapp_auth_required" });
+    return;
+  }
+  const tgId = parseTgId(String(ver.user.id ?? ""));
+  if (!tgId) {
+    res.status(401).json({ error: "tg_webapp_auth_required" });
+    return;
+  }
+  const userId = Math.floor(Number((req.body as { user_id?: unknown })?.user_id) || 0);
+  const linked = findUsersByTelegramChatId(tgId);
+  const u = linked.find((x) => x.id === userId);
+  if (!u) {
+    res.status(403).json({ error: "forbidden" });
+    return;
+  }
+  const label = String((req.body as { label?: unknown })?.label ?? "").trim();
+  const dlSettings = getDeviceLimitSettings();
+  if (!isDeviceLimitActiveForUser(u)) {
+    res.status(400).json({ error: "device_limit_disabled" });
+    return;
+  }
+  const result = addUserDeviceSlot(u.id, label || undefined);
+  if (result.error) {
+    res.status(400).json({ error: result.error });
+    return;
+  }
+  res.json({
+    device: {
+      id: result.slot!.id,
+      device_name: result.slot!.device_name,
+      subscription_url: publicSubUrl(result.user!.sub_token, result.slot!.id),
+    },
+    devices: subscriptionDeviceInfoForWebApp(result.user!),
+  });
+});
+
+router.patch("/webapp/devices/rename", async (req, res) => {
+  const initData = String((req.body as { init_data?: unknown })?.init_data ?? "").trim();
+  const ver = verifyTelegramWebAppInitData(initData);
+  if (!ver.ok) {
+    res.status(401).json({ error: "tg_webapp_auth_required" });
+    return;
+  }
+  const tgId = parseTgId(String(ver.user.id ?? ""));
+  if (!tgId) {
+    res.status(401).json({ error: "tg_webapp_auth_required" });
+    return;
+  }
+  const userId = Math.floor(Number((req.body as { user_id?: unknown })?.user_id) || 0);
+  const deviceId = String((req.body as { device_id?: unknown })?.device_id ?? "").trim();
+  const name = String((req.body as { name?: unknown })?.name ?? "").trim();
+  const linked = findUsersByTelegramChatId(tgId);
+  if (!linked.some((x) => x.id === userId)) {
+    res.status(403).json({ error: "forbidden" });
+    return;
+  }
+  const next = renameUserDeviceSlot(userId, deviceId, name);
+  if (!next) {
+    res.status(404).json({ error: "not_found" });
+    return;
+  }
+  res.json({ devices: subscriptionDeviceInfoForWebApp(next) });
+});
+
+router.delete("/webapp/devices/remove", async (req, res) => {
+  const initData = String((req.body as { init_data?: unknown })?.init_data ?? "").trim();
+  const ver = verifyTelegramWebAppInitData(initData);
+  if (!ver.ok) {
+    res.status(401).json({ error: "tg_webapp_auth_required" });
+    return;
+  }
+  const tgId = parseTgId(String(ver.user.id ?? ""));
+  if (!tgId) {
+    res.status(401).json({ error: "tg_webapp_auth_required" });
+    return;
+  }
+  const userId = Math.floor(Number((req.body as { user_id?: unknown })?.user_id) || 0);
+  const deviceId = String((req.body as { device_id?: unknown })?.device_id ?? "").trim();
+  const linked = findUsersByTelegramChatId(tgId);
+  if (!linked.some((x) => x.id === userId)) {
+    res.status(403).json({ error: "forbidden" });
+    return;
+  }
+  const next = removeUserDeviceSlot(userId, deviceId);
+  if (!next) {
+    res.status(404).json({ error: "not_found" });
+    return;
+  }
+  res.json({ devices: subscriptionDeviceInfoForWebApp(next) });
 });
 
 export default router;

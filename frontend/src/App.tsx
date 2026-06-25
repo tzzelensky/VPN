@@ -1,7 +1,10 @@
 import { Navigate, Route, Routes } from "react-router-dom";
 import { useEffect, useState, type ReactNode } from "react";
 import { authMe } from "./api";
+import GlobalAmbientBackdrop from "./components/GlobalAmbientBackdrop";
 import { PanelSettingsProvider } from "./panelSettingsContext";
+import { prefetchUsersInBackground } from "./usersPrefetch";
+import { clearUsersListCache } from "./usersListCache";
 import SectionGuard from "./components/SectionGuard";
 import HomeRedirect from "./components/HomeRedirect";
 import LoginPage from "./pages/LoginPage";
@@ -14,9 +17,12 @@ import PromoCodesPage from "./pages/PromoCodesPage";
 import ConfigVaultPage from "./pages/ConfigVaultPage";
 import WhitelistVaultPage from "./pages/WhitelistVaultPage";
 import DropperGamePage from "./pages/DropperGamePage";
+import ProxiesPage from "./pages/ProxiesPage";
 import SupportAppealsPage from "./pages/SupportAppealsPage";
 import LogsPage from "./pages/LogsPage";
 import ExperimentsPage from "./pages/ExperimentsPage";
+import DeviceLimitPage from "./pages/DeviceLimitPage";
+import DailyGiftPage from "./pages/DailyGiftPage";
 import MySubPage from "./pages/MySubPage";
 
 function useSession() {
@@ -39,6 +45,14 @@ function useSession() {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    if (!loggedIn) {
+      clearUsersListCache();
+      return;
+    }
+    void prefetchUsersInBackground();
+  }, [loggedIn]);
 
   return { ready, loggedIn, setLoggedIn };
 }
@@ -84,6 +98,7 @@ export default function App() {
 
   return (
     <PanelSettingsProvider enabled={loggedIn}>
+      <GlobalAmbientBackdrop />
       <Routes>
         <Route path="/login" element={<LoginPage onSuccess={() => setLoggedIn(true)} />} />
         <Route
@@ -175,10 +190,34 @@ export default function App() {
           }
         />
         <Route
+          path="/telegram-proxies"
+          element={
+            <AuthRoute loggedIn={loggedIn} path="/telegram-proxies">
+              <ProxiesPage onLogout={logout} />
+            </AuthRoute>
+          }
+        />
+        <Route
           path="/dropper-game"
           element={
             <AuthRoute loggedIn={loggedIn} path="/dropper-game">
               <DropperGamePage onLogout={logout} />
+            </AuthRoute>
+          }
+        />
+        <Route
+          path="/device-limit"
+          element={
+            <AuthRoute loggedIn={loggedIn} path="/device-limit">
+              <DeviceLimitPage onLogout={logout} />
+            </AuthRoute>
+          }
+        />
+        <Route
+          path="/daily-gift"
+          element={
+            <AuthRoute loggedIn={loggedIn} path="/daily-gift">
+              <DailyGiftPage onLogout={logout} />
             </AuthRoute>
           }
         />

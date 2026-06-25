@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   deletePanelAvatar,
   fetchPanelSystemInfo,
+  fetchPanelTelegramBotToken,
   importPanelSettings,
   panelSettingsExportUrl,
   resetPanelSettings,
@@ -13,9 +14,9 @@ import {
 import { usePanelSettings } from "../panelSettingsContext";
 import { normalizeSectionOrder, orderSectionsMeta } from "../panelNavUtils";
 import type { PanelSectionKey, PanelSettings } from "../panelSettingsTypes";
-import { syncThemeFromPanelSetting } from "../adminTheme";
-import { compressImageForAvatar } from "../compressAvatar";
+import { readFileAsDataUrl } from "../avatarCrop";
 import { PANEL_HINTS } from "../panelSettingsHints";
+import AvatarCropModal from "./AvatarCropModal";
 import { FieldLabel, SettingHint } from "./SettingHint";
 import SettingsToggleRow from "./SettingsToggleRow";
 
@@ -36,7 +37,7 @@ function cloneSettings(s: PanelSettings): PanelSettings {
 }
 
 export default function PanelSettingsModal({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const { settings, meta, telegram, applyPatch, refresh } = usePanelSettings();
+  const { settings, meta, telegram, applyPatch, refresh, avatarUrl } = usePanelSettings();
   const [tab, setTab] = useState<TabId>("main");
   const [draft, setDraft] = useState<PanelSettings | null>(null);
   const [dirty, setDirty] = useState(false);
@@ -44,26 +45,50 @@ export default function PanelSettingsModal({ open, onClose }: { open: boolean; o
   const [msg, setMsg] = useState<{ type: "ok" | "err"; text: string } | null>(null);
   const [botTokenEdit, setBotTokenEdit] = useState("");
   const [showToken, setShowToken] = useState(false);
+  const [revealedToken, setRevealedToken] = useState<string | null>(null);
+  const [tokenRevealBusy, setTokenRevealBusy] = useState(false);
   const [botTest, setBotTest] = useState<{ type: "ok" | "err"; text: string } | null>(null);
   const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
+  const [avatarCropOpen, setAvatarCropOpen] = useState(false);
+  const [avatarCropSrc, setAvatarCropSrc] = useState<string | null>(null);
   const [systemInfo, setSystemInfo] = useState<Record<string, unknown> | null>(null);
   const [dragSectionKey, setDragSectionKey] = useState<PanelSectionKey | null>(null);
   const [overSectionKey, setOverSectionKey] = useState<PanelSectionKey | null>(null);
   const avatarInputRef = useRef<HTMLInputElement>(null);
+  const wasOpenRef = useRef(false);
+  const lastSyncedAtRef = useRef(0);
 
   useEffect(() => {
-    if (open && settings) {
-      const cloned = cloneSettings(settings);
-      cloned.sectionOrder = normalizeSectionOrder(cloned.sectionOrder ?? settings.sectionOrder);
-      setDraft(cloned);
-      setDirty(false);
-      setBotTokenEdit("");
-      setShowToken(false);
-      setBotTest(null);
-      setAvatarPreview(null);
-      setTab("main");
-      setMsg(null);
+    if (!open) {
+      wasOpenRef.current = false;
+      lastSyncedAtRef.current = 0;
+      setAvatarCropOpen(false);
+      return;
     }
+    if (!settings) return;
+    if (wasOpenRef.current) return;
+    wasOpenRef.current = true;
+    lastSyncedAtRef.current = settings.updatedAt;
+    const cloned = cloneSettings(settings);
+    cloned.sectionOrder = normalizeSectionOrder(cloned.sectionOrder ?? settings.sectionOrder);
+    cloned.panel.subscriptionBanner = {
+      ...{
+        enabled: false,
+        text: "",
+        telegramUrl: "",
+        telegramLinkText: "тех. поддержку",
+      },
+      ...cloned.panel.subscriptionBanner,
+    };
+    setDraft(cloned);
+    setDirty(false);
+    setBotTokenEdit("");
+    setShowToken(false);
+    setRevealedToken(null);
+    setBotTest(null);
+    setAvatarPreview(null);
+    setTab("main");
+    setMsg(null);
   }, [open, settings]);
 
   useEffect(() => {
@@ -147,12 +172,41 @@ export default function PanelSettingsModal({ open, onClose }: { open: boolean; o
         },
       };
       if (botTokenEdit.trim()) payload.botToken = botTokenEdit.trim();
-      await applyPatch(payload);
-      syncThemeFromPanelSetting(draft.ui.theme);
+      const r = await applyPatch(payload);
+      lastSyncedAtRef.current = r.settings.updatedAt;
       setDirty(false);
       setBotTokenEdit("");
       setMsg({ type: "ok", text: "Настройки сохранены." });
       if (closeAfter) onClose();
+    } catch (e) {
+      setMsg({ type: "err", text: String(e) });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function openAvatarCrop(src?: string | null) {
+    setAvatarCropSrc(src ?? avatarPreview ?? avatarUrl ?? null);
+    setAvatarCropOpen(true);
+  }
+
+  async function onAvatarCropSave(dataUrl: string, mime: string) {
+    setBusy(true);
+    try {
+      setAvatarPreview(dataUrl);
+      const uploaded = await uploadPanelAvatar(dataUrl, mime);
+      setDraft((d) =>
+        d
+          ? {
+              ...d,
+              panel: { ...d.panel, avatarPath: uploaded.settings.panel.avatarPath },
+              updatedAt: uploaded.settings.updatedAt,
+            }
+          : d,
+      );
+      await refresh();
+      setAvatarCropOpen(false);
+      setMsg({ type: "ok", text: "Аватарка обновлена." });
     } catch (e) {
       setMsg({ type: "err", text: String(e) });
     } finally {
@@ -166,23 +220,44 @@ export default function PanelSettingsModal({ open, onClose }: { open: boolean; o
       setMsg({ type: "err", text: "Исходный файл больше 5 МБ." });
       return;
     }
-    setBusy(true);
     try {
-      const { dataUrl, mime } = await compressImageForAvatar(file);
-      setAvatarPreview(dataUrl);
-      await uploadPanelAvatar(dataUrl, mime);
-      await refresh();
-      setMsg({ type: "ok", text: "Аватарка обновлена." });
+      const dataUrl = await readFileAsDataUrl(file);
+      setAvatarCropSrc(dataUrl);
+      setAvatarCropOpen(true);
     } catch (e) {
       setMsg({ type: "err", text: String(e) });
+    }
+  }
+
+  async function toggleShowBotToken() {
+    if (showToken) {
+      setShowToken(false);
+      setRevealedToken(null);
+      return;
+    }
+    if (botTokenEdit.trim()) {
+      setShowToken(true);
+      return;
+    }
+    if (!telegram?.botTokenConfigured) return;
+    setTokenRevealBusy(true);
+    try {
+      const { botToken } = await fetchPanelTelegramBotToken();
+      setRevealedToken(botToken);
+      setShowToken(true);
+    } catch (e) {
+      setMsg({ type: "err", text: `Не удалось получить токен: ${String(e)}` });
     } finally {
-      setBusy(false);
+      setTokenRevealBusy(false);
     }
   }
 
   if (!open || !draft) return null;
 
+  const avatarDisplaySrc = avatarPreview ?? avatarUrl ?? null;
+
   return (
+    <>
     <div className="modal-backdrop panel-settings-backdrop">
       <div className="modal panel-settings-modal" onClick={(e) => e.stopPropagation()}>
         <div className="modal-head panel-settings-head">
@@ -242,14 +317,101 @@ export default function PanelSettingsModal({ open, onClose }: { open: boolean; o
                   onChange={(e) => patchDraft((d) => ({ ...d, panel: { ...d.panel, telegramFooter: e.target.value } }))}
                 />
               </div>
+              <div className="panel-subscription-text-block">
+                <SettingsToggleRow
+                  label="Текст подписки"
+                  hint={PANEL_HINTS.subscriptionBanner}
+                  on={draft.panel.subscriptionBanner?.enabled ?? false}
+                  onToggle={() =>
+                    patchDraft((d) => ({
+                      ...d,
+                      panel: {
+                        ...d.panel,
+                        subscriptionBanner: {
+                          ...(d.panel.subscriptionBanner ?? {
+                            enabled: false,
+                            text: "",
+                            telegramUrl: "",
+                            telegramLinkText: "тех. поддержку",
+                          }),
+                          enabled: !(d.panel.subscriptionBanner?.enabled ?? false),
+                        },
+                      },
+                    }))
+                  }
+                />
+                {draft.panel.subscriptionBanner?.enabled ? (
+                  <div className="panel-subscription-text-fields">
+                    <div className="form-field">
+                      <FieldLabel label="Текст в Happ / подписке" hint={PANEL_HINTS.subscriptionBannerText} />
+                      <textarea
+                        className="comms-textarea"
+                        rows={5}
+                        placeholder={"Нет подключения к интернету? Обновите подписку 🔄\n🪄 = Подключение к RU сайтам без VPN"}
+                        value={draft.panel.subscriptionBanner.text}
+                        onChange={(e) =>
+                          patchDraft((d) => ({
+                            ...d,
+                            panel: {
+                              ...d.panel,
+                              subscriptionBanner: { ...d.panel.subscriptionBanner, text: e.target.value },
+                            },
+                          }))
+                        }
+                      />
+                    </div>
+                    <div className="form-field">
+                      <FieldLabel label="Ссылка Telegram (поддержка)" hint={PANEL_HINTS.subscriptionBannerTelegram} />
+                      <input
+                        value={draft.panel.subscriptionBanner.telegramUrl}
+                        placeholder="https://t.me/your_support или @username"
+                        onChange={(e) =>
+                          patchDraft((d) => ({
+                            ...d,
+                            panel: {
+                              ...d.panel,
+                              subscriptionBanner: { ...d.panel.subscriptionBanner, telegramUrl: e.target.value },
+                            },
+                          }))
+                        }
+                      />
+                    </div>
+                    <div className="form-field">
+                      <FieldLabel label="Текст ссылки" hint={PANEL_HINTS.subscriptionBannerLinkText} />
+                      <input
+                        value={draft.panel.subscriptionBanner.telegramLinkText}
+                        placeholder="тех. поддержку"
+                        onChange={(e) =>
+                          patchDraft((d) => ({
+                            ...d,
+                            panel: {
+                              ...d.panel,
+                              subscriptionBanner: { ...d.panel.subscriptionBanner, telegramLinkText: e.target.value },
+                            },
+                          }))
+                        }
+                      />
+                    </div>
+                  </div>
+                ) : null}
+              </div>
               <div className="panel-avatar-block">
                 <FieldLabel label="Аватарка / логотип" hint={PANEL_HINTS.avatar} />
                 <div className="panel-avatar-row">
-                  {avatarPreview ? (
-                    <img src={avatarPreview} alt="" className="panel-avatar-preview" />
-                  ) : (
-                    <div className="panel-avatar-placeholder">{draft.panel.title.slice(0, 2).toUpperCase()}</div>
-                  )}
+                  <button
+                    type="button"
+                    className="panel-avatar-hit"
+                    disabled={busy}
+                    title="Изменить аватарку"
+                    aria-label="Изменить аватарку"
+                    onClick={() => openAvatarCrop()}
+                  >
+                    {avatarDisplaySrc ? (
+                      <img src={avatarDisplaySrc} alt="" className="panel-avatar-preview" />
+                    ) : (
+                      <div className="panel-avatar-placeholder">{draft.panel.title.slice(0, 2).toUpperCase()}</div>
+                    )}
+                  </button>
                   <div className="panel-avatar-actions">
                     <input
                       ref={avatarInputRef}
@@ -412,30 +574,51 @@ export default function PanelSettingsModal({ open, onClose }: { open: boolean; o
                 <FieldLabel label="Telegram Bot Token" hint={PANEL_HINTS.botToken} />
                 <div className="panel-token-row">
                   <input
-                    type={showToken ? "text" : "password"}
-                    value={botTokenEdit || (showToken ? "" : telegram?.botTokenMasked ?? "••••••••••••••••")}
+                    type={showToken || !telegram?.botTokenConfigured ? "text" : "password"}
+                    value={
+                      botTokenEdit
+                        ? botTokenEdit
+                        : telegram?.botTokenConfigured
+                          ? showToken
+                            ? (revealedToken ?? "")
+                            : "••••••••••••••••"
+                          : ""
+                    }
                     placeholder={telegram?.botTokenConfigured ? "Оставьте пустым, чтобы не менять" : "Введите новый токен"}
                     onChange={(e) => {
                       setBotTokenEdit(e.target.value);
                       setDirty(true);
                     }}
                   />
-                  <button type="button" className="ghost" onClick={() => setShowToken((v) => !v)}>
-                    {showToken ? "Скрыть" : "Показать"}
+                  <button
+                    type="button"
+                    className="ghost"
+                    disabled={(!telegram?.botTokenConfigured && !botTokenEdit) || tokenRevealBusy}
+                    onClick={() => void toggleShowBotToken()}
+                  >
+                    {tokenRevealBusy ? "…" : showToken ? "Скрыть" : "Показать"}
                   </button>
                   <button
                     type="button"
                     className="ghost"
                     onClick={() => {
-                      if (botTokenEdit) void navigator.clipboard.writeText(botTokenEdit);
-                      else setMsg({ type: "err", text: "Токен скрыт. Введите новый для копирования." });
+                      const toCopy =
+                        botTokenEdit.trim() || (showToken ? (revealedToken ?? "").trim() : "");
+                      if (!toCopy) {
+                        setMsg({ type: "err", text: "Нажмите «Показать», чтобы скопировать токен, или введите новый." });
+                        return;
+                      }
+                      void navigator.clipboard.writeText(toCopy);
+                      setMsg({ type: "ok", text: "Скопировано в буфер обмена." });
                     }}
                   >
                     Копировать
                   </button>
                 </div>
                 <p className="field-hint">
-                  {telegram?.botTokenConfigured ? "Токен настроен (отображается замаскированно)." : "Токен не задан."}
+                  {telegram?.botTokenConfigured
+                    ? "Токен настроен. «Показать» загружает полный токен с сервера."
+                    : "Токен не задан."}
                 </p>
               </div>
               <div className="form-field">
@@ -514,8 +697,23 @@ export default function PanelSettingsModal({ open, onClose }: { open: boolean; o
                 </div>
               ) : null}
               <div className="settings-toggle-list">
+              <SettingsToggleRow
+                label="Двухфакторная аутентификация"
+                hint={PANEL_HINTS.login2faEnabled}
+                on={draft.telegram.login2faEnabled !== false}
+                onToggle={() =>
+                  patchDraft((d) => ({
+                    ...d,
+                    telegram: {
+                      ...d.telegram,
+                      login2faEnabled: d.telegram.login2faEnabled === false,
+                    },
+                  }))
+                }
+              />
               {(
                 [
+                  ["adminClientsButtonEnabled", "Показывать кнопку «Клиенты» у админов"],
                   ["notifyNewUsers", "Уведомлять о новых пользователях"],
                   ["notifyBroadcastErrors", "Уведомлять об ошибках рассылок"],
                   ["notifySurveyResponses", "Уведомлять о новых ответах на опросы"],
@@ -524,6 +722,7 @@ export default function PanelSettingsModal({ open, onClose }: { open: boolean; o
                 ] as const
               ).map(([key, label]) => {
                 const hintMap: Record<string, string> = {
+                  adminClientsButtonEnabled: PANEL_HINTS.adminClientsButtonEnabled,
                   notifyNewUsers: PANEL_HINTS.notifyNewUsers,
                   notifyBroadcastErrors: PANEL_HINTS.notifyBroadcastErrors,
                   notifySurveyResponses: PANEL_HINTS.notifySurveyResponses,
@@ -606,6 +805,24 @@ export default function PanelSettingsModal({ open, onClose }: { open: boolean; o
                 hint={PANEL_HINTS.showHints}
                 on={draft.ui.showHints}
                 onToggle={() => patchDraft((d) => ({ ...d, ui: { ...d.ui, showHints: !d.ui.showHints } }))}
+              />
+              <SettingsToggleRow
+                label="Новый дизайн WebApp"
+                hint={PANEL_HINTS.webAppNewDesign}
+                on={draft.ui.webAppNewDesign ?? false}
+                onToggle={() => {
+                  const next = !(draft.ui.webAppNewDesign ?? false);
+                  const ui = { ...draft.ui, webAppNewDesign: next };
+                  patchDraft((d) => ({ ...d, ui }));
+                  void applyPatch({ settings: { ui } })
+                    .then(() =>
+                      setMsg({
+                        type: "ok",
+                        text: next ? "Новый дизайн WebApp включён." : "Старый дизайн WebApp включён.",
+                      }),
+                    )
+                    .catch((e) => setMsg({ type: "err", text: String(e) }));
+                }}
               />
               </div>
               <div className="form-field">
@@ -739,7 +956,19 @@ export default function PanelSettingsModal({ open, onClose }: { open: boolean; o
                   <li>Версия панели: {String(systemInfo.panelVersion ?? "—")}</li>
                   <li>Node: {String(systemInfo.nodeVersion ?? "—")}</li>
                   <li>Окружение: {String(systemInfo.environment ?? "—")}</li>
-                  <li>Uptime API: {String(systemInfo.uptimeSec ?? "—")} с</li>
+                  <li>
+                    Uptime{" "}
+                    <a
+                      href="/panel/swagger/admin"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="panel-about-api-link"
+                      title="Документация API (Swagger)"
+                    >
+                      API
+                    </a>
+                    : {String(systemInfo.uptimeSec ?? "—")} с
+                  </li>
                   <li>Обновление настроек: {systemInfo.settingsUpdatedAt ? new Date(Number(systemInfo.settingsUpdatedAt)).toLocaleString("ru-RU") : "—"}</li>
                   <li>Telegram: {systemInfo.telegramBotConfigured ? String(systemInfo.telegramBotMasked) : "не настроен"}</li>
                 </ul>
@@ -774,5 +1003,15 @@ export default function PanelSettingsModal({ open, onClose }: { open: boolean; o
         </div>
       </div>
     </div>
+    <AvatarCropModal
+      open={avatarCropOpen}
+      initialSrc={avatarCropSrc}
+      busy={busy}
+      onClose={() => {
+        if (!busy) setAvatarCropOpen(false);
+      }}
+      onSave={onAvatarCropSave}
+    />
+    </>
   );
 }

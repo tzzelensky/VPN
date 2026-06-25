@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import DashboardLayout from "../components/DashboardLayout";
+import DualListPicker, { type DualListItem } from "../components/DualListPicker";
 import {
   checkAllConfigVaultKeys,
   checkConfigVaultKey,
@@ -8,16 +9,21 @@ import {
   deleteConfigVaultKey,
   fetchConfigVaultKeyRaw,
   importConfigVaultKeys,
+  importConfigVaultJson,
   listConfigVaultChecks,
+  listUsers,
   loadConfigVault,
   patchConfigVaultSettings,
   pollUntilVaultChecksDone,
+  setConfigVaultSubscriptionTargets,
   setConfigVaultSubscriptions,
   updateConfigVaultKey,
   type ConfigVaultCheckDto,
   type ConfigVaultKeyDto,
   type ConfigVaultOverviewDto,
   type ConfigVaultSettingsDto,
+  type ConfigVaultSubscriptionModeDto,
+  type UserDto,
   type VlessCheckStatusDto,
 } from "../api";
 import { usePanelSettings } from "../panelSettingsContext";
@@ -73,6 +79,7 @@ export default function ConfigVaultPage({ onLogout }: { onLogout: () => void }) 
 
   const [addOpen, setAddOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
+  const [jsonImportOpen, setJsonImportOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
 
@@ -94,7 +101,16 @@ export default function ConfigVaultPage({ onLogout }: { onLogout: () => void }) 
   const [formNotify, setFormNotify] = useState(true);
   const [importText, setImportText] = useState("");
   const [importPrefix, setImportPrefix] = useState("");
+  const [jsonText, setJsonText] = useState("");
   const [settingsForm, setSettingsForm] = useState<ConfigVaultSettingsDto | null>(null);
+
+  const [users, setUsers] = useState<UserDto[]>([]);
+  const [formSubscriptionMode, setFormSubscriptionMode] = useState<ConfigVaultSubscriptionModeDto>("all");
+  const [formSubscriptionUserIds, setFormSubscriptionUserIds] = useState<number[]>([]);
+  const [usersPickerOpen, setUsersPickerOpen] = useState(false);
+  const [usersPickerTitle, setUsersPickerTitle] = useState("");
+  const [assignKey, setAssignKey] = useState<ConfigVaultKeyDto | null>(null);
+  const [subscriptionTargetsOpen, setSubscriptionTargetsOpen] = useState(false);
 
   const showToast = useCallback((type: "ok" | "err", text: string) => {
     setToast({ type, text });
@@ -110,6 +126,12 @@ export default function ConfigVaultPage({ onLogout }: { onLogout: () => void }) 
   useEffect(() => {
     void reload().catch((e) => showToast("err", parseErr(e)));
   }, [reload, showToast]);
+
+  useEffect(() => {
+    void listUsers()
+      .then(setUsers)
+      .catch(() => setUsers([]));
+  }, []);
 
   const keys = useMemo(() => {
     const list = data?.keys ?? [];
@@ -171,6 +193,8 @@ export default function ConfigVaultPage({ onLogout }: { onLogout: () => void }) 
     setFormName(k.name);
     setFormActive(k.active);
     setFormNotify(k.notify_on_fail);
+    setFormSubscriptionMode(k.subscription_mode ?? "all");
+    setFormSubscriptionUserIds(k.subscription_user_ids ?? []);
     const uri = (prefilledUri ?? k.raw_uri ?? "").trim();
     if (uri) {
       setFormUri(uri);
@@ -207,11 +231,15 @@ export default function ConfigVaultPage({ onLogout }: { onLogout: () => void }) 
         raw_uri: formUri,
         active: formActive,
         notify_on_fail: formNotify,
+        subscription_mode: formSubscriptionMode,
+        subscription_user_ids: formSubscriptionMode === "selected" ? formSubscriptionUserIds : [],
       });
       await reload();
       setAddOpen(false);
       setFormName("");
       setFormUri("");
+      setFormSubscriptionMode("all");
+      setFormSubscriptionUserIds([]);
       showToast("ok", "Ключ добавлен в хранилище");
     });
   }
@@ -234,6 +262,25 @@ export default function ConfigVaultPage({ onLogout }: { onLogout: () => void }) 
     });
   }
 
+  async function handleJsonImport() {
+    await runBusy(async () => {
+      const r = await importConfigVaultJson({
+        json: jsonText,
+        name: formName || undefined,
+        active: formActive,
+        notify_on_fail: formNotify,
+      });
+      await reload();
+      setJsonImportOpen(false);
+      setJsonText("");
+      setFormName("");
+      showToast(
+        "ok",
+        `Импорт: добавлено ${r.added}, дублей ${r.skipped_duplicates}, ошибок ${r.errors.length}`,
+      );
+    });
+  }
+
   async function handleSaveEdit() {
     if (!editKey) return;
     if (editKey.added_to_subscriptions) {
@@ -248,6 +295,8 @@ export default function ConfigVaultPage({ onLogout }: { onLogout: () => void }) 
         raw_uri: formUri,
         active: formActive,
         notify_on_fail: formNotify,
+        subscription_mode: formSubscriptionMode,
+        subscription_user_ids: formSubscriptionMode === "selected" ? formSubscriptionUserIds : [],
       });
       await reload();
       setEditKey(null);
@@ -299,6 +348,99 @@ export default function ConfigVaultPage({ onLogout }: { onLogout: () => void }) 
   }
 
   const stats = data?.stats;
+
+  const configVaultUserPickerItems = useMemo((): DualListItem[] => {
+    return users.map((u) => {
+      const title = (u.name || u.email || `Клиент #${u.id}`).trim();
+      return { id: u.id, label: `#${u.id} ${title}` };
+    });
+  }, [users]);
+
+  function openSubscriptionUsersPicker(title: string, ids: number[]) {
+    setUsersPickerTitle(title);
+    setFormSubscriptionUserIds(ids);
+    setFormSubscriptionMode("selected");
+    setUsersPickerOpen(true);
+  }
+
+  async function openSubscriptionTargets(k: ConfigVaultKeyDto) {
+    setAssignKey(k);
+    setFormSubscriptionMode(k.subscription_mode ?? "all");
+    let ids = k.subscription_user_ids ?? [];
+    if (ids.length === 0 && k.subscription_mode === "selected") {
+      try {
+        const { key } = await fetchConfigVaultKeyRaw(k.id);
+        ids = key.subscription_user_ids ?? [];
+      } catch {
+        /* ignore */
+      }
+    }
+    setFormSubscriptionUserIds(ids);
+    setSubscriptionTargetsOpen(true);
+  }
+
+  async function handleSaveSubscriptionTargets() {
+    if (!assignKey) return;
+    if (formSubscriptionMode === "selected" && formSubscriptionUserIds.length === 0) {
+      showToast("err", "Выберите хотя бы одного пользователя");
+      return;
+    }
+    await runBusy(async () => {
+      await setConfigVaultSubscriptionTargets(
+        assignKey.id,
+        formSubscriptionMode,
+        formSubscriptionMode === "selected" ? formSubscriptionUserIds : [],
+      );
+      await reload();
+      setSubscriptionTargetsOpen(false);
+      setAssignKey(null);
+      showToast("ok", "Список подписок обновлён");
+    });
+  }
+
+  async function handleSubscriptionUsersPickerSave(ids: number[]) {
+    setFormSubscriptionUserIds(ids);
+    setFormSubscriptionMode("selected");
+    setUsersPickerOpen(false);
+  }
+
+  function renderSubscriptionTargetFields() {
+    return (
+      <>
+        <label className="field">
+          <span>Кому добавлять в подписку</span>
+          <select
+            className="input"
+            value={formSubscriptionMode}
+            onChange={(e) => {
+              const mode = e.target.value as ConfigVaultSubscriptionModeDto;
+              setFormSubscriptionMode(mode);
+              if (mode === "selected") {
+                openSubscriptionUsersPicker("Кому в подписках", formSubscriptionUserIds);
+              } else {
+                setFormSubscriptionUserIds([]);
+              }
+            }}
+          >
+            <option value="all">Всем пользователям</option>
+            <option value="selected">Выбранным пользователям</option>
+          </select>
+        </label>
+        {formSubscriptionMode === "selected" && (
+          <div className="field">
+            <button
+              type="button"
+              className="btn"
+              onClick={() => openSubscriptionUsersPicker("Кому в подписках", formSubscriptionUserIds)}
+            >
+              Выбрать пользователей
+            </button>
+            <span className="muted vault-hint">Выбрано: {formSubscriptionUserIds.length}</span>
+          </div>
+        )}
+      </>
+    );
+  }
 
   return (
     <DashboardLayout onLogout={onLogout}>
@@ -357,12 +499,27 @@ export default function ConfigVaultPage({ onLogout }: { onLogout: () => void }) 
             setFormUri("");
             setFormActive(true);
             setFormNotify(true);
+            setFormSubscriptionMode("all");
+            setFormSubscriptionUserIds([]);
             setAddOpen(true);
           }}>
             Добавить ключ
           </button>
           <button type="button" className="btn" disabled={busy} onClick={() => setImportOpen(true)}>
             Импорт списком
+          </button>
+          <button
+            type="button"
+            className="btn"
+            disabled={busy}
+            onClick={() => {
+              setFormName("");
+              setFormActive(true);
+              setFormNotify(true);
+              setJsonImportOpen(true);
+            }}
+          >
+            Импорт из JSON
           </button>
           <button
             type="button"
@@ -451,6 +608,9 @@ export default function ConfigVaultPage({ onLogout }: { onLogout: () => void }) 
                     )}
                     <span className="muted">Проверка: {formatDt(k.last_check_at)}</span>
                     <span className="muted">В подписках: {k.added_to_subscriptions ? "Да" : "Нет"}</span>
+                    {k.added_to_subscriptions && (
+                      <span className="muted">Кому: {k.subscription_label ?? "Всем пользователям"}</span>
+                    )}
                   </div>
                 </div>
                 <div className="vault-row-actions">
@@ -462,6 +622,14 @@ export default function ConfigVaultPage({ onLogout }: { onLogout: () => void }) 
                   </button>
                   <button type="button" className="btn btn-sm" disabled={busy} onClick={() => void checkOne(k)}>
                     Проверить
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-sm"
+                    disabled={busy || !k.added_to_subscriptions}
+                    onClick={() => void openSubscriptionTargets(k)}
+                  >
+                    Кому в подписках
                   </button>
                   <button
                     type="button"
@@ -530,6 +698,7 @@ export default function ConfigVaultPage({ onLogout }: { onLogout: () => void }) 
                 <input type="checkbox" checked={formNotify} onChange={(e) => setFormNotify(e.target.checked)} />
                 Уведомлять при недоступности
               </label>
+              {renderSubscriptionTargetFields()}
             </div>
             <div className="modal-footer">
               <button type="button" className="btn" onClick={() => setAddOpen(false)}>
@@ -569,12 +738,49 @@ export default function ConfigVaultPage({ onLogout }: { onLogout: () => void }) 
                 <input type="checkbox" checked={formNotify} onChange={(e) => setFormNotify(e.target.checked)} />
                 Уведомлять при недоступности
               </label>
+              {renderSubscriptionTargetFields()}
             </div>
             <div className="modal-footer">
               <button type="button" className="btn" onClick={() => setEditKey(null)}>
                 Отмена
               </button>
               <button type="button" className="btn primary" disabled={busy} onClick={() => void handleSaveEdit()}>
+                Сохранить
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {subscriptionTargetsOpen && assignKey && (
+        <div className="modal-backdrop">
+          <div className="modal modal--sm vault-modal">
+            <div className="modal-head">
+              <h2>Кому в подписках: {assignKey.name}</h2>
+              <button
+                type="button"
+                className="modal-close"
+                onClick={() => {
+                  setSubscriptionTargetsOpen(false);
+                  setAssignKey(null);
+                }}
+              >
+                ×
+              </button>
+            </div>
+            <div className="modal-body">{renderSubscriptionTargetFields()}</div>
+            <div className="modal-footer">
+              <button
+                type="button"
+                className="btn"
+                onClick={() => {
+                  setSubscriptionTargetsOpen(false);
+                  setAssignKey(null);
+                }}
+              >
+                Отмена
+              </button>
+              <button type="button" className="btn primary" disabled={busy} onClick={() => void handleSaveSubscriptionTargets()}>
                 Сохранить
               </button>
             </div>
@@ -619,6 +825,12 @@ export default function ConfigVaultPage({ onLogout }: { onLogout: () => void }) 
                 <dd>{viewKey.last_error ?? "—"}</dd>
                 <dt>В подписках</dt>
                 <dd>{viewKey.added_to_subscriptions ? "Да" : "Нет"}</dd>
+                {viewKey.added_to_subscriptions && (
+                  <>
+                    <dt>Кому в подписках</dt>
+                    <dd>{viewKey.subscription_label ?? "Всем пользователям"}</dd>
+                  </>
+                )}
                 <dt>Активен</dt>
                 <dd>{viewKey.active ? "Да" : "Нет"}</dd>
                 <dt>Уведомления</dt>
@@ -637,6 +849,19 @@ export default function ConfigVaultPage({ onLogout }: { onLogout: () => void }) 
               >
                 {viewKey.added_to_subscriptions ? "Убрать из подписок" : "Добавить в подписки"}
               </button>
+              {viewKey.added_to_subscriptions && (
+                <button
+                  type="button"
+                  className="btn"
+                  disabled={busy}
+                  onClick={() => {
+                    setViewKey(null);
+                    void openSubscriptionTargets(viewKey);
+                  }}
+                >
+                  Кому в подписках
+                </button>
+              )}
               <button
                 type="button"
                 className="btn"
@@ -652,6 +877,40 @@ export default function ConfigVaultPage({ onLogout }: { onLogout: () => void }) 
               </button>
               <button type="button" className="btn" onClick={() => setViewKey(null)}>
                 Закрыть
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {jsonImportOpen && (
+        <div className="modal-backdrop">
+          <div className="modal modal-import vault-modal">
+            <div className="modal-head">
+              <h2>Импорт из JSON</h2>
+              <button type="button" className="modal-close" onClick={() => setJsonImportOpen(false)}>
+                ×
+              </button>
+            </div>
+            <div className="modal-body">
+              <label className="field">
+                <span>Название (опционально)</span>
+                <input className="input" value={formName} onChange={(e) => setFormName(e.target.value)} />
+              </label>
+              <label className="field">
+                <span>JSON-конфиг Xray/Happ или экспорт хранилища</span>
+                <textarea className="input" rows={12} value={jsonText} onChange={(e) => setJsonText(e.target.value)} />
+              </label>
+              <p className="vault-warn-sm">
+                Поддерживаются конфиги с outbound vless, trojan, hysteria, а также JSON-экспорт с полем keys.
+              </p>
+            </div>
+            <div className="modal-footer">
+              <button type="button" className="btn" onClick={() => setJsonImportOpen(false)}>
+                Отмена
+              </button>
+              <button type="button" className="btn primary" disabled={busy} onClick={() => void handleJsonImport()}>
+                Импортировать
               </button>
             </div>
           </div>
@@ -928,6 +1187,17 @@ export default function ConfigVaultPage({ onLogout }: { onLogout: () => void }) 
           </div>
         </div>
       )}
+
+      <DualListPicker
+        open={usersPickerOpen}
+        title={usersPickerTitle}
+        leftLabel="Доступные пользователи"
+        rightLabel="Выбрано"
+        items={configVaultUserPickerItems}
+        selectedIds={formSubscriptionUserIds}
+        onClose={() => setUsersPickerOpen(false)}
+        onSave={(ids) => void handleSubscriptionUsersPickerSave(ids)}
+      />
     </DashboardLayout>
   );
 }

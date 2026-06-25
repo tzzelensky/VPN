@@ -11,17 +11,19 @@ export function mainMenuInline(
   supportAppealsEnabled = false,
   buyGbEnabled = true,
   whitelistEnabled = false,
+  buyDeviceEnabled = false,
+  adminClientsButtonEnabled = false,
 ) {
   const rows: { text: string; callback_data: string }[][] = [
-    [{ text: "Статистика по подписке", callback_data: "stats" }],
     [{ text: "Подписка", callback_data: "sub" }],
     [{ text: "Оплата подписки", callback_data: "pay" }],
   ];
   if (whitelistEnabled) rows.push([{ text: "Белые списки", callback_data: "wlmenu" }]);
   if (buyGbEnabled) rows.push([{ text: "Докупить ГБ", callback_data: "buygb" }]);
+  if (buyDeviceEnabled) rows.push([{ text: "Купить устройство", callback_data: "buydevice" }]);
   if (supportAppealsEnabled) rows.push([{ text: "Сообщить о проблеме", callback_data: "appeal_start" }]);
   if (referralEnabled) rows.push([{ text: "Пригласи друга", callback_data: "ref_menu" }]);
-  if (isAdmin) rows.push([{ text: "Клиенты", callback_data: "admin_clients" }]);
+  if (isAdmin && adminClientsButtonEnabled) rows.push([{ text: "Клиенты", callback_data: "admin_clients" }]);
   return { inline_keyboard: rows };
 }
 
@@ -31,13 +33,16 @@ export function mainMenuReply(
   supportAppealsEnabled = false,
   buyGbEnabled = true,
   whitelistEnabled = false,
+  buyDeviceEnabled = false,
+  adminClientsButtonEnabled = false,
 ) {
-  const rows: string[][] = [["Статистика по подписке", "Подписка"], ["Оплата подписки"]];
+  const rows: string[][] = [["Подписка"], ["Оплата подписки"]];
   if (whitelistEnabled) rows.push(["Белые списки"]);
   if (buyGbEnabled) rows[1]!.push("Докупить ГБ");
+  if (buyDeviceEnabled) rows.push(["Купить устройство"]);
   if (supportAppealsEnabled) rows.push(["Сообщить о проблеме"]);
   if (referralEnabled) rows.push(["Пригласи друга"]);
-  if (isAdmin) rows.push(["Клиенты"]);
+  if (isAdmin && adminClientsButtonEnabled) rows.push(["Клиенты"]);
   return {
     keyboard: rows.map((r) => r.map((text) => ({ text }))),
     resize_keyboard: true,

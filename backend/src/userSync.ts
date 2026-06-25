@@ -7,6 +7,8 @@ import {
   userAllowedOnServers,
   type ServerRow,
 } from "./db.js";
+import { isDeviceLimitActiveForUser } from "./deviceLimitEffective.js";
+import { userDeviceTotalLimit } from "./userDeviceSlots.js";
 import {
   alterInboundUsersViaApi,
   TZADMIN_XRAY_CONFIG_PATH,
@@ -98,9 +100,7 @@ export function managedClientsForServer(serverUuid: string | null): ManagedClien
     seen.add(key);
     out.push({
       id,
-      ...(u.device_limit_enabled === 1
-        ? { deviceLimit: Math.max(1, Math.floor(Number(u.device_limit_count) || 1)) }
-        : {}),
+      ...(isDeviceLimitActiveForUser(u) ? { deviceLimit: userDeviceTotalLimit(u) } : {}),
       ...(u.speed_limit_mbps > 0 ? { speedLimitMbps: u.speed_limit_mbps } : {}),
     });
   }

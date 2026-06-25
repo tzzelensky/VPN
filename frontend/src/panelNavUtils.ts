@@ -9,7 +9,7 @@ export const PANEL_NAV_SECTIONS: PanelSectionMeta[] = [
   { key: "communications", path: "/communications", label: "Коммуникации", description: "Рассылки и опросы" },
   { key: "support_appeals", path: "/support-appeals", label: "Обращения", description: "Обращения в поддержку" },
   { key: "referral_program", path: "/referral-program", label: "Реферальная программа", description: "Рефералы и награды" },
-  { key: "promo_codes", path: "/promo-codes", label: "Промокоды", description: "Скидки и промокоды" },
+  { key: "promo_codes", path: "/promo-codes", label: "Промоакции", description: "Промокоды и очередь скидок" },
   {
     key: "config_vault",
     path: "/config-vault",
@@ -22,7 +22,20 @@ export const PANEL_NAV_SECTIONS: PanelSectionMeta[] = [
     label: "Белые списки",
     description: "VLESS-ключи белых списков, назначение и проверка",
   },
+  {
+    key: "telegram_proxies",
+    path: "/telegram-proxies",
+    label: "Прокси",
+    description: "Развертывание Telegram-прокси на добавленных серверах",
+  },
   { key: "dropper_game", path: "/dropper-game", label: "Игра", description: "Мини-игра в боте" },
+  {
+    key: "device_limit",
+    path: "/device-limit",
+    label: "Ограничение по устройствам",
+    description: "Лимиты устройств, докупка мест и журнал",
+  },
+  { key: "daily_gift", path: "/daily-gift", label: "Ежедневный подарок", description: "Ежедневные награды в WebApp" },
 ];
 
 const PATH_TO_KEY: Record<string, PanelSectionKey> = {
@@ -37,7 +50,10 @@ const PATH_TO_KEY: Record<string, PanelSectionKey> = {
   "/promo-codes": "promo_codes",
   "/config-vault": "config_vault",
   "/whitelist-vault": "whitelist_vault",
+  "/telegram-proxies": "telegram_proxies",
   "/dropper-game": "dropper_game",
+  "/device-limit": "device_limit",
+  "/daily-gift": "daily_gift",
 };
 
 function normPath(path: string): string {

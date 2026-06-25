@@ -9,12 +9,43 @@ import { fileURLToPath } from "node:url";
 import { randomBytes } from "node:crypto";
 import { v4 as uuidv4 } from "uuid";
 import { normalizeExtraVlessLinks, type ExtraVlessLink } from "./extraVless.js";
+import { localYmdInTz, projectTimezone } from "./projectTime.js";
 import {
   defaultRealityFlow,
   defaultRealitySni,
   normalizeFlow,
   randomRealityShortId,
 } from "./realityKeygen.js";
+import {
+  evaluateDeviceLimitAccess,
+  activeDeviceSlots,
+  allowedDeviceSlots,
+  newDeviceSlot,
+  normalizeDeviceId,
+  normalizeDeviceSlots,
+  reconcileUserDeviceSlots,
+  userDeviceTotalLimit,
+  type UserDeviceSlot,
+} from "./userDeviceSlots.js";
+import {
+  defaultDeviceLimitSettings,
+  normalizeDeviceLimitSettings,
+  type DeviceLimitSettings,
+} from "./deviceLimitSettings.js";
+import {
+  newDeviceLimitEvent,
+  normalizeDeviceLimitEvents,
+  type DeviceLimitEventRow,
+} from "./deviceLimitEvents.js";
+import {
+  newDeviceSlotPurchase,
+  normalizeDeviceSlotPurchases,
+  type DeviceSlotPurchaseRow,
+} from "./deviceSlotPurchases.js";
+import { appendDeviceLimitEvent, getDeviceLimitSettings } from "./deviceLimitStore.js";
+import { isDeviceLimitActiveForUser } from "./deviceLimitEffective.js";
+
+export type { UserDeviceSlot };
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const dataPath = process.env.DATA_PATH ?? path.join(__dirname, "..", "data.json");
@@ -50,6 +81,10 @@ export type CreateUserInput = {
   device_limit_enabled?: number;
   /** Максимум устройств при включённом device_limit_enabled. */
   device_limit_count?: number;
+  /** Докупленные дополнительные слоты устройств. */
+  device_extra_slots?: number;
+  /** Зарегистрированные устройства (UUID в ?did= ссылки подписки). */
+  device_slots?: UserDeviceSlot[];
   /** Лимит скорости, Мбит/с; 0 = без ограничения. */
   speed_limit_mbps?: number;
   /** 1 = к подписке дописать последние 4 узла + строка Happ (белые списки). По умолчанию выкл. */
@@ -66,8 +101,14 @@ export type CreateUserInput = {
   stats_raw_down?: number;
   /** Антиспам-состояние авто-уведомлений о трафике в Telegram. */
   traffic_notify_state?: "" | "low30" | "empty";
-  /** Антиспам авто-уведомлений о сроке подписки: warn = ≤3 дня, expired = истекла. */
+  /** Антиспам авто-уведомлений о сроке подписки: warn = устар., expired = истекла. */
   expiry_notify_state?: "" | "warn" | "expired";
+  /** YYYY-MM-DD — последний день отправки напоминания о сроке (пояс панели). */
+  expiry_warn_sent_day?: string;
+  /** Текст последней ошибки авто-напоминания о сроке. */
+  expiry_warn_last_error?: string;
+  /** YYYY-MM-DD — день последней ошибки авто-напоминания. */
+  expiry_warn_error_day?: string;
   /** legacy = старый plain/tls; reality = использовать Reality-профиль в ссылках. */
   connection_profile?: "legacy" | "reality";
   /** 1 = тестовая подписка (скрыта из раздела «Пользователи»). */
@@ -106,6 +147,10 @@ export type UserRow = {
   device_limit_enabled: number;
   /** Максимум устройств, когда ограничение включено. */
   device_limit_count: number;
+  /** Докупленные дополнительные слоты. */
+  device_extra_slots: number;
+  /** Зарегистрированные устройства для лимита подписки. */
+  device_slots: UserDeviceSlot[];
   /** Лимит скорости, Мбит/с; 0 = без ограничения. */
   speed_limit_mbps: number;
   /** 1 = к подписке дописываются последние 4 сервера + happ-строка белых списков. */
@@ -122,6 +167,9 @@ export type UserRow = {
   /** Антиспам-состояние авто-уведомлений о трафике в Telegram. */
   traffic_notify_state: "" | "low30" | "empty";
   expiry_notify_state: "" | "warn" | "expired";
+  expiry_warn_sent_day: string;
+  expiry_warn_last_error: string;
+  expiry_warn_error_day: string;
   connection_profile: "legacy" | "reality";
   /** Билеты на мини-игру «Дроппер» в WebApp. */
   dropper_tickets: number;
@@ -141,7 +189,7 @@ export type PaymentSessionRow = {
   tg_user_id: number;
   target_user_id?: number;
   new_subscription_name?: string;
-  kind: "subscription" | "topup" | "test" | "white_lists";
+  kind: "subscription" | "topup" | "test" | "white_lists" | "device_slot";
   plan_id: PaymentPlanId;
   created_at: string;
   status: "awaiting_proof" | "pending_admin";
@@ -155,10 +203,15 @@ export type PaymentSessionRow = {
   roulette_discount_spin_id?: number;
 };
 
+export type PurchaseDiscountSource = "roulette" | "daily_gift" | "admin";
+
 export type RoulettePurchaseDiscountRow = {
+  id: string;
   tg_user_id: number;
   discount_percent: number;
   spin_id: number;
+  source: PurchaseDiscountSource;
+  source_label?: string;
   created_at: string;
 };
 
@@ -172,7 +225,7 @@ export const ROULETTE_GB_PIGGY_EXCHANGE_THRESHOLD = 50;
 
 export type ShopActivityRow = {
   id: string;
-  kind: "subscription" | "topup" | "test" | "white_lists";
+  kind: "subscription" | "topup" | "test" | "white_lists" | "device_slot";
   user_id: number;
   user_name: string;
   plan_id: PaymentPlanId;
@@ -414,6 +467,8 @@ export type ReferralSettingsChangeRow = {
   created_at: string;
 };
 
+export type PromoCodeSource = "admin" | "daily_gift" | "campaign";
+
 export type PromoCodeRow = {
   id: string;
   name: string;
@@ -433,6 +488,9 @@ export type PromoCodeRow = {
   admin_note?: string;
   active: boolean;
   valid_until: string;
+  bound_tg_user_id?: number;
+  source?: PromoCodeSource;
+  source_ref?: string;
   created_at: string;
   updated_at: string;
 };
@@ -949,6 +1007,15 @@ function normalizePromoCode(raw: unknown): PromoCodeRow | null {
     new_users_only: o.new_users_only === true || o.new_users_only === 1 || o.new_users_only === "1",
     ...(applyPlanIds.length > 0 ? { apply_plan_ids: applyPlanIds } : {}),
     ...(String(o.admin_note ?? "").trim() ? { admin_note: String(o.admin_note ?? "").trim().slice(0, 500) } : {}),
+    ...(Number.isFinite(Number(o.bound_tg_user_id)) && Number(o.bound_tg_user_id) > 0
+      ? { bound_tg_user_id: Math.floor(Number(o.bound_tg_user_id)) }
+      : {}),
+    ...(String(o.source ?? "").trim() === "daily_gift" ||
+    String(o.source ?? "").trim() === "campaign" ||
+    String(o.source ?? "").trim() === "admin"
+      ? { source: String(o.source).trim() as PromoCodeSource }
+      : {}),
+    ...(String(o.source_ref ?? "").trim() ? { source_ref: String(o.source_ref).trim().slice(0, 120) } : {}),
     active: !(o.active === false || o.active === 0 || o.active === "0"),
     valid_until: String(o.valid_until ?? "").trim(),
     created_at: String(o.created_at ?? new Date().toISOString()),
@@ -1124,7 +1191,9 @@ function normalizePaymentSession(raw: unknown): PaymentSessionRow | null {
         ? "test"
         : kindRaw === "white_lists"
           ? "white_lists"
-          : "subscription";
+          : kindRaw === "device_slot"
+            ? "device_slot"
+            : "subscription";
   return {
     id,
     tg_chat_id: chat,
@@ -1177,6 +1246,8 @@ function normalizeShopActivity(raw: unknown): ShopActivityRow | null {
         ? "test"
         : kindRaw === "white_lists"
           ? "white_lists"
+        : kindRaw === "device_slot"
+          ? "device_slot"
           : kindRaw === "subscription"
             ? "subscription"
             : "";
@@ -1288,7 +1359,8 @@ function deployedIdsFromServerRows(servers: ServerRow[]): number[] {
 }
 
 function coerceSubscriptionServerIds(rawIds: unknown, legacyCount: number, allIds: number[]): number[] {
-  if (Array.isArray(rawIds) && rawIds.length > 0) {
+  if (Array.isArray(rawIds)) {
+    if (rawIds.length === 0) return [];
     const valid = new Set(allIds);
     const seen = new Set<number>();
     const out: number[] = [];
@@ -1367,6 +1439,8 @@ function normalizeUser(u: UserRow, deployedIdsForNormalize?: number[]): UserRow 
     online_devices: Math.max(0, Math.floor(Number((u as { online_devices?: unknown }).online_devices) || 0)),
     device_limit_enabled: Number((u as { device_limit_enabled?: unknown }).device_limit_enabled) === 1 ? 1 : 0,
     device_limit_count: Math.max(1, Math.floor(Number((u as { device_limit_count?: unknown }).device_limit_count) || 1)),
+    device_extra_slots: Math.max(0, Math.floor(Number((u as { device_extra_slots?: unknown }).device_extra_slots) || 0)),
+    device_slots: normalizeDeviceSlots((u as { device_slots?: unknown }).device_slots),
     speed_limit_mbps: coerceSpeedLimitMbps((u as { speed_limit_mbps?: unknown }).speed_limit_mbps),
     whitelist_happ_enabled: Number((u as { whitelist_happ_enabled?: unknown }).whitelist_happ_enabled) === 1 ? 1 : 0,
     whitelist_active_until: Math.max(0, Math.floor(Number((u as { whitelist_active_until?: unknown }).whitelist_active_until) || 0)),
@@ -1385,6 +1459,13 @@ function normalizeUser(u: UserRow, deployedIdsForNormalize?: number[]): UserRow 
       (u as { expiry_notify_state?: unknown }).expiry_notify_state === "expired"
         ? ((u as { expiry_notify_state: "warn" | "expired" }).expiry_notify_state)
         : "",
+    expiry_warn_sent_day: String((u as { expiry_warn_sent_day?: unknown }).expiry_warn_sent_day ?? "").trim().slice(0, 10),
+    expiry_warn_last_error: String((u as { expiry_warn_last_error?: unknown }).expiry_warn_last_error ?? "")
+      .trim()
+      .slice(0, 200),
+    expiry_warn_error_day: String((u as { expiry_warn_error_day?: unknown }).expiry_warn_error_day ?? "")
+      .trim()
+      .slice(0, 10),
     connection_profile: mode === "reality" ? "reality" : "legacy",
     dropper_tickets: Math.max(0, Math.floor(Number((u as { dropper_tickets?: unknown }).dropper_tickets) || 0)),
     is_test_subscription: Number((u as { is_test_subscription?: unknown }).is_test_subscription) === 1 ? 1 : 0,
@@ -1831,6 +1912,42 @@ export function addServerToAllSubscriptions(serverId: number): { updated_users: 
   return { updated_users: updated };
 }
 
+/** Убрать развёрнутый сервер из subscription_server_ids у всех клиентов (кроме тестовых). */
+export function removeServerFromAllSubscriptions(serverId: number): { updated_users: number } {
+  const server = getServer(serverId);
+  if (!server) throw new Error("server_not_found");
+  if (server.vless_deployed !== 1 || server.vless_uuid == null) {
+    throw new Error("server_not_deployed");
+  }
+  const deployedIds = deployedIdsFromServerRows(readStore().servers);
+  if (!deployedIds.includes(serverId)) {
+    throw new Error("server_not_deployed");
+  }
+
+  let updated = 0;
+  mutate((store) => {
+    const allDeployed = deployedIdsFromServerRows(store.servers);
+    for (let i = 0; i < store.users.length; i++) {
+      const u = store.users[i]!;
+      if (u.is_test_subscription === 1) continue;
+      const cur = u.subscription_server_ids ?? [];
+      if (!cur.includes(serverId)) continue;
+      const nextIds = cur.filter((id) => id !== serverId);
+      store.users[i] = normalizeUser(
+        {
+          ...u,
+          subscription_server_ids: nextIds,
+          subscription_server_count: subscriptionCountFromIds(nextIds, allDeployed),
+          updated_at: new Date().toISOString(),
+        },
+        allDeployed,
+      );
+      updated += 1;
+    }
+  });
+  return { updated_users: updated };
+}
+
 /** Узлы в подписке по списку subscription_server_ids (порядок из списка). */
 export function serversForUserSubscription(user: UserRow): ServerRow[] {
   const rows = listDeployedServers();
@@ -1919,13 +2036,6 @@ export function userAllowedOnServers(u: UserRow): boolean {
   return true;
 }
 
-export function userExceededDeviceLimit(u: Pick<UserRow, "device_limit_enabled" | "device_limit_count" | "online_devices">): boolean {
-  if (u.device_limit_enabled !== 1) return false;
-  const limit = Math.max(1, Math.floor(Number(u.device_limit_count) || 1));
-  const online = Math.max(0, Math.floor(Number(u.online_devices) || 0));
-  return online > limit;
-}
-
 export function listUsers(): UserRow[] {
   return [...readStore().users].sort((a, b) => a.id - b.id);
 }
@@ -1939,6 +2049,42 @@ export function findUsersByTelegramChatId(chatId: number | string): UserRow[] {
   const key = String(chatId).trim();
   if (!key) return [];
   return listUsers().filter((u) => String(u.tg_id ?? "").trim() === key);
+}
+
+/** Telegram @username без «@» — из сессий оплаты, обращений, промокодов. */
+export function resolveTelegramUsernameByTgUserId(tgUserId: number): string | null {
+  const id = Math.floor(Number(tgUserId));
+  if (!Number.isFinite(id) || id <= 0) return null;
+  const norm = (raw: string | undefined) => {
+    const s = String(raw ?? "").trim().replace(/^@/, "");
+    return s || null;
+  };
+  const store = readStore();
+  const sessions = store.payment_sessions ?? [];
+  for (let i = sessions.length - 1; i >= 0; i--) {
+    const row = sessions[i]!;
+    if (row.tg_user_id === id) {
+      const un = norm(row.tg_username);
+      if (un) return un;
+    }
+  }
+  const appeals = store.support_appeals ?? [];
+  for (let i = appeals.length - 1; i >= 0; i--) {
+    const row = appeals[i]!;
+    if (row.tg_user_id === id) {
+      const un = norm(row.tg_username);
+      if (un) return un;
+    }
+  }
+  const usages = store.promo_code_usages ?? [];
+  for (let i = usages.length - 1; i >= 0; i--) {
+    const row = usages[i]!;
+    if (row.tg_user_id === id) {
+      const un = norm(row.tg_username);
+      if (un) return un;
+    }
+  }
+  return null;
 }
 
 export function getUserBySubToken(token: string): UserRow | undefined {
@@ -2095,6 +2241,13 @@ export function createUser(input: CreateUserInput = {}): UserRow {
       online_devices: 0,
       device_limit_enabled: input.device_limit_enabled === 1 ? 1 : 0,
       device_limit_count: Math.max(1, Math.floor(Number(input.device_limit_count) || 1)),
+      device_extra_slots: Math.max(0, Math.floor(Number(input.device_extra_slots) || 0)),
+      device_slots:
+        input.device_limit_enabled === 1
+          ? normalizeDeviceSlots(input.device_slots).length > 0
+            ? normalizeDeviceSlots(input.device_slots)
+            : [newDeviceSlot("Устройство 1")]
+          : [],
       speed_limit_mbps: coerceSpeedLimitMbps(input.speed_limit_mbps),
       whitelist_happ_enabled: input.whitelist_happ_enabled === 1 ? 1 : 0,
       whitelist_active_until: Math.max(0, Math.floor(Number(input.whitelist_active_until) || 0)),
@@ -2104,6 +2257,9 @@ export function createUser(input: CreateUserInput = {}): UserRow {
       stats_raw_down: -1,
       traffic_notify_state: "",
       expiry_notify_state: "",
+      expiry_warn_sent_day: "",
+      expiry_warn_last_error: "",
+      expiry_warn_error_day: "",
       connection_profile,
       dropper_tickets: 0,
       is_test_subscription: input.is_test_subscription === 1 ? 1 : 0,
@@ -2170,6 +2326,20 @@ export function updateUserRow(id: number, patch: Partial<CreateUserInput>): User
         patch.device_limit_count !== undefined
           ? Math.max(1, Math.floor(Number(patch.device_limit_count) || 1))
           : cur.device_limit_count,
+      device_extra_slots:
+        patch.device_extra_slots !== undefined
+          ? Math.max(0, Math.floor(Number(patch.device_extra_slots) || 0))
+          : cur.device_extra_slots,
+      device_slots: (() => {
+        const nextEnabled =
+          patch.device_limit_enabled !== undefined
+            ? patch.device_limit_enabled === 1
+            : cur.device_limit_enabled === 1;
+        let slots =
+          patch.device_slots !== undefined ? normalizeDeviceSlots(patch.device_slots) : normalizeDeviceSlots(cur.device_slots);
+        if (!nextEnabled) slots = [];
+        return slots;
+      })(),
       speed_limit_mbps:
         patch.speed_limit_mbps !== undefined ? coerceSpeedLimitMbps(patch.speed_limit_mbps) : cur.speed_limit_mbps,
       whitelist_happ_enabled:
@@ -2226,6 +2396,18 @@ export function updateUserRow(id: number, patch: Partial<CreateUserInput>): User
             ? patch.expiry_notify_state
             : ""
           : cur.expiry_notify_state,
+      expiry_warn_sent_day:
+        patch.expiry_warn_sent_day !== undefined
+          ? String(patch.expiry_warn_sent_day ?? "").trim().slice(0, 10)
+          : cur.expiry_warn_sent_day,
+      expiry_warn_last_error:
+        patch.expiry_warn_last_error !== undefined
+          ? String(patch.expiry_warn_last_error ?? "").trim().slice(0, 200)
+          : cur.expiry_warn_last_error,
+      expiry_warn_error_day:
+        patch.expiry_warn_error_day !== undefined
+          ? String(patch.expiry_warn_error_day ?? "").trim().slice(0, 10)
+          : cur.expiry_warn_error_day,
       connection_profile:
         patch.connection_profile !== undefined
           ? String(patch.connection_profile).toLowerCase() === "reality"
@@ -2246,6 +2428,364 @@ export function updateUserRow(id: number, patch: Partial<CreateUserInput>): User
     }, deployedIds);
     store.users[i] = merged;
     out = merged;
+  });
+  return out;
+}
+
+/** Пересчитывает blocked у устройств после изменения лимита. */
+export function reconcileAllUsersDeviceSlots(): number {
+  let changed = 0;
+  mutate((store) => {
+    const deployedIds = deployedIdsFromServerRows(store.servers);
+    for (let i = 0; i < store.users.length; i++) {
+      const cur = store.users[i]!;
+      if (!isDeviceLimitActiveForUser(cur)) continue;
+      const reconciled = reconcileUserDeviceSlots(cur);
+      const prev = JSON.stringify(cur.device_slots ?? []);
+      const next = JSON.stringify(reconciled);
+      if (prev === next) continue;
+      store.users[i] = normalizeUser(
+        { ...cur, device_slots: reconciled, updated_at: new Date().toISOString() },
+        deployedIds,
+      );
+      changed++;
+    }
+  });
+  return changed;
+}
+
+/** Пересчитывает blocked у одной подписки и сохраняет. */
+export function refreshUserDeviceSlotsReconcile(userId: number): UserRow | undefined {
+  let out: UserRow | undefined;
+  mutate((store) => {
+    const i = store.users.findIndex((u) => u.id === userId);
+    if (i === -1) return;
+    const cur = store.users[i]!;
+    if (!isDeviceLimitActiveForUser(cur)) {
+      out = cur;
+      return;
+    }
+    const reconciled = reconcileUserDeviceSlots(cur);
+    const deployedIds = deployedIdsFromServerRows(store.servers);
+    const next = normalizeUser(
+      { ...cur, device_slots: reconciled, updated_at: new Date().toISOString() },
+      deployedIds,
+    );
+    store.users[i] = next;
+    out = next;
+  });
+  return out;
+}
+
+/** Проверка лимита устройств по UUID (?did=); при успехе обновляет last_seen у слота. */
+export function touchDeviceLimitForUser(
+  userId: number,
+  deviceId: string,
+  opts?: {
+    requestIp?: string;
+    userAgent?: string;
+    deviceName?: string;
+    matchedBy?: string;
+    globalEnabled?: boolean;
+    autoBind?: boolean;
+  },
+): { allowed: boolean; user?: UserRow; reason?: string } {
+  let result: { allowed: boolean; user?: UserRow; reason?: string } = { allowed: true };
+  mutate((store) => {
+    const i = store.users.findIndex((u) => u.id === userId);
+    if (i === -1) return;
+    const cur = store.users[i]!;
+    if (!isDeviceLimitActiveForUser(cur)) {
+      result = { allowed: true, user: cur };
+      return;
+    }
+    const globalSettings = getDeviceLimitSettings();
+    const evalResult = evaluateDeviceLimitAccess(cur, deviceId, {
+      requestIp: opts?.requestIp,
+      userAgent: opts?.userAgent,
+      deviceName: opts?.deviceName,
+      autoBind: opts?.autoBind ?? globalSettings.auto_bind,
+      defaultSlots: globalSettings.default_slots,
+    });
+    if (evalResult.eventType) {
+      appendDeviceLimitEvent({
+        user_id: cur.id,
+        subscription_id: cur.id,
+        device_id: normalizeDeviceId(deviceId),
+        event_type: evalResult.eventType,
+        message: evalResult.reason ?? evalResult.eventType,
+        metadata_json: JSON.stringify({ matched_by: opts?.matchedBy ?? "unknown" }),
+      });
+    }
+    if (!evalResult.allowed) {
+      const reconciled = reconcileUserDeviceSlots({ ...cur, device_slots: evalResult.slots });
+      const deployedIds = deployedIdsFromServerRows(store.servers);
+      const blocked = normalizeUser({ ...cur, device_slots: reconciled, updated_at: new Date().toISOString() }, deployedIds);
+      store.users[i] = blocked;
+      result = { allowed: false, user: blocked, reason: evalResult.reason };
+      return;
+    }
+    const reconciled = reconcileUserDeviceSlots({ ...cur, device_slots: evalResult.slots });
+    const rid = normalizeDeviceId(deviceId);
+    const hit = reconciled.find((s) => s.id === rid);
+    const deployedIds = deployedIdsFromServerRows(store.servers);
+    const next = normalizeUser(
+      { ...cur, device_slots: reconciled, updated_at: new Date().toISOString() },
+      deployedIds,
+    );
+    store.users[i] = next;
+    if (hit?.blocked === 1) {
+      result = { allowed: false, user: next, reason: "over_limit" };
+      return;
+    }
+    result = { allowed: true, user: next };
+  });
+  return result;
+}
+
+export function addUserDeviceSlot(
+  userId: number,
+  label?: string,
+): { slot?: UserDeviceSlot; user?: UserRow; error?: string } {
+  let result: { slot?: UserDeviceSlot; user?: UserRow; error?: string } = { error: "not_found" };
+  const globalSettings = getDeviceLimitSettings();
+  mutate((store) => {
+    const i = store.users.findIndex((u) => u.id === userId);
+    if (i === -1) return;
+    let cur = store.users[i]!;
+    if (!isDeviceLimitActiveForUser(cur)) {
+      result = { error: "device_limit_disabled" };
+      return;
+    }
+    const slots = normalizeDeviceSlots(cur.device_slots);
+    const active = activeDeviceSlots(slots);
+    const calcSettings = { enabled: true as const, default_slots: globalSettings.default_slots };
+    const limit = userDeviceTotalLimit(cur, calcSettings);
+    if (active.length >= limit) {
+      result = { error: "device_limit_full", user: cur };
+      return;
+    }
+    const slot = newDeviceSlot(label?.trim() || `Устройство ${slots.length + 1}`);
+    const deployedIds = deployedIdsFromServerRows(store.servers);
+    const next = normalizeUser(
+      { ...cur, device_slots: [...slots, slot], updated_at: new Date().toISOString() },
+      deployedIds,
+    );
+    store.users[i] = next;
+    result = { slot, user: next };
+  });
+  return result;
+}
+
+export function removeUserDeviceSlot(userId: number, deviceId: string): UserRow | undefined {
+  let out: UserRow | undefined;
+  mutate((store) => {
+    const i = store.users.findIndex((u) => u.id === userId);
+    if (i === -1) return;
+    const cur = store.users[i]!;
+    const id = normalizeDeviceId(deviceId);
+    const now = new Date().toISOString();
+    const slots = normalizeDeviceSlots(cur.device_slots);
+    const idx = slots.findIndex((s) => s.id === id);
+    if (idx < 0) {
+      out = cur;
+      return;
+    }
+    const nextSlots = [...slots];
+    nextSlots[idx] = { ...nextSlots[idx]!, active: 0, deleted_at: now };
+    appendDeviceLimitEvent({
+      user_id: cur.id,
+      subscription_id: cur.id,
+      device_id: id,
+      event_type: "device_removed",
+      message: `Устройство удалено: ${nextSlots[idx]!.device_name}`,
+      metadata_json: "{}",
+    });
+    const deployedIds = deployedIdsFromServerRows(store.servers);
+    const next = normalizeUser({ ...cur, device_slots: nextSlots, updated_at: now }, deployedIds);
+    store.users[i] = next;
+    out = next;
+  });
+  return out;
+}
+
+export function renameUserDeviceSlot(userId: number, deviceId: string, name: string): UserRow | undefined {
+  let out: UserRow | undefined;
+  mutate((store) => {
+    const i = store.users.findIndex((u) => u.id === userId);
+    if (i === -1) return;
+    const cur = store.users[i]!;
+    const id = normalizeDeviceId(deviceId);
+    const label = String(name ?? "").trim().slice(0, 64);
+    if (!label) return;
+    const slots = normalizeDeviceSlots(cur.device_slots);
+    const idx = slots.findIndex((s) => s.id === id && !s.deleted_at);
+    if (idx < 0) return;
+    const nextSlots = [...slots];
+    nextSlots[idx] = { ...nextSlots[idx]!, label, device_name: label };
+    appendDeviceLimitEvent({
+      user_id: cur.id,
+      subscription_id: cur.id,
+      device_id: id,
+      event_type: "device_renamed",
+      message: `Переименовано: ${label}`,
+      metadata_json: "{}",
+    });
+    const deployedIds = deployedIdsFromServerRows(store.servers);
+    const next = normalizeUser({ ...cur, device_slots: nextSlots, updated_at: new Date().toISOString() }, deployedIds);
+    store.users[i] = next;
+    out = next;
+  });
+  return out;
+}
+
+export function addAdminDeviceExtraSlots(
+  userId: number,
+  slotsCount: number,
+  comment?: string,
+): UserRow | undefined {
+  let out: UserRow | undefined;
+  mutate((store) => {
+    const i = store.users.findIndex((u) => u.id === userId);
+    if (i === -1) return;
+    const cur = store.users[i]!;
+    const add = Math.max(1, Math.floor(Number(slotsCount) || 1));
+    const deployedIds = deployedIdsFromServerRows(store.servers);
+    const next = normalizeUser(
+      {
+        ...cur,
+        device_extra_slots: Math.max(0, Math.floor(Number(cur.device_extra_slots) || 0)) + add,
+        updated_at: new Date().toISOString(),
+      },
+      deployedIds,
+    );
+    store.users[i] = next;
+    out = next;
+    appendDeviceLimitEvent({
+      user_id: cur.id,
+      subscription_id: cur.id,
+      device_id: "",
+      event_type: "admin_slot_added",
+      message: `Админ добавил ${add} слот(ов)${comment ? `: ${comment}` : ""}`,
+      metadata_json: JSON.stringify({ slots: add }),
+    });
+  });
+  return out;
+}
+
+export function resetUserDeviceSlots(userId: number): UserRow | undefined {
+  let out: UserRow | undefined;
+  mutate((store) => {
+    const i = store.users.findIndex((u) => u.id === userId);
+    if (i === -1) return;
+    const cur = store.users[i]!;
+    const deployedIds = deployedIdsFromServerRows(store.servers);
+    const next = normalizeUser({ ...cur, device_slots: [], updated_at: new Date().toISOString() }, deployedIds);
+    store.users[i] = next;
+    out = next;
+  });
+  return out;
+}
+
+/** Синхронизирует лимит подписок с глобальным default_slots. */
+export function syncAllUsersDeviceLimitFromGlobal(defaultSlots: number): number {
+  let changed = 0;
+  mutate((store) => {
+    const deployedIds = deployedIdsFromServerRows(store.servers);
+    const slots = Math.max(1, Math.floor(Number(defaultSlots) || 1));
+    for (let i = 0; i < store.users.length; i++) {
+      const cur = store.users[i]!;
+      if (cur.is_test_subscription === 1) continue;
+      const needsEnable = cur.device_limit_enabled !== 1;
+      const curCount = Math.max(1, Math.floor(Number(cur.device_limit_count) || 1));
+      const needsCountSync = curCount !== slots;
+      if (!needsEnable && !needsCountSync) continue;
+      store.users[i] = normalizeUser(
+        {
+          ...cur,
+          device_limit_enabled: 1,
+          device_limit_count: slots,
+          updated_at: new Date().toISOString(),
+        },
+        deployedIds,
+      );
+      changed++;
+    }
+  });
+  return changed;
+}
+
+/** @deprecated use syncAllUsersDeviceLimitFromGlobal */
+export function applyGlobalDeviceLimitToAllUsers(defaultSlots: number): number {
+  return syncAllUsersDeviceLimitFromGlobal(defaultSlots);
+}
+
+/** Включает лимит устройств у подписки и подтягивает default_slots. */
+export function ensureUserDeviceLimitWhenGlobalEnabled(userId: number, defaultSlots: number): UserRow | undefined {
+  let out: UserRow | undefined;
+  mutate((store) => {
+    const i = store.users.findIndex((u) => u.id === userId);
+    if (i === -1) return;
+    const cur = store.users[i]!;
+    if (cur.is_test_subscription === 1) {
+      out = cur;
+      return;
+    }
+    const slots = Math.max(1, Math.floor(Number(defaultSlots) || 1));
+    const curCount = Math.max(1, Math.floor(Number(cur.device_limit_count) || 1));
+    const needsEnable = cur.device_limit_enabled !== 1;
+    const needsCountBump = curCount < slots;
+    if (!needsEnable && !needsCountBump) {
+      out = cur;
+      return;
+    }
+    const deployedIds = deployedIdsFromServerRows(store.servers);
+    const next = normalizeUser(
+      {
+        ...cur,
+        device_limit_enabled: 1,
+        device_limit_count: needsCountBump ? slots : curCount,
+        updated_at: new Date().toISOString(),
+      },
+      deployedIds,
+    );
+    store.users[i] = next;
+    out = next;
+  });
+  return out;
+}
+
+export function activateDeviceSlotPurchaseForUser(
+  userId: number,
+  slotsCount: number,
+  paymentId: string,
+): UserRow | undefined {
+  let out: UserRow | undefined;
+  mutate((store) => {
+    const i = store.users.findIndex((u) => u.id === userId);
+    if (i === -1) return;
+    const cur = store.users[i]!;
+    const add = Math.max(1, Math.floor(Number(slotsCount) || 1));
+    const deployedIds = deployedIdsFromServerRows(store.servers);
+    const next = normalizeUser(
+      {
+        ...cur,
+        device_limit_enabled: 1,
+        device_extra_slots: Math.max(0, Math.floor(Number(cur.device_extra_slots) || 0)) + add,
+        updated_at: new Date().toISOString(),
+      },
+      deployedIds,
+    );
+    store.users[i] = next;
+    out = next;
+    appendDeviceLimitEvent({
+      user_id: cur.id,
+      subscription_id: cur.id,
+      device_id: "",
+      event_type: "device_slot_purchase_paid",
+      message: `Оплачено +${add} мест, payment=${paymentId}`,
+      metadata_json: JSON.stringify({ payment_id: paymentId, slots: add }),
+    });
   });
   return out;
 }
@@ -2395,7 +2935,7 @@ export function startPaymentAwaitingProof(
   tg_chat_id: number,
   tg_user_id: number,
   plan_id: PaymentPlanId,
-  kind: "subscription" | "topup" | "test" | "white_lists" = "subscription",
+  kind: "subscription" | "topup" | "test" | "white_lists" | "device_slot" = "subscription",
   target_user_id?: number,
   new_subscription_name?: string,
   tgProfile?: { username?: string; first_name?: string },
@@ -3390,6 +3930,9 @@ export function createPromoCode(input: {
   admin_note?: string;
   active?: boolean;
   valid_until?: string;
+  bound_tg_user_id?: number;
+  source?: PromoCodeSource;
+  source_ref?: string;
 }): PromoCodeRow {
   const name = String(input.name ?? "").trim();
   const code = normalizePromoCodeText(input.code);
@@ -3439,6 +3982,11 @@ export function createPromoCode(input: {
       new_users_only: input.new_users_only === true,
       ...(applyPlanIds.length > 0 ? { apply_plan_ids: applyPlanIds } : {}),
       ...(String(input.admin_note ?? "").trim() ? { admin_note: String(input.admin_note ?? "").trim().slice(0, 500) } : {}),
+      ...(Number.isFinite(Number(input.bound_tg_user_id)) && Number(input.bound_tg_user_id) > 0
+        ? { bound_tg_user_id: Math.floor(Number(input.bound_tg_user_id)) }
+        : {}),
+      ...(input.source ? { source: input.source } : {}),
+      ...(String(input.source_ref ?? "").trim() ? { source_ref: String(input.source_ref).trim().slice(0, 120) } : {}),
       active: input.active !== false,
       valid_until: validUntil,
       created_at: new Date().toISOString(),
@@ -3597,6 +4145,9 @@ export function validatePromoCodeForUser(code: string, tgUserId: number): PromoC
   if (promo.new_users_only && uid > 0) {
     const hadNonTestSubscription = findUsersByTelegramChatId(uid).some((u) => u.is_test_subscription !== 1);
     if (hadNonTestSubscription) throw new Error("promo_new_users_only");
+  }
+  if (promo.bound_tg_user_id != null && promo.bound_tg_user_id > 0 && promo.bound_tg_user_id !== uid) {
+    throw new Error("promo_not_for_user");
   }
   return promo;
 }
@@ -3880,9 +4431,25 @@ export function clearTestSubscriptionFlags(userIds: number[]): void {
 
 const COMMUNICATION_LOG_MAX = 2000;
 
-export function listCommunicationMessageLog(limit = 200): CommunicationMessageLogRow[] {
+export function listCommunicationMessageLog(
+  limit = 200,
+  opts?: { fromYmd?: string; toYmd?: string },
+): CommunicationMessageLogRow[] {
   const cap = Math.max(1, Math.min(500, Math.floor(limit) || 200));
-  const rows = readCommunicationLogFile();
+  const tz = projectTimezone();
+  const fromYmd = String(opts?.fromYmd ?? "").trim();
+  const toYmd = String(opts?.toYmd ?? "").trim();
+  let rows = readCommunicationLogFile();
+  if (fromYmd || toYmd) {
+    rows = rows.filter((r) => {
+      const ts = Date.parse(r.sent_at);
+      if (!Number.isFinite(ts)) return false;
+      const ymd = localYmdInTz(ts, tz);
+      if (fromYmd && ymd < fromYmd) return false;
+      if (toYmd && ymd > toYmd) return false;
+      return true;
+    });
+  }
   return [...rows]
     .sort((a, b) => {
       const ta = Date.parse(a.sent_at);
@@ -4359,37 +4926,153 @@ function normalizeRoulettePurchaseDiscount(raw: unknown): RoulettePurchaseDiscou
   if (!Number.isFinite(tgUserId) || tgUserId <= 0) return null;
   if (!Number.isFinite(percent) || percent < 1 || percent > 100) return null;
   if (!Number.isFinite(spinId) || spinId <= 0) return null;
+  const sourceRaw = String(o.source ?? "").trim();
+  const source: PurchaseDiscountSource =
+    sourceRaw === "daily_gift" || sourceRaw === "admin" ? sourceRaw : "roulette";
+  const id = String(o.id ?? "").trim() || randomBytes(8).toString("hex");
   return {
+    id,
     tg_user_id: Math.floor(tgUserId),
     discount_percent: Math.floor(percent),
     spin_id: Math.floor(spinId),
+    source,
+    ...(String(o.source_label ?? "").trim()
+      ? { source_label: String(o.source_label).trim().slice(0, 120) }
+      : {}),
     created_at: String(o.created_at ?? new Date().toISOString()),
   };
+}
+
+export function generateUniquePromoCodeText(prefix = "DG"): string {
+  const codes = new Set((readStore().promo_codes ?? []).map((p) => p.code));
+  for (let i = 0; i < 64; i++) {
+    const code = `${prefix}${randomBytes(4).toString("hex").toUpperCase()}`;
+    if (!codes.has(code)) return code;
+  }
+  throw new Error("promo_code_generate_failed");
+}
+
+export function createPersonalPromoCodeForUser(input: {
+  tg_user_id: number;
+  discount_percent: number;
+  name: string;
+  source?: PromoCodeSource;
+  source_ref?: string;
+}): PromoCodeRow {
+  const percent = Math.min(100, Math.max(1, Math.floor(Number(input.discount_percent) || 0)));
+  if (percent < 1) throw new Error("promo_discount_invalid");
+  const code = generateUniquePromoCodeText("DG");
+  return createPromoCode({
+    name: String(input.name ?? "").trim() || `Подарок ${percent}%`,
+    code,
+    type: "percent",
+    discount_percent: percent,
+    one_time_per_user: true,
+    max_uses_total: 1,
+    max_uses_per_user: 1,
+    active: true,
+    bound_tg_user_id: Math.floor(input.tg_user_id),
+    source: input.source ?? "daily_gift",
+    source_ref: input.source_ref,
+  });
 }
 
 export function grantRoulettePurchaseDiscount(
   tgUserId: number,
   discountPercent: number,
   spinId: number,
+  opts?: { source?: PurchaseDiscountSource; source_label?: string },
 ): RoulettePurchaseDiscountRow {
   const row: RoulettePurchaseDiscountRow = {
+    id: randomBytes(8).toString("hex"),
     tg_user_id: Math.floor(tgUserId),
     discount_percent: Math.min(100, Math.max(1, Math.floor(discountPercent))),
     spin_id: Math.floor(spinId),
+    source: opts?.source ?? "roulette",
+    ...(String(opts?.source_label ?? "").trim()
+      ? { source_label: String(opts?.source_label ?? "").trim().slice(0, 120) }
+      : {}),
     created_at: new Date().toISOString(),
   };
   mutate((store) => {
-    const prev = store.roulette_purchase_discounts ?? [];
-    store.roulette_purchase_discounts = [
-      ...prev.filter((d) => d.tg_user_id !== row.tg_user_id),
-      row,
-    ];
+    store.roulette_purchase_discounts = [...(store.roulette_purchase_discounts ?? []), row];
   });
   return row;
 }
 
 export function getRoulettePurchaseDiscount(tgUserId: number): RoulettePurchaseDiscountRow | undefined {
-  return (readStore().roulette_purchase_discounts ?? []).find((d) => d.tg_user_id === Math.floor(tgUserId));
+  const uid = Math.floor(tgUserId);
+  const rows = (readStore().roulette_purchase_discounts ?? [])
+    .filter((d) => d.tg_user_id === uid)
+    .sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at));
+  return rows[0];
+}
+
+export function countRoulettePurchaseDiscounts(tgUserId: number): number {
+  const uid = Math.floor(tgUserId);
+  return (readStore().roulette_purchase_discounts ?? []).filter((d) => d.tg_user_id === uid).length;
+}
+
+export function listPurchaseDiscountsGrouped(): {
+  users: Array<{
+    tg_user_id: number;
+    user_name?: string;
+    queue_count: number;
+    next_percent?: number;
+    discounts: RoulettePurchaseDiscountRow[];
+  }>;
+  total_discounts: number;
+} {
+  const list = [...(readStore().roulette_purchase_discounts ?? [])].sort(
+    (a, b) => Date.parse(a.created_at) - Date.parse(b.created_at),
+  );
+  const byUser = new Map<number, RoulettePurchaseDiscountRow[]>();
+  for (const d of list) {
+    const arr = byUser.get(d.tg_user_id) ?? [];
+    arr.push(d);
+    byUser.set(d.tg_user_id, arr);
+  }
+  const users = [...byUser.entries()]
+    .map(([tg_user_id, discounts]) => {
+      const linked = findUsersByTelegramChatId(tg_user_id);
+      const u = linked.sort((a, b) => a.id - b.id)[0];
+      return {
+        tg_user_id,
+        user_name: u?.name?.trim() || undefined,
+        queue_count: discounts.length,
+        next_percent: discounts[0]?.discount_percent,
+        discounts,
+      };
+    })
+    .sort((a, b) => b.queue_count - a.queue_count || b.tg_user_id - a.tg_user_id);
+  return { users, total_discounts: list.length };
+}
+
+export function clearPurchaseDiscountsForUser(tgUserId: number): number {
+  let removed = 0;
+  mutate((store) => {
+    const uid = Math.floor(tgUserId);
+    const before = store.roulette_purchase_discounts ?? [];
+    const after = before.filter((d) => d.tg_user_id !== uid);
+    removed = before.length - after.length;
+    store.roulette_purchase_discounts = after;
+  });
+  return removed;
+}
+
+export function deletePurchaseDiscount(id: string): boolean {
+  const discountId = String(id ?? "").trim();
+  if (!discountId) return false;
+  let ok = false;
+  mutate((store) => {
+    const list = [...(store.roulette_purchase_discounts ?? [])];
+    const idx = list.findIndex((d) => d.id === discountId);
+    if (idx < 0) return;
+    list.splice(idx, 1);
+    store.roulette_purchase_discounts = list;
+    ok = true;
+  });
+  return ok;
 }
 
 function normalizeRouletteGbPiggy(raw: unknown, users: UserRow[]): RouletteGbPiggyRow | null {
@@ -4492,12 +5175,19 @@ export function exchangeRouletteGbPiggyForTicket(
 export function consumeRoulettePurchaseDiscount(tgUserId: number, spinId?: number): boolean {
   let ok = false;
   mutate((store) => {
-    const list = store.roulette_purchase_discounts ?? [];
-    const idx = list.findIndex(
-      (d) =>
-        d.tg_user_id === Math.floor(tgUserId) &&
-        (spinId == null || spinId <= 0 || d.spin_id === Math.floor(spinId)),
-    );
+    const list = [...(store.roulette_purchase_discounts ?? [])];
+    const uid = Math.floor(tgUserId);
+    let idx = -1;
+    if (spinId != null && spinId > 0) {
+      idx = list.findIndex((d) => d.tg_user_id === uid && d.spin_id === Math.floor(spinId));
+    }
+    if (idx < 0) {
+      const userRows = list
+        .map((d, i) => ({ d, i }))
+        .filter(({ d }) => d.tg_user_id === uid)
+        .sort((a, b) => Date.parse(a.d.created_at) - Date.parse(b.d.created_at));
+      idx = userRows[0]?.i ?? -1;
+    }
     if (idx < 0) return;
     list.splice(idx, 1);
     store.roulette_purchase_discounts = list;

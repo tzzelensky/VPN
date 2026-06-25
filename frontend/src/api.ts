@@ -1,6 +1,7 @@
 import type { PanelSettings, PanelSettingsResponse } from "./panelSettingsTypes";
 
 const jsonHeaders = { "Content-Type": "application/json" };
+const SYNC_STATS_FETCH_TIMEOUT_MS = 45_000;
 
 async function handle<T>(res: Response): Promise<T> {
   if (!res.ok) {
@@ -84,6 +85,16 @@ export async function addServerToAllSubscriptions(
   id: number,
 ): Promise<{ ok: boolean; updated_users: number; server: ServerDto }> {
   const res = await fetch(`/api/servers/${id}/add-to-all-subscriptions`, {
+    method: "POST",
+    credentials: "include",
+  });
+  return handle(res);
+}
+
+export async function removeServerFromAllSubscriptions(
+  id: number,
+): Promise<{ ok: boolean; updated_users: number; server: ServerDto }> {
+  const res = await fetch(`/api/servers/${id}/remove-from-all-subscriptions`, {
     method: "POST",
     credentials: "include",
   });
@@ -436,8 +447,18 @@ export type UserDto = {
   subscription_server_ids: number[];
   /** Включено ли ограничение устройств для подписки. */
   device_limit_enabled: boolean;
+  /** Глобальный переключатель лимита устройств в настройках панели. */
+  device_limit_global_enabled?: boolean;
+  /** Лимит реально применяется (глобально и для пользователя). */
+  device_limit_active?: boolean;
   /** Максимум устройств при включенном ограничении. */
   device_limit_count: number;
+  /** Итоговый лимит: default_slots + докупленные места. */
+  device_limit_total?: number;
+  /** Зарегистрированные устройства (не онлайн). */
+  devices_registered?: number;
+  /** Зарегистрированные устройства (ссылка подписки с ?did=). */
+  device_slots: UserDeviceSlotDto[];
   /** Лимит скорости, Мбит/с; 0 = без ограничения. */
   speed_limit_mbps: number;
   /** К подписке дописываются последние 4 узла + happ (белые списки). По умолчанию выкл. */
@@ -457,6 +478,9 @@ export type UserDto = {
   /** Победы в дроппере: при том же tg_id — общее число для Telegram; иначе по строке подписки. */
   dropper_wins: number;
   extra_vless_links: ExtraVlessLinkDto[];
+  /** Статус авто-напоминания о сроке: sent | waiting | error | null */
+  expiry_auto_notify_status?: "sent" | "waiting" | "error" | null;
+  expiry_auto_notify_hint?: string;
   created_at: string;
   updated_at: string;
 };
@@ -465,6 +489,20 @@ export type ExtraVlessLinkDto = {
   id: string;
   uri: string;
   label: string;
+};
+
+export type UserDeviceSlotDto = {
+  id: string;
+  label: string;
+  device_name?: string;
+  device_type?: string;
+  device_icon?: string;
+  created_at: string;
+  first_seen_at?: string;
+  last_seen_at: string;
+  last_ip: string;
+  subscription_url: string;
+  active?: boolean;
 };
 
 export type CreateUserPayload = {
@@ -540,6 +578,244 @@ export async function patchUser(id: number, payload: Partial<CreateUserPayload>)
     credentials: "include",
     headers: jsonHeaders,
     body: JSON.stringify(compactPatch(payload)),
+  });
+  return handle(res);
+}
+
+export async function addUserDeviceSlot(
+  userId: number,
+  label?: string,
+): Promise<{ slot: UserDeviceSlotDto; user: UserDto }> {
+  const res = await fetch(`/api/users/${userId}/device-slots`, {
+    method: "POST",
+    credentials: "include",
+    headers: jsonHeaders,
+    body: JSON.stringify(label ? { label } : {}),
+  });
+  return handle(res);
+}
+
+export async function removeUserDeviceSlot(userId: number, deviceId: string): Promise<{ user: UserDto }> {
+  const res = await fetch(`/api/users/${userId}/device-slots/${encodeURIComponent(deviceId)}`, {
+    method: "DELETE",
+    credentials: "include",
+  });
+  return handle(res);
+}
+
+export type DeviceLimitSettingsDto = {
+  enabled: boolean;
+  limit_scope: "all" | "selected";
+  default_slots: number;
+  auto_bind: boolean;
+  on_limit_exceeded: "stub" | "empty" | "instruction";
+  purchase_enabled: boolean;
+  purchase_price_rub: number;
+  purchase_validity: "subscription_end" | "30_days" | "forever" | "custom";
+  purchase_max_extra: number;
+  updated_at: string;
+};
+
+export type DeviceLimitOverviewDto = {
+  settings: DeviceLimitSettingsDto;
+  stats: {
+    users_with_limit: number;
+    total_devices: number;
+    active_devices: number;
+    blocked_attempts: number;
+    purchased_extra_slots: number;
+    purchase_revenue_rub: number;
+  };
+  events?: Array<{
+    id: string;
+    event_type: string;
+    message: string;
+    user_id: number;
+    subscription_id?: number;
+    device_id?: string;
+    created_at: string;
+  }>;
+};
+
+export type DeviceLimitSubscriptionRowDto = {
+  user_id: number;
+  user_name: string;
+  tg_id: string;
+  subscription_id: number;
+  subscription_name: string;
+  expiry_time: number;
+  device_limit_enabled: boolean;
+  devices_used: number;
+  device_limit: number | null;
+  device_extra_slots: number;
+  last_device_name: string;
+  devices: Array<UserDeviceSlotDto & { device_id_masked?: string; device_icon?: string }>;
+};
+
+export async function loadDeviceLimitOverview(): Promise<DeviceLimitOverviewDto> {
+  const [base, eventsRes] = await Promise.all([
+    fetch("/api/device-limit", { credentials: "include" }).then(handle) as Promise<{ settings: DeviceLimitSettingsDto; stats: DeviceLimitOverviewDto["stats"] }>,
+    fetch("/api/device-limit/events?limit=100", { credentials: "include" }).then(handle) as Promise<{ events: DeviceLimitOverviewDto["events"] }>,
+  ]);
+  return { ...base, events: eventsRes.events };
+}
+
+export async function saveDeviceLimitSettings(settings: Partial<DeviceLimitSettingsDto>): Promise<{ settings: DeviceLimitSettingsDto }> {
+  const res = await fetch("/api/device-limit/settings", {
+    method: "PUT",
+    credentials: "include",
+    headers: jsonHeaders,
+    body: JSON.stringify(settings),
+  });
+  return handle(res);
+}
+
+export async function setSubscriptionDeviceLimit(
+  subscriptionId: number,
+  enabled: boolean,
+): Promise<{ row: DeviceLimitSubscriptionRowDto }> {
+  const res = await fetch(`/api/device-limit/subscriptions/${subscriptionId}/limit`, {
+    method: "PUT",
+    credentials: "include",
+    headers: jsonHeaders,
+    body: JSON.stringify({ enabled }),
+  });
+  return handle(res);
+}
+
+export async function setAllSubscriptionDeviceLimit(
+  enabled: boolean,
+): Promise<{ changed: number; rows: DeviceLimitSubscriptionRowDto[] }> {
+  const res = await fetch("/api/device-limit/subscriptions/limit-all", {
+    method: "PUT",
+    credentials: "include",
+    headers: jsonHeaders,
+    body: JSON.stringify({ enabled }),
+  });
+  return handle(res);
+}
+
+export async function loadDeviceLimitSubscriptions(): Promise<{ rows: DeviceLimitSubscriptionRowDto[] }> {
+  const res = await fetch("/api/device-limit/subscriptions", { credentials: "include" });
+  return handle(res);
+}
+
+export async function loadDeviceLimitPurchases(): Promise<{
+  purchases: Array<{
+    id: string;
+    user_name: string;
+    subscription_name: string;
+    slots_count: number;
+    amount_total: number;
+    status: string;
+    created_at: string;
+    activated_at?: string;
+    payment_id?: string;
+    expires_at?: number;
+  }>;
+}> {
+  const res = await fetch("/api/device-limit/purchases", { credentials: "include" });
+  return handle(res);
+}
+
+export async function addAdminDeviceSlots(subscriptionId: number, slots: number, comment?: string): Promise<{ row: DeviceLimitSubscriptionRowDto }> {
+  const res = await fetch(`/api/device-limit/subscriptions/${subscriptionId}/add-slots`, {
+    method: "POST",
+    credentials: "include",
+    headers: jsonHeaders,
+    body: JSON.stringify({ slots, comment }),
+  });
+  return handle(res);
+}
+
+export async function resetAdminDevices(subscriptionId: number): Promise<{ row: DeviceLimitSubscriptionRowDto }> {
+  const res = await fetch(`/api/device-limit/subscriptions/${subscriptionId}/reset-devices`, {
+    method: "POST",
+    credentials: "include",
+  });
+  return handle(res);
+}
+
+export async function renameAdminDevice(subscriptionId: number, deviceId: string, name: string): Promise<{ row: DeviceLimitSubscriptionRowDto }> {
+  const res = await fetch(`/api/device-limit/subscriptions/${subscriptionId}/devices/${encodeURIComponent(deviceId)}/rename`, {
+    method: "PATCH",
+    credentials: "include",
+    headers: jsonHeaders,
+    body: JSON.stringify({ name }),
+  });
+  return handle(res);
+}
+
+export async function removeAdminDevice(subscriptionId: number, deviceId: string): Promise<{ row: DeviceLimitSubscriptionRowDto }> {
+  const res = await fetch(`/api/device-limit/subscriptions/${subscriptionId}/devices/${encodeURIComponent(deviceId)}`, {
+    method: "DELETE",
+    credentials: "include",
+  });
+  return handle(res);
+}
+
+export async function diagnoseDeviceLimit(
+  subscriptionId: number,
+  deviceId: string,
+  userAgent?: string,
+): Promise<Record<string, unknown>> {
+  const res = await fetch("/api/device-limit/diagnose", {
+    method: "POST",
+    credentials: "include",
+    headers: jsonHeaders,
+    body: JSON.stringify({ subscription_id: subscriptionId, device_id: deviceId, user_agent: userAgent ?? "" }),
+  });
+  return handle(res);
+}
+
+export type DeviceLimitSubscriptionsSnapshotDto = {
+  generated_at: string;
+  scan_duration_ms?: number;
+  servers_scanned?: number;
+  errors?: string[];
+  warnings?: string[];
+  settings: {
+    enabled: boolean;
+    limit_scope: "all" | "selected";
+    default_slots: number;
+  };
+  summary: {
+    subscriptions_total: number;
+    limit_active: number;
+    online_now: number;
+    total_live_connections: number;
+    registered_devices_total: number;
+    with_devices?: number;
+    total_active_devices?: number;
+    online_with_devices?: number;
+    over_limit?: number;
+  };
+  rows: Array<{
+    user_id: number;
+    user_name: string;
+    tg_id: string;
+    limit_active: boolean;
+    device_limit_enabled: boolean;
+    registered_devices: number;
+    registered_names: string[];
+    device_limit: number | null;
+    online_connections: number;
+    online_ips: string[];
+    xray_online_count?: number;
+    /** legacy fields from DB-only snapshot */
+    devices_used?: number;
+    device_names?: string[];
+    online?: boolean;
+    online_devices?: number;
+    last_device_name?: string;
+    device_extra_slots?: number;
+  }>;
+};
+
+export async function loadDeviceLimitSubscriptionsSnapshot(): Promise<DeviceLimitSubscriptionsSnapshotDto> {
+  const res = await fetch("/api/device-limit/diagnose/connections-scan", {
+    method: "POST",
+    credentials: "include",
   });
   return handle(res);
 }
@@ -696,8 +972,19 @@ export async function syncUserStatsFromServers(): Promise<{
   warns: string[];
   ms: number;
 }> {
-  const res = await fetch("/api/users/sync-stats", { method: "POST", credentials: "include" });
-  return handle(res);
+  const controller = new AbortController();
+  const timer = window.setTimeout(() => controller.abort(), SYNC_STATS_FETCH_TIMEOUT_MS);
+  try {
+    const res = await fetch("/api/users/sync-stats", { method: "POST", credentials: "include", signal: controller.signal });
+    return handle(res);
+  } catch (e) {
+    if (e instanceof Error && e.name === "AbortError") {
+      return { ok: false, updated: 0, errors: ["timeout"], warns: [], ms: SYNC_STATS_FETCH_TIMEOUT_MS };
+    }
+    throw e;
+  } finally {
+    window.clearTimeout(timer);
+  }
 }
 
 export async function saveSubscriptionShop(body: SubscriptionShopDto): Promise<SubscriptionShopDto> {
@@ -834,8 +1121,72 @@ export type CommunicationMessageLogDto = {
   failed: number;
 };
 
-export async function listCommunicationHistory(limit = 200): Promise<{ items: CommunicationMessageLogDto[] }> {
-  const res = await fetch(`/api/communications/history?limit=${encodeURIComponent(String(limit))}`, {
+export async function listCommunicationHistory(opts?: {
+  limit?: number;
+  from?: string;
+  to?: string;
+}): Promise<{ items: CommunicationMessageLogDto[] }> {
+  const q = new URLSearchParams();
+  q.set("limit", String(opts?.limit ?? 200));
+  if (opts?.from) q.set("from", opts.from);
+  if (opts?.to) q.set("to", opts.to);
+  const res = await fetch(`/api/communications/history?${q}`, {
+    credentials: "include",
+  });
+  return handle(res);
+}
+
+export type AutoTrafficNotifyConfigDto = {
+  enabled: boolean;
+  low_gb_threshold: number;
+  interval_minutes: number;
+  skip_test_subscriptions: boolean;
+  low_message: string;
+  empty_message: string;
+  source_label_low: string;
+  source_label_empty: string;
+};
+
+export type AutoExpiryNotifyConfigDto = {
+  enabled: boolean;
+  days_before: number;
+  interval_minutes: number;
+  notify_hour: number;
+  notify_minute: number;
+  skip_test_subscriptions: boolean;
+  warn_same_day_message: string;
+  warn_days_message: string;
+  expired_message: string;
+  source_label_warn: string;
+  source_label_expired: string;
+};
+
+export type AutoCommunicationsConfigDto = {
+  traffic: AutoTrafficNotifyConfigDto;
+  expiry: AutoExpiryNotifyConfigDto;
+  updated_at: string;
+};
+
+export async function loadAutoCommunicationsConfig(): Promise<AutoCommunicationsConfigDto> {
+  const res = await fetch("/api/communications/auto-broadcasts", { credentials: "include" });
+  return handle(res);
+}
+
+export async function saveAutoCommunicationsConfig(
+  body: AutoCommunicationsConfigDto,
+): Promise<AutoCommunicationsConfigDto> {
+  const res = await fetch("/api/communications/auto-broadcasts", {
+    method: "PUT",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  return handle(res);
+}
+
+export async function runExpiryAutoBroadcastsNow(): Promise<{ ok: boolean }> {
+  const res = await fetch("/api/communications/auto-broadcasts/run-expiry", {
+    method: "POST",
     credentials: "include",
   });
   return handle(res);
@@ -977,6 +1328,11 @@ export type PanelSettingsPatchPayload = {
 
 export async function fetchPanelSettings(): Promise<PanelSettingsResponse> {
   const res = await fetch("/api/settings", { credentials: "include" });
+  return handle(res);
+}
+
+export async function fetchPanelTelegramBotToken(): Promise<{ botToken: string }> {
+  const res = await fetch("/api/settings/telegram-bot-token", { credentials: "include" });
   return handle(res);
 }
 
@@ -1219,6 +1575,8 @@ export type MySubProfileDto = {
   name: string;
   avatar_url: string | null;
   stats_html: string;
+  /** Включён ли новый дизайн WebApp (из настроек панели). */
+  web_app_new_design?: boolean;
   subscriptions: Array<{
     id: number;
     name: string;
@@ -1245,7 +1603,16 @@ export type MySubProfileDto = {
       traffic_percent: number | null;
       expiry_label: string | null;
     };
+    devices?: MySubDevicesInfoDto;
+    daily_gift?: MySubDailyGiftDto;
   }>;
+  device_limit?: {
+    enabled: boolean;
+    purchase_enabled: boolean;
+    purchase_price_rub: number;
+    purchase_max_extra: number;
+    default_slots: number;
+  };
   payment_url: string;
   plans: Array<{ id: number; title: string; total_gb: number; days: number; price_rub: number }>;
   topup_plans: Array<{ id: number; title: string; add_gb: number; price_rub: number }>;
@@ -1309,6 +1676,9 @@ export type MySubProfileDto = {
     enabled: boolean;
     invite_copy_text: string;
     invite_link: string;
+    inviter_reward_gb?: number;
+    inviter_reward_days?: number;
+    invited_discount_percent?: number;
     invited_friends: Array<{
       reward_id: string;
       name: string;
@@ -1337,6 +1707,38 @@ export type MySubProfileDto = {
       photo_url?: string | null;
     };
   };
+  daily_gift?: MySubDailyGiftDto;
+};
+
+export type MySubDailyGiftDto = {
+  enabled: boolean;
+  visible: boolean;
+  can_open: boolean;
+  opened: boolean;
+  golden: boolean;
+  reminder_enabled: boolean;
+  day_key: string;
+  empty_message: string | null;
+  banner_image_url: string | null;
+  prize_preview: {
+    id: string;
+    title: string;
+    type: "gb" | "days" | "promo" | "discount";
+    value: string;
+    description: string;
+    golden: boolean;
+  } | null;
+  opened_gift: {
+    title: string;
+    type: "gb" | "days" | "promo" | "discount";
+    value: string;
+    description: string;
+    golden: boolean;
+    status: "applied" | "failed" | "pending";
+    error_message: string | null;
+    credit_mode?: "direct" | "piggy" | null;
+  } | null;
+  next_reset_at: string | null;
 };
 
 export async function loadMySubProfile(tgId: number): Promise<MySubProfileDto> {
@@ -1353,9 +1755,30 @@ export async function loadMySubWebAppProfile(initData: string): Promise<MySubPro
   return handle(res);
 }
 
+export type MySubDevicesInfoDto = {
+  enabled: boolean;
+  used: number;
+  limit: number;
+  over_limit?: number;
+  free_slots: number;
+  can_buy_slot: boolean;
+  purchase_enabled?: boolean;
+  purchase_price_rub: number;
+  devices: Array<{
+    id: string;
+    device_name: string;
+    device_type: string;
+    device_icon: string;
+    last_seen_at: string;
+    last_ip: string;
+    subscription_url: string;
+    status?: "active" | "over_limit";
+  }>;
+};
+
 export async function sendMySubPaymentProof(payload: {
   init_data: string;
-  pay_kind?: "subscription" | "topup" | "test" | "white_lists";
+  pay_kind?: "subscription" | "topup" | "test" | "white_lists" | "device_slot";
   user_id?: number;
   plan_id: number;
   photo_base64: string;
@@ -1366,6 +1789,36 @@ export async function sendMySubPaymentProof(payload: {
 }): Promise<{ ok: boolean }> {
   const res = await fetch("/api/mysub/webapp/payment-proof", {
     method: "POST",
+    headers: jsonHeaders,
+    body: JSON.stringify(payload),
+  });
+  return handle(res);
+}
+
+export async function mySubAddDevice(payload: { init_data: string; user_id: number; label?: string }): Promise<{
+  device: { id: string; device_name: string; subscription_url: string };
+  devices: MySubDevicesInfoDto;
+}> {
+  const res = await fetch("/api/mysub/webapp/devices/add", {
+    method: "POST",
+    headers: jsonHeaders,
+    body: JSON.stringify(payload),
+  });
+  return handle(res);
+}
+
+export async function mySubRenameDevice(payload: { init_data: string; user_id: number; device_id: string; name: string }) {
+  const res = await fetch("/api/mysub/webapp/devices/rename", {
+    method: "PATCH",
+    headers: jsonHeaders,
+    body: JSON.stringify(payload),
+  });
+  return handle(res);
+}
+
+export async function mySubRemoveDevice(payload: { init_data: string; user_id: number; device_id: string }) {
+  const res = await fetch("/api/mysub/webapp/devices/remove", {
+    method: "DELETE",
     headers: jsonHeaders,
     body: JSON.stringify(payload),
   });
@@ -1477,6 +1930,44 @@ export async function claimMySubReferralReward(payload: {
     method: "POST",
     headers: jsonHeaders,
     body: JSON.stringify(payload),
+  });
+  return handle(res);
+}
+
+export async function claimMySubDailyGift(payload: {
+  init_data: string;
+  user_id?: number;
+}): Promise<{
+  ok: boolean;
+  gift: MySubDailyGiftDto["opened_gift"];
+  daily_gift: MySubDailyGiftDto;
+  user_id?: number;
+}> {
+  const res = await fetch("/api/mysub/webapp/daily-gift/claim", {
+    method: "POST",
+    headers: jsonHeaders,
+    body: JSON.stringify(payload),
+  });
+  return handle(res);
+}
+
+export async function toggleMySubDailyGiftReminder(payload: {
+  init_data: string;
+  enabled: boolean;
+}): Promise<{ ok: boolean; reminder_enabled: boolean; daily_gift: MySubDailyGiftDto }> {
+  const res = await fetch("/api/mysub/webapp/daily-gift/reminder", {
+    method: "POST",
+    headers: jsonHeaders,
+    body: JSON.stringify(payload),
+  });
+  return handle(res);
+}
+
+export async function markMySubDailyGiftSeen(initData: string): Promise<{ ok: boolean }> {
+  const res = await fetch("/api/mysub/webapp/daily-gift/seen", {
+    method: "POST",
+    headers: jsonHeaders,
+    body: JSON.stringify({ init_data: initData }),
   });
   return handle(res);
 }
@@ -1994,6 +2485,50 @@ export async function deletePromoCode(promoId: string): Promise<{ ok: boolean }>
   return handle(res);
 }
 
+export type PurchaseDiscountSource = "roulette" | "daily_gift" | "admin";
+
+export type PurchaseDiscountRowDto = {
+  id: string;
+  tg_user_id: number;
+  discount_percent: number;
+  spin_id: number;
+  source: PurchaseDiscountSource;
+  source_label?: string;
+  created_at: string;
+};
+
+export type PurchaseDiscountUserDto = {
+  tg_user_id: number;
+  user_name?: string;
+  queue_count: number;
+  next_percent?: number;
+  discounts: PurchaseDiscountRowDto[];
+};
+
+export async function listPurchaseDiscounts(): Promise<{
+  users: PurchaseDiscountUserDto[];
+  total_discounts: number;
+}> {
+  const res = await fetch("/api/purchase-discounts", { credentials: "include" });
+  return handle(res);
+}
+
+export async function clearPurchaseDiscountsForUser(tgUserId: number): Promise<{ ok: boolean; removed: number }> {
+  const res = await fetch(`/api/purchase-discounts/user/${encodeURIComponent(String(tgUserId))}`, {
+    method: "DELETE",
+    credentials: "include",
+  });
+  return handle(res);
+}
+
+export async function deletePurchaseDiscount(id: string): Promise<{ ok: boolean }> {
+  const res = await fetch(`/api/purchase-discounts/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+    credentials: "include",
+  });
+  return handle(res);
+}
+
 export async function previewMySubPromoCode(payload: {
   init_data: string;
   code: string;
@@ -2271,6 +2806,8 @@ export async function patchExperimentNote(
 
 export type VlessCheckStatusDto = "available" | "unavailable" | "unstable" | "never" | "checking";
 
+export type ConfigVaultSubscriptionModeDto = "all" | "selected";
+
 export type ConfigVaultKeyDto = {
   id: number;
   name: string;
@@ -2278,6 +2815,10 @@ export type ConfigVaultKeyDto = {
   masked_uri: string;
   active: boolean;
   added_to_subscriptions: boolean;
+  subscription_mode: ConfigVaultSubscriptionModeDto;
+  subscription_user_ids?: number[];
+  subscription_users_count?: number;
+  subscription_label?: string;
   last_check_at: string | null;
   last_check_status: VlessCheckStatusDto;
   last_check_latency_ms: number | null;
@@ -2359,6 +2900,8 @@ export async function createConfigVaultKey(body: {
   raw_uri: string;
   active?: boolean;
   notify_on_fail?: boolean;
+  subscription_mode?: ConfigVaultSubscriptionModeDto;
+  subscription_user_ids?: number[];
 }): Promise<{ key: ConfigVaultKeyDto }> {
   const res = await fetch("/api/config-vault", {
     method: "POST",
@@ -2371,7 +2914,14 @@ export async function createConfigVaultKey(body: {
 
 export async function updateConfigVaultKey(
   id: number,
-  body: Partial<{ name: string; raw_uri: string; active: boolean; notify_on_fail: boolean }>,
+  body: Partial<{
+    name: string;
+    raw_uri: string;
+    active: boolean;
+    notify_on_fail: boolean;
+    subscription_mode: ConfigVaultSubscriptionModeDto;
+    subscription_user_ids: number[];
+  }>,
 ): Promise<{ key: ConfigVaultKeyDto }> {
   const res = await fetch(`/api/config-vault/${id}`, {
     method: "PATCH",
@@ -2393,6 +2943,20 @@ export async function setConfigVaultSubscriptions(id: number, added: boolean): P
     credentials: "include",
     headers: jsonHeaders,
     body: JSON.stringify({ added }),
+  });
+  return handleVault(res);
+}
+
+export async function setConfigVaultSubscriptionTargets(
+  id: number,
+  subscription_mode: ConfigVaultSubscriptionModeDto,
+  subscription_user_ids?: number[],
+): Promise<{ key: ConfigVaultKeyDto }> {
+  const res = await fetch(`/api/config-vault/${id}/subscription-targets`, {
+    method: "POST",
+    credentials: "include",
+    headers: jsonHeaders,
+    body: JSON.stringify({ subscription_mode, subscription_user_ids }),
   });
   return handleVault(res);
 }
@@ -2431,6 +2995,28 @@ export async function importConfigVaultKeys(body: {
   notify_on_fail?: boolean;
 }): Promise<{ added: number; skipped_duplicates: number; errors: string[]; keys: ConfigVaultKeyDto[] }> {
   const res = await fetch("/api/config-vault/import", {
+    method: "POST",
+    credentials: "include",
+    headers: jsonHeaders,
+    body: JSON.stringify(body),
+  });
+  return handleVault(res);
+}
+
+export async function importConfigVaultJson(body: {
+  json: string;
+  name?: string;
+  active?: boolean;
+  notify_on_fail?: boolean;
+  import_all?: boolean;
+}): Promise<{
+  added: number;
+  skipped_duplicates: number;
+  errors: string[];
+  keys: ConfigVaultKeyDto[];
+  parsed_uris?: string[];
+}> {
+  const res = await fetch("/api/config-vault/import-json", {
     method: "POST",
     credentials: "include",
     headers: jsonHeaders,
@@ -2805,4 +3391,374 @@ export async function testWhitelistInstruction(admin_chat_id: number): Promise<{
     body: JSON.stringify({ admin_chat_id }),
   });
   return handleVault(res);
+}
+
+export type TelegramProxyTypeDto = "mtproto" | "socks5" | "http";
+
+export type TelegramProxyStatusDto =
+  | "unknown"
+  | "available"
+  | "unavailable"
+  | "auth_error"
+  | "timeout"
+  | "checking";
+
+export type TelegramProxyDto = {
+  id: number;
+  server_id: number;
+  name: string;
+  type: TelegramProxyTypeDto;
+  host: string;
+  port: number;
+  username: string;
+  password: string;
+  secret: string;
+  auth_enabled: boolean;
+  active: boolean;
+  status: TelegramProxyStatusDto;
+  last_check_at: string | null;
+  last_latency_ms: number | null;
+  last_error: string | null;
+  service_name: string;
+  created_at: string;
+  updated_at: string;
+  tg_link: string | null;
+  tme_link: string | null;
+  mtproto_sni: string | null;
+  connection_text: string | null;
+};
+
+export type TelegramProxyServerDto = {
+  id: number;
+  name: string;
+  country: string;
+  host: string;
+  ssh_ok: boolean;
+  xray_ok: boolean;
+  proxy_count: number;
+  proxy_status: TelegramProxyStatusDto | "none";
+  last_proxy_check_at: string | null;
+};
+
+export type TelegramProxySettingsDto = {
+  auto_check_enabled: boolean;
+  interval_minutes: number;
+  attempts_per_check: number;
+  attempt_timeout_sec: number;
+  notify_on_unavailable: boolean;
+  notify_on_recovery: boolean;
+  notify_cooldown_minutes: number;
+  last_auto_run_at: string | null;
+};
+
+export type TelegramProxiesOverviewDto = {
+  stats: {
+    total: number;
+    available: number;
+    unavailable: number;
+    mtproto: number;
+    socks5: number;
+    http: number;
+    last_auto_run_at: string | null;
+  };
+  telegram_configured: boolean;
+  settings: TelegramProxySettingsDto;
+  servers: TelegramProxyServerDto[];
+  proxies: TelegramProxyDto[];
+};
+
+export type TelegramProxyEventDto = {
+  id: number;
+  proxy_id: number | null;
+  server_id: number | null;
+  event_type: string;
+  message: string;
+  created_at: string;
+};
+
+async function handleProxies<T>(res: Response): Promise<T> {
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(parseApiError(text));
+  }
+  return res.json() as Promise<T>;
+}
+
+export async function loadTelegramProxies(): Promise<TelegramProxiesOverviewDto> {
+  const res = await fetch("/api/telegram-proxies", { credentials: "include" });
+  return handleProxies(res);
+}
+
+export async function createTelegramProxy(body: {
+  server_id: number;
+  name: string;
+  type: TelegramProxyTypeDto;
+  port?: number;
+  auth_enabled?: boolean;
+  username?: string;
+  password?: string;
+  secret?: string;
+  auto_generate?: boolean;
+  active?: boolean;
+}): Promise<{ proxy: TelegramProxyDto; deploy?: { firewall: string | null } }> {
+  const res = await fetch("/api/telegram-proxies", {
+    method: "POST",
+    credentials: "include",
+    headers: jsonHeaders,
+    body: JSON.stringify(body),
+  });
+  return handleProxies(res);
+}
+
+export async function updateTelegramProxy(
+  id: number,
+  body: Partial<{
+    name: string;
+    port: number;
+    auth_enabled: boolean;
+    username: string;
+    password: string;
+    secret: string;
+    active: boolean;
+  }>,
+): Promise<{ proxy: TelegramProxyDto }> {
+  const res = await fetch(`/api/telegram-proxies/${id}`, {
+    method: "PATCH",
+    credentials: "include",
+    headers: jsonHeaders,
+    body: JSON.stringify(body),
+  });
+  return handleProxies(res);
+}
+
+export async function deleteTelegramProxy(id: number): Promise<void> {
+  const res = await fetch(`/api/telegram-proxies/${id}`, { method: "DELETE", credentials: "include" });
+  await handleProxies(res);
+}
+
+export async function checkTelegramProxy(id: number): Promise<{ proxy: TelegramProxyDto; check: unknown }> {
+  const res = await fetch(`/api/telegram-proxies/${id}/check`, { method: "POST", credentials: "include" });
+  return handleProxies(res);
+}
+
+export async function restartTelegramProxy(id: number): Promise<{ proxy: TelegramProxyDto }> {
+  const res = await fetch(`/api/telegram-proxies/${id}/restart`, { method: "POST", credentials: "include" });
+  return handleProxies(res);
+}
+
+export async function checkAllTelegramProxies(): Promise<
+  TelegramProxiesOverviewDto & { total: number; already_running?: boolean; started?: boolean }
+> {
+  const res = await fetch("/api/telegram-proxies/check-all", { method: "POST", credentials: "include" });
+  return handleProxies(res);
+}
+
+export async function checkServerTelegramProxies(
+  serverId: number,
+): Promise<{ checked: number; errors: string[]; proxies: TelegramProxyDto[] }> {
+  const res = await fetch(`/api/telegram-proxies/servers/${serverId}/check-all`, {
+    method: "POST",
+    credentials: "include",
+  });
+  return handleProxies(res);
+}
+
+export async function purgeServerTelegramProxies(
+  serverId: number,
+): Promise<TelegramProxiesOverviewDto & { removed: number; errors: string[] }> {
+  const res = await fetch(`/api/telegram-proxies/servers/${serverId}/purge`, {
+    method: "POST",
+    credentials: "include",
+  });
+  return handleProxies(res);
+}
+
+export async function patchTelegramProxySettings(
+  patch: Partial<TelegramProxySettingsDto>,
+): Promise<TelegramProxiesOverviewDto> {
+  const res = await fetch("/api/telegram-proxies/settings", {
+    method: "PATCH",
+    credentials: "include",
+    headers: jsonHeaders,
+    body: JSON.stringify(patch),
+  });
+  return handleProxies(res);
+}
+
+export async function listTelegramProxyEvents(limit = 200): Promise<{ events: TelegramProxyEventDto[] }> {
+  const res = await fetch(`/api/telegram-proxies/events?limit=${limit}`, { credentials: "include" });
+  return handleProxies(res);
+}
+
+export async function suggestTelegramProxyPort(
+  serverId: number,
+  type: TelegramProxyTypeDto,
+): Promise<{ port: number }> {
+  const res = await fetch(
+    `/api/telegram-proxies/suggest-port?server_id=${serverId}&type=${type}`,
+    { credentials: "include" },
+  );
+  return handleProxies(res);
+}
+
+export async function generateMtprotoSecretApi(): Promise<{ secret: string }> {
+  const res = await fetch("/api/telegram-proxies/generate-secret", { credentials: "include" });
+  return handleProxies(res);
+}
+
+export async function fetchTelegramProxyDetails(id: number): Promise<{ proxy: TelegramProxyDto }> {
+  const res = await fetch(`/api/telegram-proxies/${id}`, { credentials: "include" });
+  return handleProxies(res);
+}
+
+export async function fetchTelegramProxyLogs(id: number, lines = 80): Promise<{ logs: string }> {
+  const res = await fetch(`/api/telegram-proxies/${id}/logs?lines=${lines}`, { credentials: "include" });
+  return handleProxies(res);
+}
+
+export type DailyGiftPrizeType = "gb" | "days" | "promo" | "discount";
+export type DailyGiftSelectionMode = "random" | "scheduled" | "queue";
+
+export type DailyGiftPrizeDto = {
+  id: string;
+  title: string;
+  type: DailyGiftPrizeType;
+  value: string;
+  description: string;
+  active: boolean;
+  weight: number;
+  valid_from: string | null;
+  valid_until: string | null;
+  max_total_claims: number | null;
+  max_per_user: number | null;
+  claims_count: number;
+  golden?: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+export type DailyGiftConfigDto = {
+  enabled: boolean;
+  selection_mode: DailyGiftSelectionMode;
+  queue_prize_ids: string[];
+  queue_index: number;
+  banner_image_url: string | null;
+  reset_hour: number;
+  reset_minute: number;
+  notify_hour: number;
+  notify_minute: number;
+};
+
+export type DailyGiftAdminDto = {
+  config: DailyGiftConfigDto;
+  prizes: DailyGiftPrizeDto[];
+  schedules: Array<{ day_key: string; prize_id: string }>;
+  day_assignments: Array<{ day_key: string; prize_id: string }>;
+  claims: Array<{
+    id: string;
+    tg_user_id: number;
+    tg_username: string | null;
+    subscription_name?: string | null;
+    user_id: number | null;
+    day_key: string;
+    prize_title: string;
+    prize_type: DailyGiftPrizeType;
+    status: string;
+    opened_at: string;
+  }>;
+  events: Array<{ id: string; event: string; detail: string | null; created_at: string; tg_user_id: number | null }>;
+  reminders_count: number;
+};
+
+export async function loadDailyGiftAdmin(): Promise<DailyGiftAdminDto> {
+  const res = await fetch("/api/daily-gift", { credentials: "include" });
+  return handle(res);
+}
+
+export async function saveDailyGiftConfig(config: Partial<DailyGiftConfigDto>): Promise<DailyGiftConfigDto> {
+  const res = await fetch("/api/daily-gift/config", {
+    method: "PUT",
+    headers: jsonHeaders,
+    body: JSON.stringify(config),
+    credentials: "include",
+  });
+  return handle(res);
+}
+
+export async function saveDailyGiftPrize(prize: Partial<DailyGiftPrizeDto> & { id?: string }): Promise<DailyGiftPrizeDto> {
+  const hasId = Boolean(prize.id);
+  const res = await fetch(hasId ? `/api/daily-gift/prizes/${encodeURIComponent(prize.id!)}` : "/api/daily-gift/prizes", {
+    method: hasId ? "PUT" : "POST",
+    headers: jsonHeaders,
+    body: JSON.stringify(prize),
+    credentials: "include",
+  });
+  return handle(res);
+}
+
+export async function deleteDailyGiftPrize(id: string): Promise<{ ok: boolean }> {
+  const res = await fetch(`/api/daily-gift/prizes/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+    credentials: "include",
+  });
+  return handle(res);
+}
+
+export async function saveDailyGiftSchedule(day_key: string, prize_id: string): Promise<{ ok: boolean }> {
+  const res = await fetch("/api/daily-gift/schedules", {
+    method: "POST",
+    headers: jsonHeaders,
+    body: JSON.stringify({ day_key, prize_id }),
+    credentials: "include",
+  });
+  return handle(res);
+}
+
+export async function deleteDailyGiftSchedule(dayKey: string): Promise<{ ok: boolean }> {
+  const res = await fetch(`/api/daily-gift/schedules/${encodeURIComponent(dayKey)}`, {
+    method: "DELETE",
+    credentials: "include",
+  });
+  return handle(res);
+}
+
+export async function saveDailyGiftQueue(prize_ids: string[]): Promise<DailyGiftConfigDto> {
+  const res = await fetch("/api/daily-gift/queue", {
+    method: "PUT",
+    headers: jsonHeaders,
+    body: JSON.stringify({ prize_ids }),
+    credentials: "include",
+  });
+  return handle(res);
+}
+
+export async function resetDailyGiftUserClaim(payload: {
+  tg_user_id: number;
+  day_key?: string;
+}): Promise<{ ok: boolean; removed: number; day_key: string; claims: DailyGiftAdminDto["claims"] }> {
+  const res = await fetch("/api/daily-gift/reset-user-claim", {
+    method: "POST",
+    headers: jsonHeaders,
+    body: JSON.stringify(payload),
+    credentials: "include",
+  });
+  return handle(res);
+}
+
+export async function sendDailyGiftReminderManual(payload: {
+  tg_user_ids: number[];
+}): Promise<{
+  ok: boolean;
+  sent: number;
+  failed: number;
+  total: number;
+  results: Array<{ tg_user_id: number; ok: boolean; error?: string }>;
+}> {
+  const res = await fetch("/api/daily-gift/send-reminder", {
+    method: "POST",
+    headers: jsonHeaders,
+    body: JSON.stringify(payload),
+    credentials: "include",
+  });
+  return handle(res);
 }

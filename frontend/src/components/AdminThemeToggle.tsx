@@ -3,7 +3,6 @@ import {
   getAdminTheme,
   initAdminTheme,
   setAdminThemeSetting,
-  transitionAdminTheme,
   type AdminTheme,
 } from "../adminTheme";
 import { usePanelSettings } from "../panelSettingsContext";
@@ -65,7 +64,6 @@ export default function AdminThemeToggle({ className, variant = "sidebar" }: Pro
     setBusy(true);
     try {
       setAdminThemeSetting(next);
-      await transitionAdminTheme(next);
       setTheme(next);
       if (panel.settings) {
         await panel.applyPatch({
