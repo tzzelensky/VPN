@@ -1,4 +1,4 @@
-import { forwardRef, useCallback, useImperativeHandle, useLayoutEffect, useRef } from "react";
+import { forwardRef, useCallback, useImperativeHandle, useLayoutEffect, useRef, useState } from "react";
 import type { MySubNavTabId } from "../../components/MySubBottomNav";
 import type { MySubWebAppController } from "../types";
 import type { BottomNavHandle } from "./bottomNavHandle";
@@ -12,6 +12,12 @@ type Props = {
 type BubbleRect = { left: number; width: number };
 
 const DRAG_THRESHOLD_PX = 6;
+
+function blurNavButton(target: EventTarget | null): void {
+  if (!(target instanceof HTMLElement)) return;
+  if (!target.closest(".mn-bottom-nav")) return;
+  target.blur();
+}
 
 function findTouchById(touches: TouchList, id: number): Touch | null {
   for (let i = 0; i < touches.length; i++) {
@@ -58,6 +64,7 @@ const BottomNavNew = forwardRef<BottomNavHandle, Props>(function BottomNavNew({ 
   const upHandlerRef = useRef<(e: PointerEvent) => void>(() => {});
 
   const activeIndex = Math.max(0, items.findIndex((it) => it.id === active));
+  const [visualIndex, setVisualIndex] = useState(activeIndex);
 
   const applyBubble = useCallback((left: number, width: number, dragging: boolean) => {
     const el = bubbleRef.current;
@@ -70,9 +77,7 @@ const BottomNavNew = forwardRef<BottomNavHandle, Props>(function BottomNavNew({ 
   const applyVisualIndex = useCallback((idx: number) => {
     if (previewIndexRef.current === idx) return;
     previewIndexRef.current = idx;
-    for (let i = 0; i < itemRefs.current.length; i++) {
-      itemRefs.current[i]?.classList.toggle("is-active", i === idx);
-    }
+    setVisualIndex(idx);
   }, []);
 
   const measureRects = useCallback(() => {
@@ -95,11 +100,11 @@ const BottomNavNew = forwardRef<BottomNavHandle, Props>(function BottomNavNew({ 
   }, [items.length]);
 
   const snapToIndex = useCallback(
-    (index: number, animate: boolean) => {
+    (index: number, _animate: boolean) => {
       swipeProgressRef.current = false;
       measureRects();
       const rect = rectsRef.current[index];
-      if (rect) applyBubble(rect.left, rect.width, !animate);
+      if (rect) applyBubble(rect.left, rect.width, false);
       applyVisualIndex(index);
     },
     [applyBubble, applyVisualIndex, measureRects],
@@ -170,6 +175,12 @@ const BottomNavNew = forwardRef<BottomNavHandle, Props>(function BottomNavNew({ 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [items.length]);
 
+  useLayoutEffect(() => {
+    if (draggingRef.current || swipeProgressRef.current) return;
+    previewIndexRef.current = activeIndex;
+    setVisualIndex(activeIndex);
+  }, [activeIndex]);
+
   const detachWindowListeners = useCallback(() => {
     window.removeEventListener("pointermove", moveHandlerRef.current);
     window.removeEventListener("pointerup", upHandlerRef.current);
@@ -194,6 +205,7 @@ const BottomNavNew = forwardRef<BottomNavHandle, Props>(function BottomNavNew({ 
       const rect = rectsRef.current[index];
       if (rect) applyBubble(rect.left, rect.width, false);
       applyVisualIndex(index);
+      blurNavButton(document.activeElement);
       const item = items[index];
       if (item && item.id !== active) onChange(item.id);
     },
@@ -322,6 +334,8 @@ const BottomNavNew = forwardRef<BottomNavHandle, Props>(function BottomNavNew({ 
         barLeft: barRect.left,
         barWidth: barRect.width,
       };
+      blurNavButton(target);
+      if (e.cancelable) e.preventDefault();
 
       const onTouchMove = (ev: TouchEvent) => {
         const drag = dragRef.current;
@@ -382,7 +396,7 @@ const BottomNavNew = forwardRef<BottomNavHandle, Props>(function BottomNavNew({ 
       inner.addEventListener("touchcancel", onTouchEnd, { passive: true });
     };
 
-    inner.addEventListener("touchstart", onTouchStart, { passive: true });
+    inner.addEventListener("touchstart", onTouchStart, { passive: false });
     return () => {
       inner.removeEventListener("touchstart", onTouchStart);
       cancelDrag();
@@ -405,8 +419,9 @@ const BottomNavNew = forwardRef<BottomNavHandle, Props>(function BottomNavNew({ 
               itemRefs.current[i] = el;
             }}
             type="button"
-            className={`mn-bottom-nav__btn ${i === activeIndex ? "is-active" : ""}`.trim()}
-            onClick={() => {
+            className={`mn-bottom-nav__btn ${i === visualIndex ? "is-active" : ""}`.trim()}
+            onClick={(e) => {
+              blurNavButton(e.currentTarget);
               if (item.id === active) return;
               onChange(item.id);
             }}

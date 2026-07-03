@@ -1,4 +1,5 @@
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import AdminModalBackdrop from "../components/AdminModalBackdrop";
 import DashboardLayout from "../components/DashboardLayout";
 import SettingsToggleRow from "../components/SettingsToggleRow";
 import Spinner from "../components/Spinner";
@@ -101,6 +102,7 @@ export default function DeviceLimitPage({ onLogout }: { onLogout: () => void }) 
   const [purchases, setPurchases] = useState<Awaited<ReturnType<typeof loadDeviceLimitPurchases>>["purchases"]>([]);
   const [events, setEvents] = useState<Awaited<ReturnType<typeof loadDeviceLimitOverview>>["events"]>([]);
   const [devicesModal, setDevicesModal] = useState<DeviceLimitSubscriptionRowDto | null>(null);
+  const [atLimitModalOpen, setAtLimitModalOpen] = useState(false);
   const [diagSubId, setDiagSubId] = useState("");
   const [diagDid, setDiagDid] = useState("");
   const [diagUa, setDiagUa] = useState("");
@@ -255,15 +257,21 @@ export default function DeviceLimitPage({ onLogout }: { onLogout: () => void }) 
     setTab("events");
   }
 
+  const usersAtLimit = useMemo(
+    () => rows.filter((r) => r.device_limit != null && r.devices_used >= r.device_limit),
+    [rows],
+  );
+
   const statCards = overview
     ? [
         { label: "С лимитом", value: overview.stats.users_with_limit, accent: "" },
         { label: "Всего устройств", value: overview.stats.total_devices, accent: "" },
         { label: "Активных", value: overview.stats.active_devices, accent: "" },
         {
-          label: "Блокировок",
-          value: overview.stats.blocked_attempts,
-          accent: overview.stats.blocked_attempts > 0 ? "warn" : "",
+          label: "На лимите",
+          value: overview.stats.users_at_limit,
+          accent: overview.stats.users_at_limit > 0 ? "warn" : "",
+          clickable: true,
         },
         { label: "Докуплено мест", value: overview.stats.purchased_extra_slots, accent: "" },
         {
@@ -322,12 +330,28 @@ export default function DeviceLimitPage({ onLogout }: { onLogout: () => void }) 
         {overview ? (
           <section className="panel referral-stats-panel">
             <div className="referral-stats-grid device-limit-stats-grid">
-              {statCards.map((c) => (
-                <div key={c.label} className={`referral-stat-card device-limit-stat-card${c.accent ? ` device-limit-stat-card--${c.accent}` : ""}`}>
-                  <span className="referral-stat-label">{c.label}</span>
-                  <strong>{c.value}</strong>
-                </div>
-              ))}
+              {statCards.map((c) =>
+                c.clickable ? (
+                  <button
+                    key={c.label}
+                    type="button"
+                    className={`referral-stat-card device-limit-stat-card device-limit-stat-card--clickable${c.accent ? ` device-limit-stat-card--${c.accent}` : ""}`}
+                    onClick={() => setAtLimitModalOpen(true)}
+                    title="Показать пользователей с достигнутым лимитом"
+                  >
+                    <span className="referral-stat-label">{c.label}</span>
+                    <strong>{c.value}</strong>
+                  </button>
+                ) : (
+                  <div
+                    key={c.label}
+                    className={`referral-stat-card device-limit-stat-card${c.accent ? ` device-limit-stat-card--${c.accent}` : ""}`}
+                  >
+                    <span className="referral-stat-label">{c.label}</span>
+                    <strong>{c.value}</strong>
+                  </div>
+                ),
+              )}
             </div>
           </section>
         ) : null}
@@ -945,8 +969,68 @@ export default function DeviceLimitPage({ onLogout }: { onLogout: () => void }) 
           </section>
         ) : null}
 
+        {atLimitModalOpen ? (
+          <AdminModalBackdrop className="device-limit-modal-backdrop" onClick={() => setAtLimitModalOpen(false)}>
+            <div className="modal card device-limit-modal device-limit-at-limit-modal" onClick={(e) => e.stopPropagation()}>
+              <h3>Пользователи на лимите</h3>
+              <p className="sub">
+                Подписки, у которых зарегистрировано устройств не меньше разрешённого лимита ({usersAtLimit.length}).
+              </p>
+              {usersAtLimit.length === 0 ? (
+                <p className="sub device-limit-empty">Сейчас никто не достиг лимита устройств.</p>
+              ) : (
+                <div className="card device-limit-table-wrap">
+                  <table className="data-table">
+                    <thead>
+                      <tr>
+                        <th>Пользователь</th>
+                        <th>Подписка</th>
+                        <th>Устройства</th>
+                        <th>Telegram</th>
+                        <th />
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {usersAtLimit.map((r) => (
+                        <tr key={r.subscription_id}>
+                          <td>{r.user_name}</td>
+                          <td>{r.subscription_name}</td>
+                          <td>
+                            <strong>
+                              {r.devices_used}/{r.device_limit}
+                            </strong>
+                            {r.device_extra_slots > 0 ? ` · +${r.device_extra_slots}` : ""}
+                          </td>
+                          <td>{r.tg_id ? r.tg_id : "—"}</td>
+                          <td>
+                            <button
+                              type="button"
+                              className="ghost"
+                              onClick={() => {
+                                setAtLimitModalOpen(false);
+                                setDevicesModal(r);
+                              }}
+                            >
+                              Устройства
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+              <div className="device-limit-modal__footer">
+                <button type="button" className="ghost" onClick={() => setAtLimitModalOpen(false)}>
+                  Закрыть
+                </button>
+              </div>
+            </div>
+          </AdminModalBackdrop>
+        ) : null}
+
         {devicesModal ? (
-          <div className="modal-backdrop device-limit-modal-backdrop" onClick={() => setDevicesModal(null)}>
+          <AdminModalBackdrop className="device-limit-modal-backdrop" onClick={() => setDevicesModal(null)}>
             <div className="modal card device-limit-modal" onClick={(e) => e.stopPropagation()}>
               <h3>{devicesModal.subscription_name}</h3>
               <p className="sub">
@@ -1030,7 +1114,7 @@ export default function DeviceLimitPage({ onLogout }: { onLogout: () => void }) 
                 </button>
               </div>
             </div>
-          </div>
+          </AdminModalBackdrop>
         ) : null}
       </div>
     </DashboardLayout>

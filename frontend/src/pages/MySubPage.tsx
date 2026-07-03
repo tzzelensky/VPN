@@ -63,6 +63,18 @@ function formatTopUpMeta(p: { add_gb: number }): string {
   return `+${p.add_gb} ГБ`;
 }
 
+function resolveLocalDevInitData(): string {
+  if (typeof window === "undefined") return "";
+  const host = String(window.location.hostname ?? "").toLowerCase();
+  if (host !== "localhost" && host !== "127.0.0.1") return "";
+  const query = new URLSearchParams(window.location.search);
+  const explicit = String(query.get("dev_tg_id") ?? "").trim();
+  if (explicit) return `local-dev:${explicit}`;
+  const pathMatch = window.location.pathname.match(/^\/mysub\/(\d+)$/);
+  if (pathMatch?.[1]) return `local-dev:${pathMatch[1]}`;
+  return "local-dev:504445187";
+}
+
 function NavIcon({ tab }: { tab: Tab }) {
   if (tab === "home") {
     return (
@@ -198,7 +210,7 @@ export default function MySubPage() {
     if (fromHash) return decodeURIComponent(fromHash);
     const fromQuery = new URLSearchParams(window.location.search).get("tgWebAppData");
     if (fromQuery) return decodeURIComponent(fromQuery);
-    return "";
+    return resolveLocalDevInitData();
   }
 
   useEffect(() => {

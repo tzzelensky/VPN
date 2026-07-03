@@ -182,7 +182,7 @@ export type DeviceLimitOverviewStats = {
   users_with_limit: number;
   total_devices: number;
   active_devices: number;
-  blocked_attempts: number;
+  users_at_limit: number;
   purchased_extra_slots: number;
   purchase_revenue_rub: number;
 };

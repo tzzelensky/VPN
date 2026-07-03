@@ -53,6 +53,7 @@
   "POST /api/daily-gift/schedules": "Привязывает приз к дню недели или дате.",
   "DELETE /api/daily-gift/schedules/{dayKey}": "Удаляет привязку приза к дню.",
   "POST /api/daily-gift/send-reminder": "Отправляет напоминание о ежедневном подарке в Telegram.",
+  "GET /api/device-limit/at-limit-users": "Список подписок, у которых достигнут лимит устройств.",
   "GET /api/device-limit/": "Настройки лимита устройств и сводная статистика.",
   "POST /api/device-limit/diagnose": "Диагностика доступа устройства к подписке без изменений в БД.",
   "POST /api/device-limit/diagnose/connections-scan": "Живой опрос Xray: с каких IP сейчас подключены клиенты.",

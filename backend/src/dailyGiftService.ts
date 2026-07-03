@@ -308,6 +308,12 @@ function resolveClaimCreditMode(claim: DailyGiftClaimRow, tgUserId: number): "di
   return "direct";
 }
 
+function syncDailyGiftChangesInBackground(): void {
+  void pushClientListToAllDeployedServers().catch((error) => {
+    console.warn("[daily-gift] background sync failed:", error instanceof Error ? error.message : error);
+  });
+}
+
 async function applyPrizeToUser(
   prize: DailyGiftPrizeRow,
   tgUserId: number,
@@ -355,11 +361,8 @@ async function applyPrizeToUser(
     const base = Math.max(Date.now(), user.expiry_time > 0 ? user.expiry_time : 0);
     updateUserRow(uid, { expiry_time: snapExpiryTimeToNoonLocal(base + days * 86_400_000) });
   }
-  try {
-    await pushClientListToAllDeployedServers();
-  } catch {
-    // UI flow continues even if sync fails
-  }
+  // Applying the reward locally is enough for the WebApp response; server sync can finish in background.
+  syncDailyGiftChangesInBackground();
   return { ok: true, credit_mode: "direct" };
 }
 

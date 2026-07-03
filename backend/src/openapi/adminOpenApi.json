@@ -2846,6 +2846,51 @@
         ]
       }
     },
+    "/api/device-limit/at-limit-users": {
+      "get": {
+        "tags": [
+          "Device limit"
+        ],
+        "summary": "Список подписок, у которых достигнут лимит устройств.",
+        "description": "Список подписок, у которых достигнут лимит устройств.\n\n**HTTP:** `GET /api/device-limit/at-limit-users`\n\n**Файл:** `deviceLimit.ts`\n\n**Требуется сессия** (cookie `tzadmin.sid`)",
+        "responses": {
+          "200": {
+            "description": "Успех"
+          },
+          "400": {
+            "description": "Неверный запрос",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Не авторизован",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Не найдено"
+          },
+          "500": {
+            "description": "Ошибка сервера"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ]
+      }
+    },
     "/api/device-limit/diagnose": {
       "post": {
         "tags": [

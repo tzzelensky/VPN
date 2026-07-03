@@ -435,6 +435,198 @@ tail -f /root/vpn-rebuild-api.log
 
 В конце скрипт сам делает `systemctl restart vpn-admin-api` и проверяет `/api/health`.
 
+### 13.2. Практический сценарий: раскатка на стенд
+
+Ниже — более «боевой» порядок, который пригодился на реальном стенде, когда на сервере уже есть история ручных правок и не всё идеально чисто.
+
+#### Шаг 1. Сначала зафиксируйте нужные правки локально
+
+На локальной машине:
+
+```bash
+cd c:\git_clone\VPN
+git status
+git add -A
+git commit -m "Кратко: что меняем на стенде"
+git push origin main
+```
+
+Если в `git status` есть служебные runtime-файлы вроде `backend/telegram_proxies.json`, `daily_gift_store.json`, `device_limit_store.json` — сначала убедитесь, что это не случайный локальный мусор от запуска, и не тащите его на стенд без необходимости.
+
+#### Шаг 2. Найдите, какой каталог реально обслуживает стенд
+
+На сервере это может быть не `/opt/vpn-admin`, а другой клон, например `/home/vpnadm/vpn-admin-app`.
+
+Проверьте:
+
+```bash
+systemctl show -p WorkingDirectory -p EnvironmentFiles vpn-admin-api.service
+```
+
+Если увидите:
+
+```text
+WorkingDirectory=/home/vpnadm/vpn-admin-app/backend
+EnvironmentFiles=/home/vpnadm/vpn-admin-app/backend/.env
+```
+
+значит обновлять надо именно `/home/vpnadm/vpn-admin-app`, а не другой клон.
+
+#### Шаг 3. Проверьте чистоту рабочего дерева на стенде
+
+```bash
+cd /home/vpnadm/vpn-admin-app
+git status --short
+git rev-parse --short HEAD
+git rev-parse --short origin/main
+```
+
+Если `HEAD` уже равен `origin/main`, но `git status --short` показывает много `M` и `??`, не запускайте вслепую `git pull && npm run build`: вы пересоберёте смесь из коммитов и старых ручных правок.
+
+#### Шаг 4. Если дерево чистое — обычная схема
+
+```bash
+cd /home/vpnadm/vpn-admin-app
+git pull
+cd backend && npm ci && npm run build
+cd ../frontend && npm ci && npm run build
+sudo systemctl restart vpn-admin-api
+sudo systemctl reload nginx
+curl -s http://127.0.0.1:4000/api/health
+```
+
+#### Шаг 5. Если дерево грязное — безопаснее раскатывать архивом
+
+Этот путь лучше, если:
+
+- на сервере много незакоммиченных файлов;
+- есть второй старый клон проекта;
+- вы не уверены, что `git pull` оставит дерево в предсказуемом состоянии.
+
+На локальной машине соберите архив **только с кодом**, без `node_modules`, `dist`, `.git`, `.env` и данных:
+
+```bash
+tar -czf vpn-prod-deploy.tar.gz ^
+  --exclude=.git ^
+  --exclude=backend/.env ^
+  --exclude=backend/data.json ^
+  --exclude=backend/cookies.txt ^
+  --exclude=backend/panel_settings.json ^
+  --exclude=backend/telegram_proxies.json ^
+  --exclude=backend/daily_gift_store.json ^
+  --exclude=backend/device_limit_store.json ^
+  --exclude=backend/surveys_store.json ^
+  --exclude=backend/panel-avatars ^
+  --exclude=backend/node_modules ^
+  --exclude=backend/dist ^
+  --exclude=frontend/node_modules ^
+  --exclude=frontend/dist ^
+  --exclude=data ^
+  .
+```
+
+Загрузите архив на сервер:
+
+```bash
+scp vpn-prod-deploy.tar.gz vpnadm@ВАШ_ХОСТ:/home/vpnadm/vpn-prod-deploy.tar.gz
+```
+
+На сервере распакуйте его во временную папку и синхронизируйте в активный каталог:
+
+```bash
+rm -rf /home/vpnadm/vpn-prod-extract
+mkdir -p /home/vpnadm/vpn-prod-extract
+tar -xzf /home/vpnadm/vpn-prod-deploy.tar.gz -C /home/vpnadm/vpn-prod-extract
+
+rsync -rlt --delete --omit-dir-times --no-perms --no-owner --no-group \
+  --exclude=data/ \
+  --exclude=backend/.env \
+  --exclude=backend/data.json \
+  --exclude=backend/cookies.txt \
+  --exclude=backend/panel_settings.json \
+  --exclude=backend/telegram_proxies.json \
+  --exclude=backend/daily_gift_store.json \
+  --exclude=backend/device_limit_store.json \
+  --exclude=backend/surveys_store.json \
+  --exclude=backend/panel-avatars/ \
+  --exclude=backend/node_modules/ \
+  --exclude=backend/dist/ \
+  --exclude=frontend/node_modules/ \
+  --exclude=frontend/dist/ \
+  /home/vpnadm/vpn-prod-extract/ /home/vpnadm/vpn-admin-app/
+```
+
+Так вы обновляете только код, но не затираете `.env`, JSON-данные панели и runtime-хранилища.
+
+#### Шаг 6. Частая проблема: `backend/dist` принадлежит `root`
+
+Если backend-сборка падает ошибками вида:
+
+```text
+TS5033: Could not write file '.../backend/dist/...': EACCES: permission denied
+```
+
+проверьте владельца:
+
+```bash
+ls -ld /home/vpnadm/vpn-admin-app/backend/dist
+```
+
+Если там `root root`, исправьте один раз от `root`:
+
+```bash
+chown -R vpnadm:vpnadm /home/vpnadm/vpn-admin-app/backend/dist /home/vpnadm/vpn-admin-app/frontend/dist
+```
+
+После этого повторите сборку уже под `vpnadm`:
+
+```bash
+cd /home/vpnadm/vpn-admin-app/backend && npm ci && npm run build
+cd /home/vpnadm/vpn-admin-app/frontend && npm ci && npm run build
+```
+
+#### Шаг 7. Рестарт без `sudo systemctl restart`, если sudo-пароль недоступен
+
+Если `vpnadm` не может сделать `sudo systemctl restart vpn-admin-api`, но сервис уже работает под `systemd`, можно аккуратно убить текущий `MainPID`: `systemd` поднимет процесс заново сам.
+
+```bash
+PID=$(systemctl show -p MainPID --value vpn-admin-api.service)
+kill "$PID"
+sleep 5
+systemctl status vpn-admin-api --no-pager
+```
+
+Это рабочий запасной вариант именно для сервиса с `Restart=always`.
+
+#### Шаг 8. Финальная проверка стенда
+
+На сервере:
+
+```bash
+systemctl is-active vpn-admin-api
+curl -s http://127.0.0.1:4000/api/health
+```
+
+С локальной машины:
+
+```bash
+curl -I https://ВАШ_ДОМЕН
+curl https://ВАШ_ДОМЕН/api/health
+```
+
+Если нужно проверить конкретную фронтовую правку, дополнительно убедитесь, что пересобрался свежий bundle:
+
+```bash
+ls -1 /home/vpnadm/vpn-admin-app/frontend/dist/assets/index-*.js | tail -1
+```
+
+#### Шаг 9. Уборка временных файлов
+
+```bash
+rm -rf /home/vpnadm/vpn-prod-extract
+rm -f /home/vpnadm/vpn-prod-deploy.tar.gz
+```
+
 ---
 
 ## Вариант без домена (только по IP)

@@ -167,10 +167,30 @@ function parseTgId(raw: string): number | null {
   return Math.floor(n);
 }
 
+function allowLocalDevWebAppBypass(): boolean {
+  const apiUrl = String(process.env.PUBLIC_API_URL ?? "").toLowerCase();
+  const frontendOrigin = String(process.env.FRONTEND_ORIGIN ?? "").toLowerCase();
+  return [apiUrl, frontendOrigin].some((value) => value.includes("localhost") || value.includes("127.0.0.1"));
+}
+
 function verifyTelegramWebAppInitData(initData: string): { ok: true; user: WebAppUser } | { ok: false; reason: string } {
+  const raw = String(initData ?? "").trim();
+  if (allowLocalDevWebAppBypass() && raw.startsWith("local-dev:")) {
+    const tgId = parseTgId(raw.slice("local-dev:".length));
+    if (!tgId) return { ok: false, reason: "bad_user_id" };
+    const linked = findUsersByTelegramChatId(tgId);
+    const fallbackName = String(linked[0]?.name ?? "").trim();
+    return {
+      ok: true,
+      user: {
+        id: tgId,
+        first_name: fallbackName || "Local",
+        username: String(linked[0]?.tg_id ?? "").trim() || undefined,
+      },
+    };
+  }
   const token = getTelegramBotToken();
   if (!token) return { ok: false, reason: "telegram_not_configured" };
-  const raw = String(initData ?? "").trim();
   if (!raw) return { ok: false, reason: "init_data_required" };
   const p = new URLSearchParams(raw);
   const hash = String(p.get("hash") ?? "").trim().toLowerCase();

@@ -424,21 +424,31 @@ export async function pullTrafficFromAllDeployedServers(log?: SshLog): Promise<{
     warns.push("Нет развёрнутых серверов — нечего опрашивать.");
     return { byUuid: merged, errors, warns };
   }
-  for (const row of servers) {
-    try {
-      const { host, byUuid, warn } = await pullTrafficFromServer(row, log);
-      if (warn) warns.push(`${host}: ${warn}`);
-      for (const [uuid, v] of byUuid) {
-        const nk = uuid.trim().toLowerCase();
-        const cur = merged.get(nk) ?? { up: 0, down: 0, online: 0 };
-        cur.up += v.up;
-        cur.down += v.down;
-        cur.online += Math.max(0, Math.floor(Number(v.online) || 0));
-        merged.set(nk, cur);
+  const results = await Promise.all(
+    servers.map(async (row) => {
+      try {
+        const pulled = await pullTrafficFromServer(row, log);
+        return { ok: true as const, row, ...pulled };
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        return { ok: false as const, host: row.host, error: msg };
       }
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      errors.push(`${row.host}: ${msg}`);
+    }),
+  );
+  for (const result of results) {
+    if (!result.ok) {
+      errors.push(`${result.host}: ${result.error}`);
+      continue;
+    }
+    const { host, byUuid, warn } = result;
+    if (warn) warns.push(`${host}: ${warn}`);
+    for (const [uuid, v] of byUuid) {
+      const nk = uuid.trim().toLowerCase();
+      const cur = merged.get(nk) ?? { up: 0, down: 0, online: 0 };
+      cur.up += v.up;
+      cur.down += v.down;
+      cur.online += Math.max(0, Math.floor(Number(v.online) || 0));
+      merged.set(nk, cur);
     }
   }
   return { byUuid: merged, errors, warns };

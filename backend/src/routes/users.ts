@@ -9,7 +9,6 @@ import {
   dropperWinsForClientRow,
   findUserByVlessUuid,
   getUser,
-  listDeployedServers,
   listUsers,
   removeUserDeviceSlot,
   updateUserRow,
@@ -22,7 +21,7 @@ import { requireAuth } from "../middleware/requireAuth.js";
 import { pushClientListToAllDeployedServers, refreshSpeedLimitsOnAllDeployedServers, removeUserUuidFromAllServers } from "../userSync.js";
 import { initNdjsonStream, ndjsonLine, wantsNdjsonStream } from "../streamUtil.js";
 import { resolveSubscriptionBase64, resolveSubscriptionLinks } from "../subscriptionResolve.js";
-import { countOnlineIpsForUserOnServer, peekUserTrafficForSubscription } from "../xrayStatsPull.js";
+import { peekUserTrafficForSubscription } from "../xrayStatsPull.js";
 import { generateX25519RealityKeyPair } from "../realityKeygen.js";
 import { logCommunicationMessage } from "../communicationLog.js";
 import { sendTelegramMessage } from "../telegram/api.js";
@@ -88,22 +87,10 @@ router.post("/sync-stats", async (_req, res) => {
       traffic_down: number;
       online_count: number;
     }> = [];
-    const servers = listDeployedServers();
     for (const u of listUsers()) {
       const k = u.vless_uuid.trim().toLowerCase();
       const agg = byUuid.get(k) ?? byUuid.get(u.vless_uuid);
-      let onlineCount = Math.max(0, Math.floor(Number(agg?.online) || 0));
-      if (isDeviceLimitActiveForUser(u)) {
-        let maxIps = 0;
-        for (const row of servers) {
-          try {
-            maxIps = Math.max(maxIps, await countOnlineIpsForUserOnServer(row, u));
-          } catch {
-            /* skip */
-          }
-        }
-        onlineCount = Math.max(onlineCount, maxIps);
-      }
+      const onlineCount = Math.max(0, Math.floor(Number(agg?.online) || 0));
       if (agg || onlineCount > 0) {
         rows.push({
           vless_uuid: u.vless_uuid,

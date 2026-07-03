@@ -60,6 +60,17 @@ html {
   --promo-icon-bg: rgba(15, 20, 32, 0.85);
   --stat-card-bg: rgba(6, 9, 18, 0.62);
   --stat-card-border: rgba(255, 255, 255, 0.08);
+  --xray-term-shell-bg: rgba(8, 10, 16, 0.55);
+  --xray-term-chrome-bg: rgba(0, 0, 0, 0.22);
+  --xray-term-footer-bg: rgba(0, 0, 0, 0.18);
+  --xray-term-body-bg: #0a0c10;
+  --xray-term-body-text: #e2e8f0;
+  --xray-log-lvl-error-text: #fca5a5;
+  --xray-log-lvl-error-bg: rgba(248, 113, 113, 0.1);
+  --xray-log-lvl-warn-text: #fcd34d;
+  --xray-log-lvl-warn-bg: rgba(251, 191, 36, 0.08);
+  --xray-log-lvl-info-text: #86efac;
+  --xray-log-lvl-info-bg: rgba(74, 222, 128, 0.06);
   --card-inset-bg: rgba(0, 0, 0, 0.12);
   --picker-teal: #0d9488;
   --picker-teal-dim: #0f766e;
@@ -148,6 +159,17 @@ html[data-theme="light"] {
   --promo-icon-bg: #f8fafc;
   --stat-card-bg: #ffffff;
   --stat-card-border: #e2e8f0;
+  --xray-term-shell-bg: #ffffff;
+  --xray-term-chrome-bg: #f1f5f9;
+  --xray-term-footer-bg: #f8fafc;
+  --xray-term-body-bg: #f8fafc;
+  --xray-term-body-text: #334155;
+  --xray-log-lvl-error-text: #b91c1c;
+  --xray-log-lvl-error-bg: rgba(220, 38, 38, 0.08);
+  --xray-log-lvl-warn-text: #b45309;
+  --xray-log-lvl-warn-bg: rgba(217, 119, 6, 0.1);
+  --xray-log-lvl-info-text: #15803d;
+  --xray-log-lvl-info-bg: rgba(22, 163, 74, 0.08);
   --card-inset-bg: #ffffff;
 }
 
@@ -503,10 +525,15 @@ html[data-theme="light"] .admin-sidebar-link.active {
   color: var(--text);
   cursor: pointer;
   text-align: left;
+  user-select: none;
   transition:
     border-color 0.25s ease,
     background-color 0.25s ease,
     box-shadow 0.3s ease;
+}
+
+.admin-theme-toggle.is-dragging {
+  cursor: grabbing;
 }
 
 .admin-theme-toggle:hover:not(:disabled) {
@@ -528,6 +555,7 @@ html[data-theme="light"] .admin-sidebar-link.active {
   border-radius: 999px;
   background: linear-gradient(145deg, #1e293b, #0f172a);
   border: 1px solid var(--border);
+  touch-action: pan-y;
   transition: background 0.45s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
@@ -549,6 +577,15 @@ html[data-theme="light"] .admin-sidebar-link.active {
   align-items: center;
   justify-content: center;
   transition: transform 0.5s cubic-bezier(0.34, 1.45, 0.64, 1);
+}
+
+.admin-theme-toggle-track.dragging {
+  transition: none;
+}
+
+.admin-theme-toggle-track.dragging .admin-theme-toggle-thumb,
+.admin-theme-toggle-track.dragging .admin-theme-toggle-icon {
+  transition: none;
 }
 
 .admin-theme-toggle-track.on .admin-theme-toggle-thumb {
@@ -2392,9 +2429,9 @@ html[data-theme="light"] .login-card {
   padding: 0;
   overflow: hidden;
   border-radius: 12px;
-  border: 1px solid rgba(148, 163, 184, 0.22);
-  background: rgba(8, 10, 16, 0.55);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border);
+  background: var(--xray-term-shell-bg);
+  box-shadow: var(--shadow-panel);
 }
 
 .xray-terminal--fullscreen {
@@ -2421,7 +2458,7 @@ html[data-theme="light"] .login-card {
   gap: 0.65rem;
   padding: 0.55rem 0.75rem;
   border-bottom: 1px solid var(--border);
-  background: rgba(0, 0, 0, 0.22);
+  background: var(--xray-term-chrome-bg);
 }
 
 .xray-log-tabs {
@@ -2517,13 +2554,8 @@ html[data-theme="light"] .login-card {
   font-family: "JetBrains Mono", ui-monospace, "Cascadia Code", monospace;
   font-size: 0.78rem;
   line-height: 1.55;
-  background: #0a0c10;
-  color: #e2e8f0;
-}
-
-html[data-theme="light"] .xray-terminal-body {
-  background: #0f1419;
-  color: #e8edf4;
+  background: var(--xray-term-body-bg);
+  color: var(--xray-term-body-text);
 }
 
 .xray-terminal-footer {
@@ -2535,7 +2567,7 @@ html[data-theme="light"] .xray-terminal-body {
   border-top: 1px solid var(--border);
   font-size: 0.72rem;
   color: var(--muted);
-  background: rgba(0, 0, 0, 0.18);
+  background: var(--xray-term-footer-bg);
 }
 
 .xray-terminal-footer-path {
@@ -2582,18 +2614,18 @@ html[data-theme="light"] .xray-terminal-body {
 }
 
 .xray-log-lvl-error {
-  color: #fca5a5;
-  background: rgba(248, 113, 113, 0.1);
+  color: var(--xray-log-lvl-error-text);
+  background: var(--xray-log-lvl-error-bg);
 }
 
 .xray-log-lvl-warn {
-  color: #fcd34d;
-  background: rgba(251, 191, 36, 0.08);
+  color: var(--xray-log-lvl-warn-text);
+  background: var(--xray-log-lvl-warn-bg);
 }
 
 .xray-log-lvl-info {
-  color: #86efac;
-  background: rgba(74, 222, 128, 0.06);
+  color: var(--xray-log-lvl-info-text);
+  background: var(--xray-log-lvl-info-bg);
 }
 
 .xray-log-secret {
@@ -2848,6 +2880,56 @@ html[data-theme="light"] .xray-log-hl-refused {
   background: rgba(248, 113, 113, 0.15);
 }
 
+html[data-theme="light"] .xray-log-hl-timeout,
+html[data-theme="light"] .xray-log-hl-eof {
+  color: #b45309;
+  background: rgba(251, 191, 36, 0.14);
+}
+
+html[data-theme="light"] .xray-log-hl-handshake,
+html[data-theme="light"] .xray-log-hl-tls,
+html[data-theme="light"] .xray-log-hl-reality {
+  color: #1d4ed8;
+  background: rgba(59, 130, 246, 0.12);
+}
+
+html[data-theme="light"] .xray-log-hl-dns {
+  color: #047857;
+  background: rgba(16, 185, 129, 0.12);
+}
+
+html[data-theme="light"] .xray-log-hl-accepted,
+html[data-theme="light"] .xray-log-hl-request {
+  color: #15803d;
+  background: rgba(34, 197, 94, 0.12);
+}
+
+html[data-theme="light"] .xray-log-search-hit {
+  background: rgba(251, 191, 36, 0.45);
+  color: #1e293b;
+}
+
+html[data-theme="light"] .xray-log-secret {
+  background: rgba(100, 116, 139, 0.18);
+}
+
+html[data-theme="light"] .xray-log-secret.is-revealed {
+  background: rgba(100, 116, 139, 0.1);
+}
+
+html[data-theme="light"] .xray-log-tab:hover {
+  background: rgba(37, 99, 235, 0.08);
+}
+
+html[data-theme="light"] .xray-log-tab.active {
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1px rgba(37, 99, 235, 0.22);
+}
+
+html[data-theme="light"] .xray-terminal--fullscreen {
+  box-shadow: 0 24px 80px rgba(15, 23, 42, 0.18);
+}
+
 .modal-backdrop {
   position: fixed;
   inset: 0;
@@ -2861,8 +2943,29 @@ html[data-theme="light"] .xray-log-hl-refused {
   isolation: isolate;
 }
 
-.modal-backdrop--admin {
+/* Контент панели (z-index: 1) ниже сайдбара (30) — модалки внутри main не перекрывали меню. */
+.admin-shell:has(.modal-backdrop) .admin-content {
   z-index: 100;
+}
+
+.admin-shell:has(.modal-backdrop) .admin-sidebar {
+  z-index: 0;
+  pointer-events: none;
+}
+
+.admin-shell:has(.modal-backdrop) .admin-drawer-backdrop,
+.admin-shell:has(.modal-backdrop) .admin-drawer {
+  z-index: 0;
+  pointer-events: none;
+  visibility: hidden;
+}
+
+.admin-shell > .modal-backdrop {
+  z-index: 120;
+}
+
+.modal-backdrop--admin {
+  z-index: 200;
 }
 
 .modal {
@@ -14331,6 +14434,32 @@ html[data-theme="light"] .panel-about-api-link:hover {
 
 .device-limit-stat-card--ok strong {
   color: #4ade80;
+}
+
+.device-limit-stat-card--clickable {
+  cursor: pointer;
+  border: 1px solid var(--stat-card-border);
+  text-align: left;
+  font: inherit;
+  width: 100%;
+  transition: border-color 0.15s ease, background 0.15s ease;
+  appearance: none;
+  -webkit-appearance: none;
+  color: inherit;
+}
+
+.device-limit-stat-card--clickable:hover {
+  border-color: rgba(96, 165, 250, 0.45);
+  background: rgba(96, 165, 250, 0.08);
+}
+
+.device-limit-stat-card--clickable:focus-visible {
+  outline: 2px solid rgba(96, 165, 250, 0.65);
+  outline-offset: 2px;
+}
+
+.device-limit-at-limit-modal {
+  max-width: min(52rem, 96vw);
 }
 
 .device-limit-tabs-bar {

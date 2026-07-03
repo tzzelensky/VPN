@@ -1,6 +1,6 @@
 {
   "config": {
-    "enabled": false,
+    "enabled": true,
     "selection_mode": "random",
     "queue_prize_ids": [],
     "queue_index": 0,
@@ -10,10 +10,290 @@
     "notify_hour": 12,
     "notify_minute": 0
   },
-  "prizes": [],
+  "prizes": [
+    {
+      "id": "73bbbb8a39256d73",
+      "title": "122",
+      "type": "gb",
+      "value": "1",
+      "description": "Дополнительный трафик уже начислен на ваш аккаунт.",
+      "active": true,
+      "weight": 1,
+      "valid_from": null,
+      "valid_until": null,
+      "max_total_claims": null,
+      "max_per_user": null,
+      "claims_count": 3,
+      "golden": false,
+      "created_at": "2026-06-26T11:18:10.608Z",
+      "updated_at": "2026-06-26T11:18:10.608Z"
+    }
+  ],
   "schedules": [],
   "day_assignments": [],
-  "claims": [],
+  "claims": [
+    {
+      "id": "aeda106aa8c8cb7a",
+      "tg_user_id": 504445187,
+      "tg_username": "504445187",
+      "user_id": 30,
+      "day_key": "2026-06-26",
+      "prize_id": "73bbbb8a39256d73",
+      "prize_type": "gb",
+      "prize_title": "122",
+      "prize_value": "1",
+      "prize_description": "Дополнительный трафик уже начислен на ваш аккаунт.",
+      "prize_golden": false,
+      "status": "applied",
+      "error_message": null,
+      "credit_mode": "direct",
+      "opened_at": "2026-06-26T11:23:28.872Z",
+      "applied_at": "2026-06-26T11:23:28.880Z"
+    },
+    {
+      "id": "69105884d207ccef",
+      "tg_user_id": 504445187,
+      "tg_username": "504445187",
+      "user_id": 30,
+      "day_key": "2026-06-29",
+      "prize_id": "73bbbb8a39256d73",
+      "prize_type": "gb",
+      "prize_title": "122",
+      "prize_value": "1",
+      "prize_description": "Дополнительный трафик уже начислен на ваш аккаунт.",
+      "prize_golden": false,
+      "status": "applied",
+      "error_message": null,
+      "credit_mode": "direct",
+      "opened_at": "2026-06-29T12:47:15.385Z",
+      "applied_at": "2026-06-29T12:47:15.392Z"
+    }
+  ],
   "reminders": [],
-  "events": []
+  "events": [
+    {
+      "id": "40b7f2ce1b9f3897",
+      "tg_user_id": 504445187,
+      "event": "block_seen",
+      "detail": "2026-06-26",
+      "created_at": "2026-06-26T11:18:46.312Z"
+    },
+    {
+      "id": "89f48e109568aa6c",
+      "tg_user_id": 504445187,
+      "event": "banner_click",
+      "detail": "2026-06-26",
+      "created_at": "2026-06-26T11:22:16.588Z"
+    },
+    {
+      "id": "7acaf7a84e58aea4",
+      "tg_user_id": 504445187,
+      "event": "gift_applied",
+      "detail": "73bbbb8a39256d73",
+      "created_at": "2026-06-26T11:22:16.604Z"
+    },
+    {
+      "id": "3be159321c1feb43",
+      "tg_user_id": 504445187,
+      "event": "block_seen",
+      "detail": "2026-06-26",
+      "created_at": "2026-06-26T11:22:39.998Z"
+    },
+    {
+      "id": "fd142ed3c498ab52",
+      "tg_user_id": 504445187,
+      "event": "block_seen",
+      "detail": "2026-06-26",
+      "created_at": "2026-06-26T11:23:11.836Z"
+    },
+    {
+      "id": "02aa6b1469d0b60e",
+      "tg_user_id": 504445187,
+      "event": "admin_reset_claim",
+      "detail": "2026-06-26",
+      "created_at": "2026-06-26T11:23:24.420Z"
+    },
+    {
+      "id": "2019290093be813d",
+      "tg_user_id": 504445187,
+      "event": "block_seen",
+      "detail": "2026-06-26",
+      "created_at": "2026-06-26T11:23:27.781Z"
+    },
+    {
+      "id": "2203b5a239bdd247",
+      "tg_user_id": 504445187,
+      "event": "banner_click",
+      "detail": "2026-06-26",
+      "created_at": "2026-06-26T11:23:28.871Z"
+    },
+    {
+      "id": "868ae27b8b661bf6",
+      "tg_user_id": 504445187,
+      "event": "gift_applied",
+      "detail": "73bbbb8a39256d73",
+      "created_at": "2026-06-26T11:23:28.882Z"
+    },
+    {
+      "id": "223d6cc371b60866",
+      "tg_user_id": 504445187,
+      "event": "block_seen",
+      "detail": "2026-06-26",
+      "created_at": "2026-06-26T11:23:33.177Z"
+    },
+    {
+      "id": "c74f93a55bffb029",
+      "tg_user_id": 504445187,
+      "event": "block_seen",
+      "detail": "2026-06-26",
+      "created_at": "2026-06-26T11:24:18.843Z"
+    },
+    {
+      "id": "2fd463497a9a0fd8",
+      "tg_user_id": 504445187,
+      "event": "block_seen",
+      "detail": "2026-06-27",
+      "created_at": "2026-06-27T07:33:28.490Z"
+    },
+    {
+      "id": "857ed2f02335c67b",
+      "tg_user_id": 504445187,
+      "event": "block_seen",
+      "detail": "2026-06-27",
+      "created_at": "2026-06-27T07:33:46.737Z"
+    },
+    {
+      "id": "28ce1c43563db4e1",
+      "tg_user_id": 504445187,
+      "event": "block_seen",
+      "detail": "2026-06-27",
+      "created_at": "2026-06-28T05:42:09.240Z"
+    },
+    {
+      "id": "62a4639ccb6985ab",
+      "tg_user_id": 504445187,
+      "event": "block_seen",
+      "detail": "2026-06-28",
+      "created_at": "2026-06-28T10:07:06.411Z"
+    },
+    {
+      "id": "84b06b3408681d74",
+      "tg_user_id": 504445187,
+      "event": "block_seen",
+      "detail": "2026-06-28",
+      "created_at": "2026-06-28T11:52:51.359Z"
+    },
+    {
+      "id": "0b01695389d7540f",
+      "tg_user_id": 504445187,
+      "event": "block_seen",
+      "detail": "2026-06-28",
+      "created_at": "2026-06-28T11:54:42.250Z"
+    },
+    {
+      "id": "2032c997c7be5fe1",
+      "tg_user_id": 504445187,
+      "event": "block_seen",
+      "detail": "2026-06-29",
+      "created_at": "2026-06-29T12:45:08.576Z"
+    },
+    {
+      "id": "e45e544c46a96078",
+      "tg_user_id": 504445187,
+      "event": "block_seen",
+      "detail": "2026-06-29",
+      "created_at": "2026-06-29T12:46:13.343Z"
+    },
+    {
+      "id": "8f8618f800b35e56",
+      "tg_user_id": 504445187,
+      "event": "banner_click",
+      "detail": "2026-06-29",
+      "created_at": "2026-06-29T12:47:15.383Z"
+    },
+    {
+      "id": "88c495f2b0d5ae67",
+      "tg_user_id": 504445187,
+      "event": "gift_applied",
+      "detail": "73bbbb8a39256d73",
+      "created_at": "2026-06-29T12:47:15.393Z"
+    },
+    {
+      "id": "92b0541a496320f1",
+      "tg_user_id": 504445187,
+      "event": "block_seen",
+      "detail": "2026-06-29",
+      "created_at": "2026-06-29T12:53:17.557Z"
+    },
+    {
+      "id": "4e3cdf8c951c3933",
+      "tg_user_id": 504445187,
+      "event": "block_seen",
+      "detail": "2026-06-29",
+      "created_at": "2026-06-29T12:56:51.730Z"
+    },
+    {
+      "id": "f106405251b2bb40",
+      "tg_user_id": 504445187,
+      "event": "block_seen",
+      "detail": "2026-06-29",
+      "created_at": "2026-06-29T14:20:16.667Z"
+    },
+    {
+      "id": "2624abced5b54139",
+      "tg_user_id": 504445187,
+      "event": "block_seen",
+      "detail": "2026-06-29",
+      "created_at": "2026-06-29T16:06:24.513Z"
+    },
+    {
+      "id": "dbc4779166704319",
+      "tg_user_id": 504445187,
+      "event": "block_seen",
+      "detail": "2026-06-29",
+      "created_at": "2026-06-29T21:05:06.884Z"
+    },
+    {
+      "id": "caf6db039f28ac22",
+      "tg_user_id": 504445187,
+      "event": "block_seen",
+      "detail": "2026-06-29",
+      "created_at": "2026-06-30T05:56:53.525Z"
+    },
+    {
+      "id": "212bc243125c77dc",
+      "tg_user_id": 504445187,
+      "event": "block_seen",
+      "detail": "2026-06-30",
+      "created_at": "2026-06-30T09:27:00.231Z"
+    },
+    {
+      "id": "ce30959543c66f32",
+      "tg_user_id": 504445187,
+      "event": "block_seen",
+      "detail": "2026-06-30",
+      "created_at": "2026-06-30T09:30:41.941Z"
+    },
+    {
+      "id": "0ad9ae4338803c2f",
+      "tg_user_id": 504445187,
+      "event": "block_seen",
+      "detail": "2026-06-30",
+      "created_at": "2026-06-30T09:30:48.657Z"
+    },
+    {
+      "id": "35bdce5767d44fb5",
+      "tg_user_id": 504445187,
+      "event": "block_seen",
+      "detail": "2026-06-30",
+      "created_at": "2026-06-30T09:34:57.606Z"
+    },
+    {
+      "id": "6b30b1a2d6c72165",
+      "tg_user_id": 504445187,
+      "event": "block_seen",
+      "detail": "2026-06-30",
+      "created_at": "2026-06-30T09:39:18.307Z"
+    }
+  ]
 }

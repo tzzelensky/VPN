@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import {
   getAdminTheme,
   initAdminTheme,
@@ -26,14 +26,29 @@ function IconMoon() {
 
 type Props = {
   className?: string;
-  /** sidebar — полный переключатель; icon — только иконка для шапки */
   variant?: "sidebar" | "icon";
+};
+
+type DragPreview = {
+  offset: number;
+  travel: number;
+};
+
+type DragState = {
+  pointerId: number;
+  startX: number;
+  startOffset: number;
+  travel: number;
+  moved: boolean;
 };
 
 export default function AdminThemeToggle({ className, variant = "sidebar" }: Props) {
   const panel = usePanelSettings();
   const [theme, setTheme] = useState<AdminTheme>(() => getAdminTheme());
   const [busy, setBusy] = useState(false);
+  const [dragPreview, setDragPreview] = useState<DragPreview | null>(null);
+  const dragStateRef = useRef<DragState | null>(null);
+  const suppressClickRef = useRef(false);
 
   const syncTheme = useCallback(() => {
     initAdminTheme();
@@ -42,13 +57,18 @@ export default function AdminThemeToggle({ className, variant = "sidebar" }: Pro
 
   useEffect(() => {
     syncTheme();
-    const onThemeChange = (e: Event) => {
-      const next = (e as CustomEvent<AdminTheme>).detail;
-      if (next === "light" || next === "dark") setTheme(next);
-      else syncTheme();
+    const onThemeChange = (event: Event) => {
+      const next = (event as CustomEvent<AdminTheme>).detail;
+      if (next === "light" || next === "dark") {
+        setTheme(next);
+        return;
+      }
+      syncTheme();
     };
-    const onStorage = (e: StorageEvent) => {
-      if (e.key === "vpn-admin-theme" || e.key === "vpn-admin-theme-setting") syncTheme();
+    const onStorage = (event: StorageEvent) => {
+      if (event.key === "vpn-admin-theme" || event.key === "vpn-admin-theme-setting") {
+        syncTheme();
+      }
     };
     window.addEventListener("admin-theme-change", onThemeChange);
     window.addEventListener("storage", onStorage);
@@ -58,9 +78,8 @@ export default function AdminThemeToggle({ className, variant = "sidebar" }: Pro
     };
   }, [syncTheme]);
 
-  const toggle = useCallback(async () => {
-    if (busy) return;
-    const next: AdminTheme = theme === "dark" ? "light" : "dark";
+  const applyTheme = useCallback(async (next: AdminTheme) => {
+    if (busy || next === theme) return;
     setBusy(true);
     try {
       setAdminThemeSetting(next);
@@ -71,13 +90,81 @@ export default function AdminThemeToggle({ className, variant = "sidebar" }: Pro
         });
       }
     } catch {
-      /* тема уже применена локально */
+      // The theme is already applied locally even if the panel request fails.
     } finally {
       setBusy(false);
     }
-  }, [busy, theme, panel]);
+  }, [busy, panel, theme]);
+
+  const toggle = useCallback(async () => {
+    const next: AdminTheme = theme === "dark" ? "light" : "dark";
+    await applyTheme(next);
+  }, [applyTheme, theme]);
+
+  const finishDrag = useCallback((pointerId: number, cancelled = false) => {
+    const dragState = dragStateRef.current;
+    if (!dragState || dragState.pointerId !== pointerId) return;
+
+    dragStateRef.current = null;
+    const preview = dragPreview;
+    const moved = dragState.moved;
+    setDragPreview(null);
+
+    if (!moved) return;
+    suppressClickRef.current = true;
+    window.setTimeout(() => {
+      suppressClickRef.current = false;
+    }, 0);
+    if (cancelled || !preview) return;
+
+    const nextTheme: AdminTheme = preview.offset >= preview.travel / 2 ? "light" : "dark";
+    if (nextTheme !== theme) {
+      void applyTheme(nextTheme);
+    }
+  }, [applyTheme, dragPreview, theme]);
+
+  const onTrackPointerDown = useCallback((event: ReactPointerEvent<HTMLSpanElement>) => {
+    if (busy) return;
+    const rect = event.currentTarget.getBoundingClientRect();
+    const travel = Math.max(rect.width - rect.height, 1);
+    const startOffset = theme === "light" ? travel : 0;
+
+    dragStateRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startOffset,
+      travel,
+      moved: false,
+    };
+    suppressClickRef.current = false;
+    setDragPreview({ offset: startOffset, travel });
+    event.currentTarget.setPointerCapture(event.pointerId);
+  }, [busy, theme]);
+
+  const onTrackPointerMove = useCallback((event: ReactPointerEvent<HTMLSpanElement>) => {
+    const dragState = dragStateRef.current;
+    if (!dragState || dragState.pointerId !== event.pointerId) return;
+
+    const deltaX = event.clientX - dragState.startX;
+    if (Math.abs(deltaX) > 4) {
+      dragState.moved = true;
+      suppressClickRef.current = true;
+    }
+
+    const offset = Math.min(Math.max(dragState.startOffset + deltaX, 0), dragState.travel);
+    setDragPreview({ offset, travel: dragState.travel });
+  }, []);
+
+  const onTrackPointerUp = useCallback((event: ReactPointerEvent<HTMLSpanElement>) => {
+    finishDrag(event.pointerId);
+  }, [finishDrag]);
+
+  const onTrackPointerCancel = useCallback((event: ReactPointerEvent<HTMLSpanElement>) => {
+    finishDrag(event.pointerId, true);
+  }, [finishDrag]);
 
   const isLight = theme === "light";
+  const displayIsLight = dragPreview ? dragPreview.offset >= dragPreview.travel / 2 : isLight;
   const nextLabel = isLight ? "Тёмная тема" : "Светлая тема";
 
   if (variant === "icon") {
@@ -99,15 +186,31 @@ export default function AdminThemeToggle({ className, variant = "sidebar" }: Pro
   return (
     <button
       type="button"
-      className={`admin-theme-toggle ${className ?? ""}`.trim()}
-      onClick={() => void toggle()}
+      className={`admin-theme-toggle ${dragPreview ? "is-dragging" : ""} ${className ?? ""}`.trim()}
+      onClick={() => {
+        if (suppressClickRef.current) {
+          suppressClickRef.current = false;
+          return;
+        }
+        void toggle();
+      }}
       disabled={busy}
       aria-pressed={isLight}
       aria-label={nextLabel}
       title={nextLabel}
     >
-      <span className={`admin-theme-toggle-track ${isLight ? "on" : ""}`.trim()} aria-hidden>
-        <span className="admin-theme-toggle-thumb">
+      <span
+        className={`admin-theme-toggle-track ${displayIsLight ? "on" : ""} ${dragPreview ? "dragging" : ""}`.trim()}
+        aria-hidden
+        onPointerDown={onTrackPointerDown}
+        onPointerMove={onTrackPointerMove}
+        onPointerUp={onTrackPointerUp}
+        onPointerCancel={onTrackPointerCancel}
+      >
+        <span
+          className="admin-theme-toggle-thumb"
+          style={dragPreview ? { transform: `translateX(${dragPreview.offset}px)` } : undefined}
+        >
           <span className="admin-theme-toggle-icon admin-theme-toggle-icon--sun">
             <IconSun />
           </span>
@@ -116,7 +219,7 @@ export default function AdminThemeToggle({ className, variant = "sidebar" }: Pro
           </span>
         </span>
       </span>
-      <span className="admin-theme-toggle-label">{isLight ? "Светлая" : "Тёмная"}</span>
+      <span className="admin-theme-toggle-label">{displayIsLight ? "Светлая" : "Тёмная"}</span>
     </button>
   );
 }

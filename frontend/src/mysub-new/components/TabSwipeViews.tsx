@@ -272,6 +272,7 @@ export default function TabSwipeViews({
         animatingRef.current = false;
         updatePanelAria(index);
         syncHeight(index);
+        navRefRef.current?.current?.snapToIndex(index, false);
         onDone?.();
         return;
       }
@@ -283,6 +284,7 @@ export default function TabSwipeViews({
         clearSnapTimer();
         animatingRef.current = false;
         root?.classList.remove("mn-tab-swipe--snapping");
+        navRefRef.current?.current?.snapToIndex(index, false);
         trackDoneRef.current = true;
         tryFinishTransition();
       };

@@ -25,7 +25,6 @@ import {
 import { requireAuth } from "../middleware/requireAuth.js";
 import {
   appendDeviceLimitEvent,
-  countDeviceLimitBlockedAttempts,
   getDeviceLimitSettings,
   listDeviceLimitEvents,
   listDeviceSlotPurchases,
@@ -87,6 +86,21 @@ function subscriptionRowDto(u: UserRow) {
   };
 }
 
+function userAtDeviceLimit(u: UserRow): boolean {
+  if (!isDeviceLimitActiveForUser(u)) return false;
+  const limit = userDeviceTotalLimit(u);
+  const used = activeDeviceSlots(u.device_slots ?? []).length;
+  return used >= limit;
+}
+
+function usersAtDeviceLimitRows() {
+  return listUsers()
+    .filter((u) => u.is_test_subscription !== 1)
+    .filter(userAtDeviceLimit)
+    .map(subscriptionRowDto)
+    .sort((a, b) => b.devices_used - a.devices_used || a.user_id - b.user_id);
+}
+
 function overviewStats() {
   const users = listUsers().filter((u) => u.is_test_subscription !== 1);
   const limited = users.filter((u) => isDeviceLimitActiveForUser(u));
@@ -105,11 +119,15 @@ function overviewStats() {
     users_with_limit: limited.length,
     total_devices: totalDevices,
     active_devices: activeDevices,
-    blocked_attempts: countDeviceLimitBlockedAttempts(),
+    users_at_limit: usersAtDeviceLimitRows().length,
     purchased_extra_slots: purchasedExtra,
     purchase_revenue_rub: revenue,
   };
 }
+
+router.get("/at-limit-users", (_req, res) => {
+  res.json({ rows: usersAtDeviceLimitRows() });
+});
 
 router.get("/", (_req, res) => {
   res.json({

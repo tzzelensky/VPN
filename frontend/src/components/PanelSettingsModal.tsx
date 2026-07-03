@@ -16,6 +16,7 @@ import { normalizeSectionOrder, orderSectionsMeta } from "../panelNavUtils";
 import type { PanelSectionKey, PanelSettings } from "../panelSettingsTypes";
 import { readFileAsDataUrl } from "../avatarCrop";
 import { PANEL_HINTS } from "../panelSettingsHints";
+import AdminModalBackdrop from "./AdminModalBackdrop";
 import AvatarCropModal from "./AvatarCropModal";
 import { FieldLabel, SettingHint } from "./SettingHint";
 import SettingsToggleRow from "./SettingsToggleRow";
@@ -258,7 +259,7 @@ export default function PanelSettingsModal({ open, onClose }: { open: boolean; o
 
   return (
     <>
-    <div className="modal-backdrop panel-settings-backdrop">
+    <AdminModalBackdrop className="panel-settings-backdrop">
       <div className="modal panel-settings-modal" onClick={(e) => e.stopPropagation()}>
         <div className="modal-head panel-settings-head">
           <h2>Настройки панели</h2>
@@ -1002,7 +1003,7 @@ export default function PanelSettingsModal({ open, onClose }: { open: boolean; o
           </button>
         </div>
       </div>
-    </div>
+    </AdminModalBackdrop>
     <AvatarCropModal
       open={avatarCropOpen}
       initialSrc={avatarCropSrc}

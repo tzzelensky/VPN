@@ -4,6 +4,7 @@ import Badge from "./Badge";
 type Props = {
   data: MySubProfileDto;
   subscription: MySubProfileDto["subscriptions"][number] | null;
+  onOpenProfile?: () => void;
 };
 
 function subscriptionStatusLabel(sub: MySubProfileDto["subscriptions"][number] | null): { text: string; tone: "success" | "warning" | "muted" } {
@@ -16,11 +17,9 @@ function subscriptionStatusLabel(sub: MySubProfileDto["subscriptions"][number] |
   return { text: "Подписка не активна", tone: "warning" };
 }
 
-export default function UserHeaderNew({ data, subscription }: Props) {
-  const status = subscriptionStatusLabel(subscription);
-
+function HeaderContent({ data, status }: { data: MySubProfileDto; status: ReturnType<typeof subscriptionStatusLabel> }) {
   return (
-    <header className="mn-user-header">
+    <>
       {data.avatar_url ? (
         <img src={data.avatar_url} alt="" className="mn-user-header__avatar" />
       ) : (
@@ -36,6 +35,24 @@ export default function UserHeaderNew({ data, subscription }: Props) {
           <Badge tone={status.tone}>{status.text}</Badge>
         </div>
       </div>
+    </>
+  );
+}
+
+export default function UserHeaderNew({ data, subscription, onOpenProfile }: Props) {
+  const status = subscriptionStatusLabel(subscription);
+
+  if (onOpenProfile) {
+    return (
+      <button type="button" className="mn-user-header mn-user-header--interactive" onClick={onOpenProfile}>
+        <HeaderContent data={data} status={status} />
+      </button>
+    );
+  }
+
+  return (
+    <header className="mn-user-header">
+      <HeaderContent data={data} status={status} />
     </header>
   );
 }

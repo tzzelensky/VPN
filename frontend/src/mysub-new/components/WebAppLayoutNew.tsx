@@ -79,9 +79,13 @@ export default function WebAppLayoutNew({
   const content = (
     <>
       <div className="mn-app__bg" aria-hidden />
-      <div ref={bindContent} className="mn-app__content">
+        <div ref={bindContent} className="mn-app__content">
         <div ref={bindHeaderShell} className="mn-user-header-shell">
-          <UserHeaderNew data={data} subscription={subscription} />
+          <UserHeaderNew
+            data={data}
+            subscription={subscription}
+            onOpenProfile={tab === "profile" ? undefined : () => onTabChange("profile")}
+          />
         </div>
         <main className="mn-main">{children}</main>
       </div>
