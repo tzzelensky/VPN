@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import DashboardLayout from "../components/DashboardLayout";
+import PanelTabs from "../components/PanelTabs";
+import PageLoadingState from "../components/PageLoadingState";
 import DualListPicker, { type DualListItem } from "../components/DualListPicker";
 import {
   bulkAssignWhitelistVaultKeys,
@@ -7,7 +9,9 @@ import {
   bulkRenameWhitelistVaultKeys,
   checkAllWhitelistVaultKeys,
   checkWhitelistVaultKey,
+  createWhitelistVaultGroup,
   createWhitelistVaultKey,
+  deleteWhitelistVaultGroup,
   deleteWhitelistVaultKey,
   fetchWhitelistVaultKeyRaw,
   importWhitelistVaultJson,
@@ -19,15 +23,20 @@ import {
   patchWhitelistPurchaseSettings,
   pollUntilVaultChecksDone,
   patchWhitelistVaultSettings,
+  removeWhitelistVaultKeyFromSubscriptions,
+  restoreWhitelistVaultKeyToSubscriptions,
   listWhitelistPurchases,
+  resetAllWhitelistPurchases,
   uploadWhitelistInstructionPhoto,
   deleteWhitelistInstructionPhoto,
   testWhitelistInstruction,
   setWhitelistVaultAssignment,
+  updateWhitelistVaultGroup,
   updateWhitelistVaultKey,
   type ConfigVaultCheckDto,
   type UserDto,
   type WhitelistAssignmentModeDto,
+  type WhitelistVaultGroupDto,
   type WhitelistVaultKeyDto,
   type WhitelistVaultOverviewDto,
   type WhitelistVaultSettingsDto,
@@ -68,9 +77,14 @@ function parseErr(e: unknown): string {
   return String(e);
 }
 
+function whitelistKeyInSubscriptions(k: WhitelistVaultKeyDto): boolean {
+  return !!(k.include_in_sale || (k.assignment_mode && k.assignment_mode !== "none"));
+}
+
 export default function WhitelistVaultPage({ onLogout }: { onLogout: () => void }) {
   const { confirmDangerous, maskSecret } = usePanelSettings();
   const [data, setData] = useState<WhitelistVaultOverviewDto | null>(null);
+  const [loading, setLoading] = useState(true);
   const [users, setUsers] = useState<UserDto[]>([]);
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState<{ type: "ok" | "err"; text: string } | null>(null);
@@ -103,6 +117,8 @@ export default function WhitelistVaultPage({ onLogout }: { onLogout: () => void 
   const [formActive, setFormActive] = useState(true);
   const [formIncludeInSale, setFormIncludeInSale] = useState(false);
   const [formNotify, setFormNotify] = useState(true);
+  const [formRemoveOnUnavailable, setFormRemoveOnUnavailable] = useState(false);
+  const [formChecksBeforeRemove, setFormChecksBeforeRemove] = useState(3);
   const [importText, setImportText] = useState("");
   const [importPrefix, setImportPrefix] = useState("");
   const [pageTab, setPageTab] = useState<"keys" | "purchase" | "instruction" | "history">("keys");
@@ -119,6 +135,13 @@ export default function WhitelistVaultPage({ onLogout }: { onLogout: () => void 
   const [usersPickerOpen, setUsersPickerOpen] = useState(false);
   const [usersPickerTitle, setUsersPickerTitle] = useState("Кому назначить белые списки");
   const [usersPickerPurpose, setUsersPickerPurpose] = useState<null | "form" | "assign-one" | "assign-bulk">(null);
+  const [collapsedGroupIds, setCollapsedGroupIds] = useState<number[]>([]);
+  const [groupMergeOpen, setGroupMergeOpen] = useState(false);
+  const [groupMergeName, setGroupMergeName] = useState("");
+  const [editGroup, setEditGroup] = useState<WhitelistVaultGroupDto | null>(null);
+  const [formGroupName, setFormGroupName] = useState("");
+  const [formGroupRemoveOnUnavailable, setFormGroupRemoveOnUnavailable] = useState(false);
+  const [formGroupChecksBeforeRemove, setFormGroupChecksBeforeRemove] = useState(3);
 
   const showToast = useCallback((type: "ok" | "err", text: string) => {
     setToast({ type, text });
@@ -130,6 +153,7 @@ export default function WhitelistVaultPage({ onLogout }: { onLogout: () => void 
     setData(r);
     setPurchaseForm(r.settings.purchase);
     setInstructionForm(r.settings.instruction);
+    setLoading(false);
     return r;
   }, []);
 
@@ -173,6 +197,19 @@ export default function WhitelistVaultPage({ onLogout }: { onLogout: () => void 
     return out;
   }, [data?.keys, search, filter, sortBy]);
 
+  const vaultGroups = useMemo(() => {
+    const allGroups = data?.groups ?? [];
+    const keyIds = new Set(keys.map((k) => k.id));
+    return allGroups
+      .map((g) => ({
+        group: g,
+        keys: keys.filter((k) => k.group_id === g.id),
+      }))
+      .filter((x) => x.keys.length > 0 || keyIds.size === 0);
+  }, [data?.groups, keys]);
+
+  const ungroupedKeys = useMemo(() => keys.filter((k) => k.group_id == null), [keys]);
+
   async function runBusy<T>(fn: () => Promise<T>): Promise<T | undefined> {
     setBusy(true);
     try {
@@ -201,6 +238,8 @@ export default function WhitelistVaultPage({ onLogout }: { onLogout: () => void 
     setFormActive(k.active);
     setFormIncludeInSale(!!k.include_in_sale);
     setFormNotify(k.notify_on_fail);
+    setFormRemoveOnUnavailable(!!k.remove_on_unavailable);
+    setFormChecksBeforeRemove(k.checks_before_remove ?? 3);
     setFormAssignment(k.assignment_mode);
     setFormUserIds(k.assigned_user_ids ?? []);
     const uri = (prefilledUri ?? k.raw_uri ?? "").trim();
@@ -236,9 +275,8 @@ export default function WhitelistVaultPage({ onLogout }: { onLogout: () => void 
 
   async function openAssign(k: WhitelistVaultKeyDto) {
     setAssignKey(k);
-    if (k.assignment_mode === "all" || k.assignment_mode === "none") {
-      setFormAssignment(k.assignment_mode);
-      setFormUserIds([]);
+    if (k.assignment_mode === "all" || k.assignment_mode === "none" || k.assignment_mode === "purchasers") {
+      void openEdit(k);
       return;
     }
     let ids = k.assigned_user_ids ?? [];
@@ -377,13 +415,195 @@ export default function WhitelistVaultPage({ onLogout }: { onLogout: () => void 
         active: formActive,
         include_in_sale: formIncludeInSale,
         notify_on_fail: formNotify,
+        ...(editKey.group_id == null
+          ? {
+              remove_on_unavailable: formRemoveOnUnavailable,
+              checks_before_remove: formChecksBeforeRemove,
+            }
+          : {}),
         assignment_mode: formAssignment,
         assigned_user_ids: formAssignment === "selected" ? formUserIds : [],
       });
       await reload();
       setEditKey(null);
-      showToast("ok", "VLESS-ключ обновлен");
+      showToast("ok", "VLESS-ключ обновлён");
     });
+  }
+
+  function toggleGroupCollapsed(groupId: number) {
+    setCollapsedGroupIds((prev) =>
+      prev.includes(groupId) ? prev.filter((id) => id !== groupId) : [...prev, groupId],
+    );
+  }
+
+  function openGroupEdit(group: WhitelistVaultGroupDto) {
+    setEditGroup(group);
+    setFormGroupName(group.name);
+    setFormGroupRemoveOnUnavailable(group.remove_on_unavailable);
+    setFormGroupChecksBeforeRemove(group.checks_before_remove);
+  }
+
+  async function handleCreateGroup() {
+    if (selectedKeyIds.length < 2) return;
+    const name = groupMergeName.trim();
+    if (!name) {
+      showToast("err", "Укажите название группы");
+      return;
+    }
+    await runBusy(async () => {
+      await createWhitelistVaultGroup({ name, key_ids: selectedKeyIds });
+      await reload();
+      clearKeySelection();
+      setGroupMergeOpen(false);
+      setGroupMergeName("");
+      showToast("ok", "Группа создана");
+    });
+  }
+
+  async function handleSaveGroupEdit() {
+    if (!editGroup) return;
+    await runBusy(async () => {
+      await updateWhitelistVaultGroup(editGroup.id, {
+        name: formGroupName,
+        remove_on_unavailable: formGroupRemoveOnUnavailable,
+        checks_before_remove: formGroupChecksBeforeRemove,
+      });
+      await reload();
+      setEditGroup(null);
+      showToast("ok", "Настройки группы сохранены");
+    });
+  }
+
+  async function handleDissolveGroup(group: WhitelistVaultGroupDto) {
+    const ok = await confirmDangerous(
+      `Разгруппировать «${group.name}»? Ключи останутся, но настройки авто-снятия группы будут потеряны.`,
+    );
+    if (!ok) return;
+    await runBusy(async () => {
+      await deleteWhitelistVaultGroup(group.id);
+      await reload();
+      showToast("ok", "Группа расформирована");
+    });
+  }
+
+  async function handleRemoveFromSubscriptions(k: WhitelistVaultKeyDto) {
+    const ok = await confirmDangerous(
+      `Убрать «${k.name}» из подписок? Ключ пропадёт у всех пользователей, включая купивших БС.`,
+    );
+    if (!ok) return;
+    await runBusy(async () => {
+      await removeWhitelistVaultKeyFromSubscriptions(k.id);
+      await reload();
+      if (viewKey?.id === k.id) {
+        setViewKey((prev) => (prev ? { ...prev, removed_from_subscriptions: true } : prev));
+      }
+      showToast("ok", "Ключ убран из подписок");
+    });
+  }
+
+  async function handleRestoreToSubscriptions(k: WhitelistVaultKeyDto) {
+    await runBusy(async () => {
+      await restoreWhitelistVaultKeyToSubscriptions(k.id);
+      await reload();
+      if (viewKey?.id === k.id) {
+        setViewKey((prev) => (prev ? { ...prev, removed_from_subscriptions: false } : prev));
+      }
+      showToast("ok", "Ключ возвращён в подписки");
+    });
+  }
+
+  function renderKeyRow(k: WhitelistVaultKeyDto, nested = false) {
+    return (
+      <article
+        key={k.id}
+        className={`vault-row${nested ? " vault-row--nested" : ""}${selectedKeyIds.includes(k.id) ? " vault-row--selected" : ""}`}
+      >
+        <div className="vault-pick">
+          <label title="Выбрать ключ">
+            <input type="checkbox" checked={selectedKeyIds.includes(k.id)} onChange={() => toggleKeySelected(k.id)} />
+          </label>
+        </div>
+        <div className="vault-row-main">
+          <div className="vault-row-title">
+            <strong>{k.name}</strong>
+            {!k.active && <span className="vault-badge vault-badge--off">Отключён</span>}
+            {k.removed_from_subscriptions ? (
+              <span className="vault-badge vault-badge--warn">
+                {k.removed_manually ? "Убран вручную" : "Убран из подписок"}
+              </span>
+            ) : null}
+            {k.group_id != null && !nested ? (
+              <span className="vault-badge vault-badge--group">{k.group_name ?? "Группа"}</span>
+            ) : null}
+          </div>
+          <code className="vault-uri">{maskSecret(k.masked_uri)}</code>
+          <div className="vault-row-meta">
+            <span className={`vault-status vault-status--${k.last_check_status}`}>
+              {STATUS_LABEL[k.last_check_status]}
+            </span>
+            {k.last_check_latency_ms != null && <span className="muted">{k.last_check_latency_ms} мс</span>}
+            <span className="muted">Проверка: {formatDt(k.last_check_at)}</span>
+            <span className="muted">Подключено: {k.assignment_label}</span>
+            {(k.consecutive_unavailable_checks ?? 0) > 0 ? (
+              <span className="muted">Сбой подряд: {k.consecutive_unavailable_checks}</span>
+            ) : null}
+          </div>
+        </div>
+        <div className="vault-row-actions">
+          <button type="button" className="btn btn-sm" onClick={() => void openView(k)}>
+            Просмотр
+          </button>
+          <button type="button" className="btn btn-sm" onClick={() => void openEdit(k)}>
+            Редактировать
+          </button>
+          <button type="button" className="btn btn-sm" disabled={busy} onClick={() => void checkOne(k)}>
+            Проверить
+          </button>
+          <button type="button" className="btn btn-sm" disabled={busy} onClick={() => openAssign(k)}>
+            Назначить
+          </button>
+          <button type="button" className="btn btn-sm" onClick={() => void openHistory(k)}>
+            История
+          </button>
+          {k.removed_from_subscriptions ? (
+            <button
+              type="button"
+              className="btn btn-sm primary"
+              disabled={busy}
+              onClick={() => void handleRestoreToSubscriptions(k)}
+            >
+              Вернуть в подписки
+            </button>
+          ) : whitelistKeyInSubscriptions(k) ? (
+            <button
+              type="button"
+              className="btn btn-sm"
+              disabled={busy}
+              onClick={() => void handleRemoveFromSubscriptions(k)}
+            >
+              Убрать из подписок
+            </button>
+          ) : null}
+          <button
+            type="button"
+            className="btn btn-sm"
+            onClick={() => {
+              const uri = k.raw_uri;
+              if (uri) copyUri(uri);
+              else
+                void fetchWhitelistVaultKeyRaw(k.id).then((r) => {
+                  if (r.key.raw_uri) copyUri(r.key.raw_uri);
+                });
+            }}
+          >
+            Скопировать
+          </button>
+          <button type="button" className="btn btn-sm danger" onClick={() => void handleDelete(k)}>
+            Удалить
+          </button>
+        </div>
+      </article>
+    );
   }
 
   function toggleKeySelected(id: number) {
@@ -501,10 +721,17 @@ export default function WhitelistVaultPage({ onLogout }: { onLogout: () => void 
             }}
           >
             <option value="none">Никому</option>
+            <option value="purchasers">Пользователям с купленными БС</option>
             <option value="all">Всем пользователям (с режимом белых списков)</option>
             <option value="selected">Выбранным пользователям</option>
           </select>
         </label>
+        {formAssignment === "purchasers" && (
+          <p className="muted vault-hint">
+            Ключ получат все с активной покупкой белых списков
+            {purchasedUserIds.length > 0 ? ` (сейчас: ${purchasedUserIds.length})` : " (сейчас покупателей нет)"}.
+          </p>
+        )}
         {formAssignment === "selected" && (
           <div className="field">
             <button
@@ -578,31 +805,23 @@ export default function WhitelistVaultPage({ onLogout }: { onLogout: () => void 
           </div>
         )}
 
-        <div className="vault-toolbar" style={{ marginBottom: "0.75rem", display: "flex", gap: "0.45rem", flexWrap: "wrap" }}>
-          {(["keys", "purchase", "instruction", "history"] as const).map((t) => (
-            <button
-              key={t}
-              type="button"
-              className={pageTab === t ? "primary" : "ghost"}
-              onClick={() => {
-                setPageTab(t);
-                if (t === "history") {
-                  void listWhitelistPurchases()
-                    .then((r) => setPurchases(r.purchases))
-                    .catch(() => setPurchases([]));
-                }
-              }}
-            >
-              {t === "keys"
-                ? "VLESS-ключи"
-                : t === "purchase"
-                  ? "Покупка"
-                  : t === "instruction"
-                    ? "Инструкция"
-                    : "История покупок"}
-            </button>
-          ))}
-        </div>
+        <PanelTabs
+          tabs={[
+            { id: "keys", label: "VLESS-ключи" },
+            { id: "purchase", label: "Покупка" },
+            { id: "instruction", label: "Инструкция" },
+            { id: "history", label: "История покупок" },
+          ]}
+          value={pageTab}
+          onChange={(t) => {
+            setPageTab(t);
+            if (t === "history") {
+              void listWhitelistPurchases()
+                .then((r) => setPurchases(r.purchases))
+                .catch(() => setPurchases([]));
+            }
+          }}
+        />
 
         {pageTab === "purchase" && purchaseForm ? (
           <section className="vault-panel" style={{ marginBottom: "1rem" }}>
@@ -788,7 +1007,42 @@ export default function WhitelistVaultPage({ onLogout }: { onLogout: () => void 
 
         {pageTab === "history" ? (
           <section className="vault-panel" style={{ marginBottom: "1rem" }}>
-            <h2 className="vault-section-title">История покупок белых списков</h2>
+            <div className="vault-toolbar" style={{ marginBottom: "0.75rem", justifyContent: "space-between" }}>
+              <div>
+                <h2 className="vault-section-title" style={{ margin: 0 }}>
+                  История покупок белых списков
+                </h2>
+                <p className="muted vault-hint" style={{ marginTop: "0.35rem" }}>
+                  Сброс снимает покупки БС у всех пользователей — после этого они снова смогут купить белые списки.
+                </p>
+              </div>
+              <button
+                type="button"
+                className="ghost err-text"
+                disabled={busy}
+                onClick={() => {
+                  if (
+                    !confirmDangerous(
+                      "Сбросить все покупки белых списков? У пользователей отключится БС, и они снова смогут купить продукт.",
+                    )
+                  ) {
+                    return;
+                  }
+                  void runBusy(async () => {
+                    const r = await resetAllWhitelistPurchases();
+                    const hist = await listWhitelistPurchases();
+                    setPurchases(hist.purchases);
+                    showToast(
+                      "ok",
+                      `Сброшено: покупок ${r.reset_purchases}, пользователей ${r.reset_users}` +
+                        (r.cleared_assignments ? `, назначений ${r.cleared_assignments}` : ""),
+                    );
+                  });
+                }}
+              >
+                Сбросить все покупки БС
+              </button>
+            </div>
             <div className="table-wrap">
               <table className="data-table">
                 <thead>
@@ -954,13 +1208,26 @@ export default function WhitelistVaultPage({ onLogout }: { onLogout: () => void 
           </div>
         ) : null}
 
-        {keys.length === 0 ? (
+        {loading ? (
+          <PageLoadingState />
+        ) : keys.length === 0 ? (
           <p className="muted vault-empty">Нет ключей. Добавьте VLESS-ключ или импортируйте список.</p>
         ) : (
           <>
             {selectedKeyIds.length > 0 ? (
               <div className="vault-bulk-bar">
                 <span className="vault-bulk-bar__count">Выбрано: {selectedKeyIds.length}</span>
+                <button
+                  type="button"
+                  className="btn btn-sm"
+                  disabled={selectedKeyIds.length < 2}
+                  onClick={() => {
+                    setGroupMergeName("");
+                    setGroupMergeOpen(true);
+                  }}
+                >
+                  Объединить в группу
+                </button>
                 <button
                   type="button"
                   className="btn btn-sm"
@@ -989,73 +1256,46 @@ export default function WhitelistVaultPage({ onLogout }: { onLogout: () => void 
               </div>
             ) : null}
             <div className="vault-list">
-            {keys.map((k) => (
-              <article
-                key={k.id}
-                className={`vault-row${selectedKeyIds.includes(k.id) ? " vault-row--selected" : ""}`}
-              >
-                <div className="vault-pick">
-                  <label title="Выбрать ключ">
-                    <input
-                      type="checkbox"
-                      checked={selectedKeyIds.includes(k.id)}
-                      onChange={() => toggleKeySelected(k.id)}
-                    />
-                  </label>
-                </div>
-                <div className="vault-row-main">
-                  <div className="vault-row-title">
-                    <strong>{k.name}</strong>
-                    {!k.active && <span className="vault-badge vault-badge--off">Отключён</span>}
-                  </div>
-                  <code className="vault-uri">{maskSecret(k.masked_uri)}</code>
-                  <div className="vault-row-meta">
-                    <span className={`vault-status vault-status--${k.last_check_status}`}>
-                      {STATUS_LABEL[k.last_check_status]}
-                    </span>
-                    {k.last_check_latency_ms != null && (
-                      <span className="muted">{k.last_check_latency_ms} мс</span>
-                    )}
-                    <span className="muted">Проверка: {formatDt(k.last_check_at)}</span>
-                    <span className="muted">Подключено: {k.assignment_label}</span>
-                  </div>
-                </div>
-                <div className="vault-row-actions">
-                  <button type="button" className="btn btn-sm" onClick={() => void openView(k)}>
-                    Просмотр
-                  </button>
-                  <button type="button" className="btn btn-sm" onClick={() => void openEdit(k)}>
-                    Редактировать
-                  </button>
-                  <button type="button" className="btn btn-sm" disabled={busy} onClick={() => void checkOne(k)}>
-                    Проверить
-                  </button>
-                  <button type="button" className="btn btn-sm" disabled={busy} onClick={() => openAssign(k)}>
-                    Назначить
-                  </button>
-                  <button type="button" className="btn btn-sm" onClick={() => void openHistory(k)}>
-                    История
-                  </button>
-                  <button
-                    type="button"
-                    className="btn btn-sm"
-                    onClick={() => {
-                      const uri = k.raw_uri;
-                      if (uri) copyUri(uri);
-                      else
-                        void fetchWhitelistVaultKeyRaw(k.id).then((r) => {
-                          if (r.key.raw_uri) copyUri(r.key.raw_uri);
-                        });
-                    }}
-                  >
-                    Скопировать
-                  </button>
-                  <button type="button" className="btn btn-sm danger" onClick={() => void handleDelete(k)}>
-                    Удалить
-                  </button>
-                </div>
-              </article>
-            ))}
+              {vaultGroups.map(({ group, keys: groupKeys }) => {
+                const collapsed = collapsedGroupIds.includes(group.id);
+                return (
+                  <section key={group.id} className={`vault-group${collapsed ? " vault-group--collapsed" : ""}`}>
+                    <header className="vault-group-head">
+                      <button
+                        type="button"
+                        className="vault-group-toggle"
+                        aria-expanded={!collapsed}
+                        onClick={() => toggleGroupCollapsed(group.id)}
+                      >
+                        {collapsed ? "▸" : "▾"}
+                      </button>
+                      <div className="vault-group-head-main" onClick={() => toggleGroupCollapsed(group.id)}>
+                        <strong className="vault-group-title">{group.name}</strong>
+                        <span className="muted vault-group-meta">
+                          {groupKeys.length} конфигов
+                          {group.unavailable_count > 0 ? ` · недоступно: ${group.unavailable_count}` : ""}
+                          {group.removed_count > 0 ? ` · убрано: ${group.removed_count}` : ""}
+                        </span>
+                        {group.remove_on_unavailable ? (
+                          <span className="vault-badge vault-badge--auto">
+                            Авто-снятие после {group.checks_before_remove} проверок
+                          </span>
+                        ) : null}
+                      </div>
+                      <div className="vault-group-head-actions">
+                        <button type="button" className="btn btn-sm" onClick={() => openGroupEdit(group)}>
+                          Настройки группы
+                        </button>
+                        <button type="button" className="btn btn-sm ghost" onClick={() => void handleDissolveGroup(group)}>
+                          Разгруппировать
+                        </button>
+                      </div>
+                    </header>
+                    {!collapsed ? <div className="vault-group-body">{groupKeys.map((k) => renderKeyRow(k, true))}</div> : null}
+                  </section>
+                );
+              })}
+              {ungroupedKeys.map((k) => renderKeyRow(k))}
             </div>
           </>
         )}
@@ -1091,6 +1331,89 @@ export default function WhitelistVaultPage({ onLogout }: { onLogout: () => void 
               </button>
               <button type="button" className="btn primary" disabled={busy} onClick={() => void handleBulkRename()}>
                 Применить
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {groupMergeOpen && (
+        <div className="modal-backdrop">
+          <div className="modal modal--sm vault-modal">
+            <div className="modal-head">
+              <h2>Объединить в группу ({selectedKeyIds.length})</h2>
+              <button type="button" className="modal-close" onClick={() => setGroupMergeOpen(false)}>
+                ×
+              </button>
+            </div>
+            <div className="modal-body">
+              <p className="muted vault-hint">
+                Выбранные конфиги будут сгруппированы. Настройки авто-снятия с подписок задаются для всей группы.
+              </p>
+              <label className="field">
+                <span>Название группы</span>
+                <input
+                  className="input"
+                  value={groupMergeName}
+                  onChange={(e) => setGroupMergeName(e.target.value)}
+                  placeholder="Резервные обходы"
+                />
+              </label>
+            </div>
+            <div className="modal-footer">
+              <button type="button" className="btn" onClick={() => setGroupMergeOpen(false)}>
+                Отмена
+              </button>
+              <button type="button" className="btn primary" disabled={busy} onClick={() => void handleCreateGroup()}>
+                Создать группу
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {editGroup && (
+        <div className="modal-backdrop">
+          <div className="modal modal--sm vault-modal">
+            <div className="modal-head">
+              <h2>Группа: {editGroup.name}</h2>
+              <button type="button" className="modal-close" onClick={() => setEditGroup(null)}>
+                ×
+              </button>
+            </div>
+            <div className="modal-body">
+              <label className="field">
+                <span>Название группы</span>
+                <input className="input" value={formGroupName} onChange={(e) => setFormGroupName(e.target.value)} />
+              </label>
+              <label className="check-row">
+                <input
+                  type="checkbox"
+                  checked={formGroupRemoveOnUnavailable}
+                  onChange={(e) => setFormGroupRemoveOnUnavailable(e.target.checked)}
+                />
+                Убирать из подписки при недоступности (для всех ключей группы)
+              </label>
+              {formGroupRemoveOnUnavailable ? (
+                <label className="field">
+                  <span>Сколько проверок подряд до снятия с подписок</span>
+                  <input
+                    className="input"
+                    type="number"
+                    min={1}
+                    max={50}
+                    value={formGroupChecksBeforeRemove}
+                    onChange={(e) => setFormGroupChecksBeforeRemove(Math.max(1, Number(e.target.value) || 3))}
+                  />
+                </label>
+              ) : null}
+            </div>
+            <div className="modal-footer">
+              <button type="button" className="btn" onClick={() => setEditGroup(null)}>
+                Отмена
+              </button>
+              <button type="button" className="btn primary" disabled={busy} onClick={() => void handleSaveGroupEdit()}>
+                Сохранить
               </button>
             </div>
           </div>
@@ -1179,6 +1502,35 @@ export default function WhitelistVaultPage({ onLogout }: { onLogout: () => void 
                 <input type="checkbox" checked={formNotify} onChange={(e) => setFormNotify(e.target.checked)} />
                 Уведомлять при недоступности
               </label>
+              {editKey.group_id == null ? (
+                <>
+                  <label className="check-row">
+                    <input
+                      type="checkbox"
+                      checked={formRemoveOnUnavailable}
+                      onChange={(e) => setFormRemoveOnUnavailable(e.target.checked)}
+                    />
+                    Убирать из подписки при недоступности
+                  </label>
+                  {formRemoveOnUnavailable ? (
+                    <label className="field">
+                      <span>Сколько проверок подряд до снятия с подписок</span>
+                      <input
+                        className="input"
+                        type="number"
+                        min={1}
+                        max={50}
+                        value={formChecksBeforeRemove}
+                        onChange={(e) => setFormChecksBeforeRemove(Math.max(1, Number(e.target.value) || 3))}
+                      />
+                    </label>
+                  ) : null}
+                </>
+              ) : (
+                <p className="muted vault-hint">
+                  Ключ в группе «{editKey.group_name ?? "—"}». Авто-снятие настраивается в редактировании группы.
+                </p>
+              )}
               {renderAssignmentFields()}
             </div>
             <div className="modal-footer">
@@ -1243,6 +1595,25 @@ export default function WhitelistVaultPage({ onLogout }: { onLogout: () => void 
               <button type="button" className="btn" onClick={() => openAssign(viewKey)}>
                 Назначить
               </button>
+              {viewKey.removed_from_subscriptions ? (
+                <button
+                  type="button"
+                  className="btn primary"
+                  disabled={busy}
+                  onClick={() => void handleRestoreToSubscriptions(viewKey)}
+                >
+                  Вернуть в подписки
+                </button>
+              ) : whitelistKeyInSubscriptions(viewKey) ? (
+                <button
+                  type="button"
+                  className="btn"
+                  disabled={busy}
+                  onClick={() => void handleRemoveFromSubscriptions(viewKey)}
+                >
+                  Убрать из подписок
+                </button>
+              ) : null}
               <button
                 type="button"
                 className="btn"

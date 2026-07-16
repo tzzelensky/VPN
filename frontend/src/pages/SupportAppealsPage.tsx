@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import DashboardLayout from "../components/DashboardLayout";
+import PageLoadingState from "../components/PageLoadingState";
 import Spinner from "../components/Spinner";
 import {
   completeSupportAppeal,
@@ -333,7 +334,7 @@ export default function SupportAppealsPage({ onLogout }: { onLogout: () => void 
       <section className="panel appeals-panel" style={{ marginTop: "1rem" }}>
         <h2 style={{ marginTop: 0 }}>Список обращений</h2>
         {loading ? (
-          <p className="sub">Загрузка…</p>
+          <PageLoadingState />
         ) : appeals.length === 0 ? (
           <p className="sub">Обращений пока нет.</p>
         ) : (

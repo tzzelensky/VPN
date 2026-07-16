@@ -2,7 +2,6 @@ import type { SupportAppealRow } from "./db.js";
 import { readAppealStoredPhoto } from "./supportAppealFiles.js";
 import { fetchTelegramPhotoBytes } from "./supportAppealMedia.js";
 import { getTelegramPaymentNotifyChatIds } from "./telegram/env.js";
-import { sendPanelPushToAll } from "./fcm.js";
 import { sendTelegramHtml, sendTelegramPhoto, sendTelegramPhotoBinary } from "./telegram/api.js";
 import { escHtml } from "./telegram/format.js";
 
@@ -22,20 +21,6 @@ function panelAppealsUrl(): string {
 }
 
 export async function notifyAdminsNewSupportAppeal(row: SupportAppealRow): Promise<void> {
-  const tagPlain =
-    row.tg_username && String(row.tg_username).trim()
-      ? `@${String(row.tg_username).replace(/^@/, "")}`
-      : row.tg_first_name && String(row.tg_first_name).trim()
-        ? String(row.tg_first_name).trim()
-        : `TG ${row.tg_user_id}`;
-  const previewPlain = row.text ? row.text.slice(0, 160) : "без текста";
-
-  void sendPanelPushToAll({
-    title: "Новое обращение",
-    body: `${tagPlain}: ${previewPlain}`,
-    data: { appeal_id: row.id },
-  }).catch((e) => console.error("[support] fcm push:", e));
-
   const admins = getTelegramPaymentNotifyChatIds();
   if (!admins.length) return;
   const tag = appealUserTag(row);

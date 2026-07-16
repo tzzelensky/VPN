@@ -40,18 +40,11 @@ function readMySubTheme(): MySubTheme {
   return "dark";
 }
 
-/** Если название не ввели: имя последней подписки (max id) + порядковый номер (следующий по счёту). */
-function defaultNewSubscriptionName(subs: MySubProfileDto["subscriptions"]): string {
-  const ord = subs.length + 1;
-  const ordStr = String(ord);
-  if (!subs.length) return `Новая подписка ${ordStr}`.slice(0, 25);
-  let latest = subs[0]!;
-  for (const s of subs) if (s.id > latest.id) latest = s;
-  const base = String(latest.name ?? "").trim() || "Подписка";
-  const suffix = ` ${ordStr}`;
-  const maxBase = Math.max(1, 25 - suffix.length);
-  const trimmedBase = (base.length > maxBase ? base.slice(0, maxBase) : base).trimEnd();
-  return `${trimmedBase}${suffix}`.slice(0, 25);
+/** Имя по умолчанию для новой подписки — @username или имя из профиля Telegram. */
+function defaultNewSubscriptionName(profileName: string): string {
+  const base = String(profileName ?? "").trim();
+  if (base) return base.slice(0, 25);
+  return "Подписка";
 }
 
 function formatMySubPlanMeta(p: { total_gb: number; days: number }): string {
@@ -127,7 +120,8 @@ export default function MySubPage() {
   const [showInstruction, setShowInstruction] = useState(false);
   const [showWhitelistInstruction, setShowWhitelistInstruction] = useState(false);
   const [showPickModal, setShowPickModal] = useState(false);
-  const [payProduct, setPayProduct] = useState<"subscription" | "topup" | "white_lists" | "device_slot">("subscription");
+  const [payProduct, setPayProduct] = useState<"subscription" | "topup" | "white_lists" | "device_slot" | "combo">("subscription");
+  const [payComboOfferId, setPayComboOfferId] = useState("");
   const [payPlanId, setPayPlanId] = useState<number>(1);
   const [payIsTest, setPayIsTest] = useState(false);
   const [payPhoto, setPayPhoto] = useState<File | null>(null);
@@ -316,7 +310,7 @@ export default function MySubPage() {
   }, [data, payTargetId]);
   const suggestedNewSubName = useMemo(() => {
     if (!data) return "";
-    return defaultNewSubscriptionName(data.subscriptions);
+    return defaultNewSubscriptionName(data.name);
   }, [data]);
   const selectedPlan = useMemo(() => {
     if (!data) return null;
@@ -328,6 +322,12 @@ export default function MySubPage() {
   }, [data, payPlanId]);
   const testPlanAvailable = data?.test_plan?.available === true;
   const salesDisabledForNew = data?.sales_disabled_for_new === true;
+  const hasLimitedSubs = Boolean(
+    data?.subscriptions.some((s) => s.total_gb > 0 && !s.stats.unlimited_traffic),
+  );
+  const payTargetUnlimited =
+    payProduct === "topup" &&
+    Boolean(payTargetSub && (payTargetSub.total_gb <= 0 || payTargetSub.stats.unlimited_traffic));
 
   function openTestPay() {
     setPayProduct("subscription");
@@ -339,16 +339,51 @@ export default function MySubPage() {
     setTab("subscription");
   }
 
-  function switchPayProduct(next: "subscription" | "topup" | "white_lists" | "device_slot") {
+  const selectedComboOffer = useMemo(() => {
+    if (!data?.combo_offers?.length || !payComboOfferId) return null;
+    return data.combo_offers.find((o) => o.id === payComboOfferId) ?? null;
+  }, [data, payComboOfferId]);
+
+  function selectComboOffer(id: string) {
+    if (payProduct === "combo" && payComboOfferId === id) {
+      switchPayProduct("subscription");
+      return;
+    }
+    setPayIsTest(false);
+    setPromoApplied(null);
+    setPromoFeedback(null);
+    setPromoCodeInput("");
+    setPayComboOfferId(id);
+    setPayProduct("combo");
+    const offer = data?.combo_offers?.find((o) => o.id === id);
+    const eligibleIds = offer?.eligible_subscription_ids ?? [];
+    if (offer?.preferred_subscription_id) {
+      setPayTargetId(offer.preferred_subscription_id);
+    } else if (eligibleIds.length > 0) {
+      if (payTargetId > 0 && eligibleIds.includes(payTargetId)) {
+        // leave current
+      } else {
+        setPayTargetId(eligibleIds[0]!);
+      }
+    }
+  }
+
+  function switchPayProduct(next: "subscription" | "topup" | "white_lists" | "device_slot" | "combo") {
+    if (next !== "combo") setPayComboOfferId("");
     setPayIsTest(false);
     setPromoApplied(null);
     setPromoFeedback(null);
     setPromoCodeInput("");
     setPayPlanId(1);
     if ((next === "topup" || next === "white_lists" || next === "device_slot") && data?.subscriptions.length) {
-      const wlId = next === "white_lists" ? data.whitelist?.purchase_user_id : null;
-      if (wlId && wlId > 0) setPayTargetId(wlId);
-      else if (next === "topup") {
+      if (next === "white_lists") {
+        const eligible = data.subscriptions.filter((s) => s.whitelist?.can_buy);
+        const pick =
+          payTargetId > 0 && eligible.some((s) => s.id === payTargetId)
+            ? payTargetId
+            : eligible[0]?.id ?? data.subscriptions[0]!.id;
+        setPayTargetId(pick);
+      } else if (next === "topup") {
         const limited = data.subscriptions.find((s) => s.total_gb > 0 && !s.stats.unlimited_traffic);
         setPayTargetId(limited?.id ?? data.subscriptions[0]!.id);
       } else if (next === "device_slot") {
@@ -435,7 +470,16 @@ export default function MySubPage() {
       setMsg("Оформление новых подписок временно недоступно.");
       return;
     }
-    if (payProduct === "device_slot") {
+    if (payProduct === "combo") {
+      if (!selectedComboOffer) {
+        setMsg("Выберите комбо-предложение.");
+        return;
+      }
+      if (!selectedComboOffer.eligible) {
+        setMsg(selectedComboOffer.block_reason || "Комбо-предложение недоступно.");
+        return;
+      }
+    } else if (payProduct === "device_slot") {
       if (!payTargetId) {
         setMsg("Выберите подписку для докупки места.");
         return;
@@ -445,11 +489,11 @@ export default function MySubPage() {
         return;
       }
     } else if (payProduct === "white_lists") {
-      if (!data.whitelist?.can_buy) {
+      if (!payTargetSub?.whitelist?.can_buy) {
         setMsg(
-          data.whitelist?.status === "connected"
-            ? "Белые списки уже подключены."
-            : data.whitelist?.block_reason || "Покупка белых списков недоступна.",
+          payTargetSub?.whitelist?.status === "active"
+            ? "Белые списки уже подключены к этой подписке."
+            : payTargetSub?.whitelist?.block_reason || data.whitelist?.block_reason || "Покупка белых списков недоступна.",
         );
         return;
       }
@@ -487,7 +531,7 @@ export default function MySubPage() {
       return;
     }
     const chosenNewName =
-      payTargetId === 0 && !payIsTest ? (newSubName.trim() || defaultNewSubscriptionName(data.subscriptions)) : "";
+      payTargetId === 0 && !payIsTest ? (newSubName.trim() || defaultNewSubscriptionName(data.name)) : "";
     setBusyPay(true);
     setMsg("");
     try {
@@ -503,17 +547,27 @@ export default function MySubPage() {
               : payProduct === "white_lists"
                 ? data.subscriptions[0]?.id
                 : undefined,
-        plan_id: payIsTest || payProduct === "white_lists" || payProduct === "device_slot" ? 1 : payPlanId,
+        plan_id:
+          payIsTest || payProduct === "white_lists" || payProduct === "device_slot"
+            ? 1
+            : payProduct === "combo"
+              ? selectedComboOffer?.plan_id ?? 1
+              : payPlanId,
         photo_base64: compressed.base64,
         photo_mime: compressed.mime,
         photo_name: compressed.name,
         new_subscription_name:
-          payProduct === "subscription" && !payIsTest && payTargetId === 0 ? chosenNewName.slice(0, 25) : undefined,
-        promo_code: payIsTest ? undefined : promoApplied?.code,
+          (payProduct === "subscription" || payProduct === "combo") && !payIsTest && payTargetId === 0
+            ? chosenNewName.slice(0, 25)
+            : undefined,
+        promo_code: payIsTest || payProduct === "combo" ? undefined : promoApplied?.code,
+        combo_offer_id: payProduct === "combo" ? payComboOfferId : undefined,
       });
       setMsg(
         payIsTest
           ? "Чек получен. Администратор проверит оплату и активирует тестовую подписку."
+          : payProduct === "combo"
+            ? "Чек получен. После подтверждения будут подключены подписка и все продукты из комбо."
           : payProduct === "device_slot"
             ? "Чек получен. После подтверждения оплаты место для устройства будет добавлено."
           : payProduct === "white_lists"
@@ -880,6 +934,10 @@ export default function MySubPage() {
       setShowPickModal,
       payProduct,
       switchPayProduct,
+      payComboOfferId,
+      setPayComboOfferId,
+      selectedComboOffer,
+      selectComboOffer,
       payPlanId,
       setPayPlanId,
       payIsTest,
@@ -1217,7 +1275,8 @@ export default function MySubPage() {
                               : "Не подключено"}
                       </b>
                     </p>
-                    {data.whitelist.status !== "connected" && data.whitelist.can_buy ? (
+                    {data.whitelist.status !== "connected" &&
+                    (data.subscriptions.some((s) => s.whitelist?.can_buy) || data.whitelist.can_buy) ? (
                       <div style={{ display: "flex", flexDirection: "column", gap: "0.45rem", marginTop: "0.55rem" }}>
                         <span className="sub">
                           Цена: <b>{data.whitelist.price_rub} ₽</b>
@@ -1276,7 +1335,7 @@ export default function MySubPage() {
                       <button
                         type="button"
                         className={payProduct === "topup" ? "primary" : "ghost"}
-                        disabled={!data.subscriptions.length}
+                        disabled={!hasLimitedSubs}
                         onClick={() => switchPayProduct("topup")}
                         style={{ width: "100%" }}
                       >
@@ -1288,8 +1347,7 @@ export default function MySubPage() {
                           className={payProduct === "white_lists" ? "primary" : "ghost"}
                           disabled={
                             !data.subscriptions.length ||
-                            data.whitelist.status === "connected" ||
-                            !data.whitelist.can_buy
+                            !data.subscriptions.some((s) => s.whitelist?.can_buy)
                           }
                           onClick={() => switchPayProduct("white_lists")}
                           style={{ width: "100%" }}
@@ -1359,17 +1417,23 @@ export default function MySubPage() {
                     <div className="form-field">
                       <label>Подписка для белых списков</label>
                       <div className="mysub-stat-list">
-                        {data.subscriptions.map((s) => (
+                        {data.subscriptions.map((s) => {
+                          const wl = s.whitelist;
+                          const wlConnected = wl?.status === "active";
+                          const wlDisabled = !wl?.can_buy;
+                          return (
                           <button
                             key={`pay-wl-${s.id}`}
                             type="button"
                             className={payTargetId === s.id ? "primary" : "ghost"}
+                            disabled={wlDisabled}
                             onClick={() => setPayTargetId(s.id)}
                           >
                             {subscriptionLabel(s)}
-                            {s.allowed ? " · активна" : ""}
+                            {wlConnected ? " · БС подключены" : s.allowed ? " · активна" : ""}
                           </button>
-                        ))}
+                          );
+                        })}
                       </div>
                     </div>
                     <p className="field-hint" style={{ marginTop: "0.45rem" }}>
@@ -1382,17 +1446,21 @@ export default function MySubPage() {
                     <div className="form-field">
                       <label>Подписка для докупки ГБ</label>
                       <div className="mysub-stat-list">
-                        {data.subscriptions.map((s) => (
+                        {data.subscriptions.map((s) => {
+                          const unlimited = s.total_gb <= 0 || s.stats.unlimited_traffic;
+                          return (
                           <button
                             key={`pay-topup-${s.id}`}
                             type="button"
                             className={payTargetId === s.id ? "primary" : "ghost"}
+                            disabled={unlimited}
                             onClick={() => setPayTargetId(s.id)}
                           >
                             {subscriptionLabel(s)}
-                            {s.allowed ? " · активна" : ""}
+                            {unlimited ? " · безлимит" : s.allowed ? " · активна" : ""}
                           </button>
-                        ))}
+                          );
+                        })}
                       </div>
                     </div>
                   </div>
@@ -1402,8 +1470,10 @@ export default function MySubPage() {
                     {salesDisabledForNew && data.subscriptions.length === 0
                       ? "Оформление новых подписок и тестовой подписки сейчас недоступно."
                       : payProduct === "white_lists"
-                        ? data.whitelist?.status === "connected"
-                          ? "Белые списки уже подключены к вашей подписке."
+                        ? payTargetSub?.whitelist?.status === "active"
+                          ? "Белые списки уже подключены к выбранной подписке."
+                          : payTargetSub?.whitelist?.block_reason
+                            ? payTargetSub.whitelist.block_reason
                           : `Покупка белых списков для ${payTargetSub ? subscriptionLabel(payTargetSub) : "подписки"}. После оплаты VLESS-ключи будут добавлены в подписку.`
                       : payProduct === "topup"
                       ? data.subscriptions.length === 0
@@ -1585,10 +1655,14 @@ export default function MySubPage() {
                     type="button"
                     className="primary"
                     style={{ width: "100%", marginTop: "0.35rem" }}
-                    disabled={busyPay}
+                    disabled={busyPay || payTargetUnlimited || (salesDisabledForNew && data.subscriptions.length === 0)}
                     onClick={() => void submitPaymentProof()}
                   >
-                    {busyPay ? "Отправка..." : "Отправить чек на проверку"}
+                    {busyPay
+                      ? "Отправка..."
+                      : payTargetUnlimited
+                        ? "Безлимит — докупка недоступна"
+                        : "Отправить чек на проверку"}
                   </button>
                 </div>
               </section>

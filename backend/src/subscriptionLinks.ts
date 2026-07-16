@@ -1,5 +1,5 @@
 import { subscriptionVaultUrisForUser } from "./configVaultDb.js";
-import { parseProxyUri } from "./configVaultUri.js";
+import { applyUserRemarkToProxyUri, defaultNameFromUri, parseProxyUri } from "./configVaultUri.js";
 import { getWhitelistAccessState, subscriptionWhitelistUrisForUser } from "./whitelistVaultDb.js";
 import { getServerSubscriptionSettings, serversForUserSubscription, userHasActiveSubscription, type ServerRow, type UserRow } from "./db.js";
 import { HAPP_WHITELIST_SUBSCRIPTION_LINE } from "./happWhitelistLine.js";
@@ -50,7 +50,14 @@ export function subscriptionVlessLinksForUser(user: UserRow): string[] {
     rows.map((r) => vlessUriForRow(user, r)),
   );
 
-  const extras = (user.extra_vless_links ?? []).map((x) => x.uri.trim()).filter(Boolean);
+  const extras = (user.extra_vless_links ?? [])
+    .map((x) => {
+      const uri = x.uri.trim();
+      if (!uri) return "";
+      const base = (x.label || defaultNameFromUri(uri)).trim();
+      return applyUserRemarkToProxyUri(uri, base, user.name);
+    })
+    .filter(Boolean);
   const vault = subscriptionVaultUrisForUser(user);
   const whitelist = subscriptionWhitelistUrisForUser(user);
   appendUniqueSubscriptionUris(out, seen, [...extras, ...vault, ...whitelist]);

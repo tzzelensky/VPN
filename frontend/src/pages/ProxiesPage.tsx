@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import DashboardLayout from "../components/DashboardLayout";
+import PageLoadingState from "../components/PageLoadingState";
 import {
   checkAllTelegramProxies,
   checkTelegramProxy,
@@ -188,6 +189,7 @@ function ProxyModal({
 export default function ProxiesPage({ onLogout }: { onLogout: () => void }) {
   const { confirmDangerous, maskSecret } = usePanelSettings();
   const [data, setData] = useState<TelegramProxiesOverviewDto | null>(null);
+  const [loading, setLoading] = useState(true);
   const [busyAction, setBusyAction] = useState<BusyAction>(null);
   const [toast, setToast] = useState<{ type: "ok" | "err"; text: string } | null>(null);
 
@@ -255,6 +257,7 @@ export default function ProxiesPage({ onLogout }: { onLogout: () => void }) {
   const reload = useCallback(async () => {
     const r = await loadTelegramProxies();
     setData(r);
+    setLoading(false);
     return r;
   }, []);
 
@@ -614,7 +617,9 @@ export default function ProxiesPage({ onLogout }: { onLogout: () => void }) {
         <section>
           <h2 className="proxy-section-title">Прокси</h2>
           <div className="proxy-table-panel" style={{ marginTop: "0.65rem" }}>
-            {proxies.length === 0 ? (
+            {loading ? (
+              <PageLoadingState />
+            ) : proxies.length === 0 ? (
               <div className="proxy-empty">
                 <h3>Прокси пока не созданы</h3>
                 <p>Создайте MTProto, SOCKS5 или HTTP proxy на одном из добавленных серверов.</p>

@@ -17,6 +17,7 @@ import {
   getSupportAppealsConfig,
   patchSupportAppealPhotoPaths,
   getUser,
+  getPaymentSession,
   listReferralRewardsForInviterUsers,
   markPaymentSessionPendingAdmin,
   registerPromoCodeUsage,
@@ -46,14 +47,17 @@ import { getRoulettePublicConfig, notifyRouletteSpinToUser, spinRouletteForUser 
 import { buyRouletteTicketsForUser, getRouletteTicketShopPublicForUser } from "../rouletteTicketShop.js";
 import { getTelegramBotToken, getTelegramPaymentNotifyChatIds, getTelegramPaymentUrl } from "../telegram/env.js";
 import { sendTelegramHtml, sendTelegramPhotoBinary } from "../telegram/api.js";
+import { sendAdminPaymentReceiptToAdmins } from "../adminPaymentReceipt.js";
+import { trackPaymentSessionPendingAdmin, trackPaymentSessionStart } from "../paymentSessionLogService.js";
 import { escHtml } from "../telegram/format.js";
 import { pushClientListToAllDeployedServers } from "../userSync.js";
 import { saveAppealUserPhoto } from "../supportAppealFiles.js";
 import { notifyAdminsNewSupportAppeal } from "../supportAppealsNotify.js";
 import { getTestPlanRuntimeMeta, isTestSubscriptionEligible } from "../testSubscription.js";
-import { formatAdminPaymentAmountLine, resolvePurchasePrice } from "../purchaseDiscount.js";
+import { formatPurchasePriceUserLines, resolvePurchasePrice } from "../purchaseDiscount.js";
 import {
   buildWhitelistOfferForMiniApp,
+  buildWhitelistStateForSubscription,
   checkWhitelistPurchaseAllowed,
   createPendingWhitelistPurchase,
   findActiveSubscriptionForTg,
@@ -61,6 +65,13 @@ import {
   getWhitelistPurchasePriceRub,
   logWhitelistPurchaseOpened,
 } from "../whitelistPurchaseService.js";
+import {
+  buildComboOffersForClient,
+  defaultSubscriptionClientName,
+  getComboOffer,
+  prepareComboPaymentSideEffects,
+  validateComboOfferForPurchase,
+} from "../comboSubscriptionService.js";
 import { getWhitelistVaultSettings } from "../whitelistVaultDb.js";
 import { primarySubscriptionUrl, publicSubUrl } from "../subscriptionUrl.js";
 import { createDeviceSlotPurchaseRecord, getDeviceLimitSettings } from "../deviceLimitStore.js";
@@ -97,21 +108,23 @@ type SendProofBody = {
   photo_name?: unknown;
   new_subscription_name?: unknown;
   promo_code?: unknown;
+  combo_offer_id?: unknown;
 };
 type ClaimReferralBody = {
   init_data?: unknown;
   reward_id?: unknown;
   kind?: unknown;
 };
-function adminDecisionKeyboard(sessionId: string) {
-  return {
-    inline_keyboard: [
-      [
-        { text: "Подтвердить", callback_data: `pok:${sessionId}` },
-        { text: "Платёж не поступил", callback_data: `pnx:${sessionId}` },
-      ],
-    ],
-  };
+
+async function notifyAdminsPaymentProof(sessionId: string, proofBytes: Uint8Array, proofMime?: string): Promise<boolean> {
+  const sess = getPaymentSession(sessionId);
+  if (!sess) return false;
+  return sendAdminPaymentReceiptToAdmins(sess, { type: "bytes", bytes: proofBytes, mime: proofMime });
+}
+
+function trackWebappPaymentSession(sessionId: string): void {
+  trackPaymentSessionStart(sessionId, "webapp");
+  trackPaymentSessionPendingAdmin(sessionId, "webapp", { text: "Чек из WebApp", hasPhoto: true });
 }
 
 function subscriptionProfileStats(u: UserRow) {
@@ -319,6 +332,7 @@ router.post("/webapp/profile", async (req, res) => {
     tickets: fresh.dropper_tickets,
     devices: subscriptionDeviceInfoForWebApp(fresh),
     daily_gift: buildDailyGiftWebAppState(tgId, fresh.id),
+    whitelist: buildWhitelistStateForSubscription(fresh),
     gb_piggy:
       fresh.total_gb <= 0
         ? {
@@ -445,6 +459,7 @@ router.post("/webapp/profile", async (req, res) => {
         photo_url: whitelist_instruction_photo_url,
       },
     },
+    combo_offers: buildComboOffersForClient(tgId, linked),
     web_app_new_design: refreshPanelSettingsCache().ui.webAppNewDesign === true,
     daily_gift: buildDailyGiftWebAppState(
       tgId,
@@ -761,15 +776,19 @@ router.post("/webapp/payment-proof", async (req, res) => {
           ? "white_lists"
           : payKindRaw === "device_slot"
             ? "device_slot"
+            : payKindRaw === "combo"
+              ? "combo"
             : "subscription";
   if (!tgId) {
     res.status(400).json({ error: "bad_payload" });
     return;
   }
+  const comboOfferId = String(body.combo_offer_id ?? "").trim();
   if (
     payKind !== "test" &&
     payKind !== "white_lists" &&
     payKind !== "device_slot" &&
+    payKind !== "combo" &&
     (!Number.isFinite(planId) || ![1, 2, 3].includes(planId))
   ) {
     res.status(400).json({ error: "bad_payload" });
@@ -777,6 +796,10 @@ router.post("/webapp/payment-proof", async (req, res) => {
   }
   const newSubscriptionName = String(body.new_subscription_name ?? "").trim().slice(0, 25);
   const promoCode = String(body.promo_code ?? "").trim().replace(/\s+/g, "");
+  const clientDefaultName = defaultSubscriptionClientName({
+    tg_username: String(ver.user.username ?? "").trim() || undefined,
+    tg_first_name: String(ver.user.first_name ?? "").trim() || undefined,
+  });
   const linked = findUsersByTelegramChatId(tgId);
   const target = userId > 0 ? linked.find((u) => u.id === userId) ?? null : null;
   if (userId > 0 && !target) {
@@ -796,8 +819,68 @@ router.post("/webapp/payment-proof", async (req, res) => {
     return;
   }
 
-  if (linked.length === 0 && shop.sales_disabled) {
-    res.status(403).json({ error: "sales_disabled" });
+  if (payKind === "combo") {
+    if (promoCode) {
+      res.status(400).json({ error: "promo_not_allowed_for_combo", message: "Промокоды не применяются к комбо." });
+      return;
+    }
+    if (!comboOfferId) {
+      res.status(400).json({ error: "combo_offer_required" });
+      return;
+    }
+    const offer = getComboOffer(comboOfferId);
+    if (!offer) {
+      res.status(404).json({ error: "combo_not_found" });
+      return;
+    }
+    const newSubscriptionName = String(body.new_subscription_name ?? "").trim().slice(0, 25);
+    let comboTarget = target;
+    if (!comboTarget && !newSubscriptionName && linked.length > 0) {
+      const built = buildComboOffersForClient(tgId, linked).find((o) => o.id === offer.id);
+      if (built?.preferred_subscription_id) {
+        comboTarget = linked.find((u) => u.id === built.preferred_subscription_id) ?? null;
+      } else if (linked.length === 1) {
+        comboTarget = linked[0] ?? null;
+      }
+    }
+    const check = validateComboOfferForPurchase(offer, {
+      tg_user_id: tgId,
+      target_user_id: comboTarget?.id,
+      new_subscription_name: comboTarget
+        ? undefined
+        : linked.length === 0 || newSubscriptionName
+          ? newSubscriptionName || clientDefaultName
+          : undefined,
+    });
+    if (!check.ok) {
+      res.status(403).json({ error: "combo_not_available", message: check.message ?? "Комбо недоступно" });
+      return;
+    }
+    const sessionId = startPaymentAwaitingProof(
+      tgId,
+      tgId,
+      offer.plan_id,
+      "combo",
+      comboTarget?.id,
+      !comboTarget && (linked.length === 0 || newSubscriptionName)
+        ? newSubscriptionName || clientDefaultName
+        : undefined,
+      {
+        username: String(ver.user.username ?? "").trim() || undefined,
+        first_name: String(ver.user.first_name ?? "").trim() || undefined,
+      },
+      undefined,
+      offer.id,
+    );
+    prepareComboPaymentSideEffects(offer, sessionId, comboTarget ?? undefined);
+    markPaymentSessionPendingAdmin(sessionId, "webapp");
+    trackWebappPaymentSession(sessionId);
+    const sentCombo = (await notifyAdminsPaymentProof(sessionId, parsed.bytes, parsed.mime)) ? 1 : 0;
+    if (sentCombo === 0) {
+      res.status(502).json({ error: "send_failed" });
+      return;
+    }
+    res.json({ ok: true });
     return;
   }
 
@@ -818,11 +901,6 @@ router.post("/webapp/payment-proof", async (req, res) => {
       return;
     }
     const price = getWhitelistPurchasePriceRub();
-    const caption =
-      `<b>Оплата из WebApp (белые списки)</b>\n` +
-      `Пользователь: <b>${String(ver.user.first_name ?? "").trim() || wlUser.name || "Пользователь"}</b> (chat <code>${tgId}</code>)\n` +
-      `Подписка: <b>${escHtml(subscriptionPublicName(wlUser))}</b>\n` +
-      `Сумма: <b>${price} ₽</b>`;
     const sessionId = startPaymentAwaitingProof(
       tgId,
       tgId,
@@ -837,22 +915,8 @@ router.post("/webapp/payment-proof", async (req, res) => {
     );
     createPendingWhitelistPurchase({ user: wlUser, payment_id: sessionId, amount: price });
     markPaymentSessionPendingAdmin(sessionId, "webapp");
-    let sent = 0;
-    const admins = getTelegramPaymentNotifyChatIds();
-    for (const chatId of admins) {
-      try {
-        await sendTelegramPhotoBinary(chatId, parsed.bytes, {
-          caption,
-          filename: String(body.photo_name ?? "proof.jpg").trim() || "proof.jpg",
-          mimeType: String(body.photo_mime ?? parsed.mime) || parsed.mime,
-          parse_mode: "HTML",
-          reply_markup: adminDecisionKeyboard(sessionId),
-        });
-        sent++;
-      } catch {
-        // skip
-      }
-    }
+    trackWebappPaymentSession(sessionId);
+    const sent = (await notifyAdminsPaymentProof(sessionId, parsed.bytes, parsed.mime)) ? 1 : 0;
     if (sent === 0) {
       res.status(502).json({ error: "send_failed" });
       return;
@@ -886,11 +950,6 @@ router.post("/webapp/payment-proof", async (req, res) => {
       return;
     }
     const price = dlSettings.purchase_price_rub;
-    const caption =
-      `<b>Оплата из WebApp (доп. устройство)</b>\n` +
-      `Пользователь: <b>${String(ver.user.first_name ?? "").trim() || subUser.name || "Пользователь"}</b> (chat <code>${tgId}</code>)\n` +
-      `Подписка: <b>${escHtml(subscriptionPublicName(subUser))}</b>\n` +
-      `Сумма: <b>${price} ₽</b>`;
     const sessionId = startPaymentAwaitingProof(
       tgId,
       tgId,
@@ -915,23 +974,9 @@ router.post("/webapp/payment-proof", async (req, res) => {
       admin_comment: "",
     });
     markPaymentSessionPendingAdmin(sessionId, "webapp");
-    let sent = 0;
-    const admins = getTelegramPaymentNotifyChatIds();
-    for (const chatId of admins) {
-      try {
-        await sendTelegramPhotoBinary(chatId, parsed.bytes, {
-          caption,
-          filename: String(body.photo_name ?? "proof.jpg").trim() || "proof.jpg",
-          mimeType: String(body.photo_mime ?? parsed.mime) || parsed.mime,
-          parse_mode: "HTML",
-          reply_markup: adminDecisionKeyboard(sessionId),
-        });
-        sent++;
-      } catch {
-        // skip
-      }
-    }
-    if (sent === 0) {
+    trackWebappPaymentSession(sessionId);
+    const sentDevice = (await notifyAdminsPaymentProof(sessionId, parsed.bytes, parsed.mime)) ? 1 : 0;
+    if (sentDevice === 0) {
       res.status(502).json({ error: "send_failed" });
       return;
     }
@@ -948,12 +993,6 @@ router.post("/webapp/payment-proof", async (req, res) => {
       res.status(403).json({ error: "test_not_available" });
       return;
     }
-    const meta = getTestPlanRuntimeMeta();
-    const caption =
-      `<b>Оплата из WebApp (тестовая подписка)</b>\n` +
-      `Пользователь: <b>${String(ver.user.first_name ?? "").trim() || "Пользователь"}</b> (chat <code>${tgId}</code>)\n` +
-      `Тест: ${meta.total_gb > 0 ? `${meta.total_gb} ГБ` : "безлимит"} / ${meta.days} дн.\n` +
-      `Сумма: <b>${meta.priceRub} ₽</b>`;
     const sessionId = startPaymentAwaitingProof(
       tgId,
       tgId,
@@ -967,24 +1006,10 @@ router.post("/webapp/payment-proof", async (req, res) => {
       },
     );
     markPaymentSessionPendingAdmin(sessionId, "webapp");
+    trackWebappPaymentSession(sessionId);
 
-    let sent = 0;
-    const admins = getTelegramPaymentNotifyChatIds();
-    for (const chatId of admins) {
-      try {
-        await sendTelegramPhotoBinary(chatId, parsed.bytes, {
-          caption,
-          filename: String(body.photo_name ?? "proof.jpg").trim() || "proof.jpg",
-          mimeType: String(body.photo_mime ?? parsed.mime) || parsed.mime,
-          parse_mode: "HTML",
-          reply_markup: adminDecisionKeyboard(sessionId),
-        });
-        sent++;
-      } catch {
-        // skip
-      }
-    }
-    if (sent === 0) {
+    const sentTest = (await notifyAdminsPaymentProof(sessionId, parsed.bytes, parsed.mime)) ? 1 : 0;
+    if (sentTest === 0) {
       res.status(502).json({ error: "send_failed" });
       return;
     }
@@ -995,6 +1020,14 @@ router.post("/webapp/payment-proof", async (req, res) => {
   if (payKind === "topup") {
     if (userId <= 0 || !target) {
       res.status(400).json({ error: "topup_target_required" });
+      return;
+    }
+    if (target.total_gb <= 0) {
+      res.status(403).json({ error: "topup_unlimited", message: "Докупка ГБ недоступна для безлимитной подписки." });
+      return;
+    }
+    if (target.is_test_subscription === 1) {
+      res.status(403).json({ error: "topup_test", message: "Докупка ГБ недоступна для тестовой подписки." });
       return;
     }
     const top = shop.topup_plans.find((p) => p.id === planId);
@@ -1031,19 +1064,6 @@ router.post("/webapp/payment-proof", async (req, res) => {
       res.status(400).json({ error: msg });
       return;
     }
-    const promoLine = priceRes.promo_calc
-      ? `\nПромокод: <b>${escHtml(priceRes.promo_calc.promo.code)}</b> (скидка ${priceRes.discount_percent}%)`
-      : "";
-    const caption =
-      `<b>Оплата из WebApp (докупка ГБ)</b>\n` +
-      `Пользователь: <b>${String(ver.user.first_name ?? "").trim() || target.name || "Пользователь"}</b> (chat <code>${tgId}</code>)\n` +
-      `Подписка: <b>${escHtml(subscriptionPublicName(target))}</b>\n` +
-      `Пакет докупки: <b>${top.id}</b> — +${top.add_gb} ГБ\n` +
-      formatAdminPaymentAmountLine(top.price_rub, {
-        roulette_discount_percent: priceRes.roulette_discount?.percent,
-        referral_discount_percent: priceRes.referral_discount_percent,
-      }) +
-      promoLine;
     const sessionId = startPaymentAwaitingProof(
       tgId,
       tgId,
@@ -1071,24 +1091,10 @@ router.post("/webapp/payment-proof", async (req, res) => {
       }
     }
     markPaymentSessionPendingAdmin(sessionId, "webapp");
+    trackWebappPaymentSession(sessionId);
 
-    let sent = 0;
-    const admins = getTelegramPaymentNotifyChatIds();
-    for (const chatId of admins) {
-      try {
-        await sendTelegramPhotoBinary(chatId, parsed.bytes, {
-          caption,
-          filename: String(body.photo_name ?? "proof.jpg").trim() || "proof.jpg",
-          mimeType: String(body.photo_mime ?? parsed.mime) || parsed.mime,
-          parse_mode: "HTML",
-          reply_markup: adminDecisionKeyboard(sessionId),
-        });
-        sent++;
-      } catch {
-        // skip
-      }
-    }
-    if (sent === 0) {
+    const sentTopup = (await notifyAdminsPaymentProof(sessionId, parsed.bytes, parsed.mime)) ? 1 : 0;
+    if (sentTopup === 0) {
       res.status(502).json({ error: "send_failed" });
       return;
     }
@@ -1108,7 +1114,7 @@ router.post("/webapp/payment-proof", async (req, res) => {
       original_price_rub: plan.price_rub,
       promo_code: promoCode || undefined,
       target_user_id: target?.id,
-      new_subscription_name: target ? undefined : newSubscriptionName || "Новая подписка",
+      new_subscription_name: target ? undefined : newSubscriptionName || clientDefaultName,
     });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
@@ -1131,29 +1137,13 @@ router.post("/webapp/payment-proof", async (req, res) => {
     res.status(400).json({ error: msg });
     return;
   }
-  const promoLine = priceRes.promo_calc
-    ? `\nПромокод: <b>${escHtml(priceRes.promo_calc.promo.code)}</b> (скидка ${priceRes.discount_percent}%)`
-    : "";
-
-  const caption =
-    `<b>Оплата из WebApp</b>\n` +
-    `Пользователь: <b>${String(ver.user.first_name ?? "").trim() || target?.name || "Пользователь"}</b> (chat <code>${tgId}</code>)\n` +
-    (target
-      ? `Подписка: <b>${escHtml(subscriptionPublicName(target))}</b>\n`
-      : `Новая подписка: <b>${newSubscriptionName || "Без названия"}</b>\n`) +
-    `Тариф: <b>${plan.id}</b> — ${plan.total_gb > 0 ? `${plan.total_gb} ГБ` : "безлимит"} / ${plan.days} дн.\n` +
-    formatAdminPaymentAmountLine(plan.price_rub, {
-      roulette_discount_percent: priceRes.roulette_discount?.percent,
-      referral_discount_percent: priceRes.referral_discount_percent,
-    }) +
-    promoLine;
   const sessionId = startPaymentAwaitingProof(
     tgId,
     tgId,
     plan.id,
     "subscription",
     target?.id,
-    target ? undefined : newSubscriptionName || "Новая подписка",
+    target ? undefined : newSubscriptionName || clientDefaultName,
     { username: String(ver.user.username ?? "").trim() || undefined, first_name: String(ver.user.first_name ?? "").trim() || undefined },
     {
       inviter_user_id: priceRes.referral_inviter_user_id,
@@ -1176,24 +1166,10 @@ router.post("/webapp/payment-proof", async (req, res) => {
     }
   }
   markPaymentSessionPendingAdmin(sessionId, "webapp");
+  trackWebappPaymentSession(sessionId);
 
-  let sent = 0;
-  const admins = getTelegramPaymentNotifyChatIds();
-  for (const chatId of admins) {
-    try {
-      await sendTelegramPhotoBinary(chatId, parsed.bytes, {
-        caption,
-        filename: String(body.photo_name ?? "proof.jpg").trim() || "proof.jpg",
-        mimeType: String(body.photo_mime ?? parsed.mime) || parsed.mime,
-        parse_mode: "HTML",
-        reply_markup: adminDecisionKeyboard(sessionId),
-      });
-      sent++;
-    } catch {
-      // skip
-    }
-  }
-  if (sent === 0) {
+  const sentSub = (await notifyAdminsPaymentProof(sessionId, parsed.bytes, parsed.mime)) ? 1 : 0;
+  if (sentSub === 0) {
     res.status(502).json({ error: "send_failed" });
     return;
   }

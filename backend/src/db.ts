@@ -189,11 +189,13 @@ export type PaymentSessionRow = {
   tg_user_id: number;
   target_user_id?: number;
   new_subscription_name?: string;
-  kind: "subscription" | "topup" | "test" | "white_lists" | "device_slot";
+  kind: "subscription" | "topup" | "test" | "white_lists" | "device_slot" | "combo";
   plan_id: PaymentPlanId;
   created_at: string;
   status: "awaiting_proof" | "pending_admin";
   proof_file_id?: string;
+  /** Для kind=combo — id предложения из subscription_shop.combo_offers */
+  combo_offer_id?: string;
   /** Снимок из Telegram при выборе тарифа — для имени клиента в панели. */
   tg_username?: string;
   tg_first_name?: string;
@@ -225,7 +227,7 @@ export const ROULETTE_GB_PIGGY_EXCHANGE_THRESHOLD = 50;
 
 export type ShopActivityRow = {
   id: string;
-  kind: "subscription" | "topup" | "test" | "white_lists" | "device_slot";
+  kind: "subscription" | "topup" | "test" | "white_lists" | "device_slot" | "combo";
   user_id: number;
   user_name: string;
   plan_id: PaymentPlanId;
@@ -259,6 +261,19 @@ export type TestSubscriptionPlanConfig = {
   price_rub: number;
 };
 
+export type ComboSubscriptionOffer = {
+  id: string;
+  enabled: boolean;
+  title: string;
+  plan_id: PaymentPlanId;
+  include_white_lists: boolean;
+  include_topup: boolean;
+  topup_plan_id: PaymentPlanId;
+  include_device_slot: boolean;
+  /** Скидка от суммы подписки + аддонов, по умолчанию 15%. */
+  discount_percent: number;
+};
+
 /** Магазин в боте: цены, ссылка на оплату, отключение продажи новым клиентам. */
 export type SubscriptionShopConfig = {
   sales_disabled: boolean;
@@ -267,6 +282,7 @@ export type SubscriptionShopConfig = {
   plans: SubscriptionShopPlanRow[];
   topup_plans: TopUpShopPlanRow[];
   test_plan: TestSubscriptionPlanConfig;
+  combo_offers: ComboSubscriptionOffer[];
 };
 
 export type ReferralProgramConfig = {
@@ -628,8 +644,6 @@ type FileStore = {
   next_roulette_spin_id?: number;
   support_appeals_config: SupportAppealsConfig;
   support_appeals: SupportAppealRow[];
-  /** FCM-токены мобильного приложения панели (любой вошедший админ). */
-  panel_fcm_tokens: PanelFcmTokenRow[];
   /** Telegram user id, уже оформивших тестовую подписку (1 раз на пользователя). */
   test_subscription_used_tg_ids: number[];
   /** Изолированные VPN-эксперименты (не связаны с users[]). */
@@ -680,12 +694,6 @@ export type VpnExperimentRow = {
   updated_at: string;
 };
 
-export type PanelFcmTokenRow = {
-  token: string;
-  created_at: string;
-  updated_at: string;
-};
-
 function defaultSubscriptionShop(): SubscriptionShopConfig {
   return {
     sales_disabled: false,
@@ -707,6 +715,7 @@ function defaultSubscriptionShop(): SubscriptionShopConfig {
       days: 3,
       price_rub: 10,
     },
+    combo_offers: [],
   };
 }
 
@@ -850,7 +859,6 @@ function emptyStore(): FileStore {
     next_roulette_spin_id: 1,
     support_appeals_config: defaultSupportAppealsConfig(),
     support_appeals: [],
-    panel_fcm_tokens: [],
     test_subscription_used_tg_ids: [],
     vpn_experiments: [],
     next_experiment_id: 1,
@@ -1099,6 +1107,33 @@ function referralFieldDisplay(key: keyof ReferralProgramConfig, value: unknown):
   return String(value ?? "");
 }
 
+function normalizeComboOffers(raw: unknown): ComboSubscriptionOffer[] {
+  if (!Array.isArray(raw)) return [];
+  const out: ComboSubscriptionOffer[] = [];
+  let n = 0;
+  for (const item of raw) {
+    if (!item || typeof item !== "object") continue;
+    const o = item as Record<string, unknown>;
+    const id = String(o.id ?? "").trim() || `combo_${++n}`;
+    const planId = Number(o.plan_id) as PaymentPlanId;
+    if (planId !== 1 && planId !== 2 && planId !== 3) continue;
+    const topupPlanId = Number(o.topup_plan_id ?? 1) as PaymentPlanId;
+    const discount = Math.min(50, Math.max(1, Math.floor(Number(o.discount_percent) || 15)));
+    out.push({
+      id,
+      enabled: o.enabled === true || o.enabled === 1 || o.enabled === "1",
+      title: String(o.title ?? "Комбо").trim().slice(0, 120) || "Комбо",
+      plan_id: planId,
+      include_white_lists: o.include_white_lists === true || o.include_white_lists === 1 || o.include_white_lists === "1",
+      include_topup: o.include_topup === true || o.include_topup === 1 || o.include_topup === "1",
+      topup_plan_id: topupPlanId === 2 || topupPlanId === 3 ? topupPlanId : 1,
+      include_device_slot: o.include_device_slot === true || o.include_device_slot === 1 || o.include_device_slot === "1",
+      discount_percent: discount,
+    });
+  }
+  return out;
+}
+
 export function normalizeSubscriptionShop(raw: unknown): SubscriptionShopConfig {
   const base = defaultSubscriptionShop();
   if (!raw || typeof raw !== "object") return base;
@@ -1151,6 +1186,7 @@ export function normalizeSubscriptionShop(raw: unknown): SubscriptionShopConfig 
     plans: ([1, 2, 3] as const).map((id) => byId.get(id)!),
     topup_plans: ([1, 2, 3] as const).map((id) => topupById.get(id)!),
     test_plan: normalizeTestSubscriptionPlan(o.test_plan, base.test_plan),
+    combo_offers: normalizeComboOffers(o.combo_offers),
   };
 }
 
@@ -1193,7 +1229,9 @@ function normalizePaymentSession(raw: unknown): PaymentSessionRow | null {
           ? "white_lists"
           : kindRaw === "device_slot"
             ? "device_slot"
-            : "subscription";
+            : kindRaw === "combo"
+              ? "combo"
+              : "subscription";
   return {
     id,
     tg_chat_id: chat,
@@ -1208,6 +1246,7 @@ function normalizePaymentSession(raw: unknown): PaymentSessionRow | null {
         : undefined,
     kind,
     plan_id: plan as PaymentPlanId,
+    combo_offer_id: o.combo_offer_id != null ? String(o.combo_offer_id).trim() || undefined : undefined,
     created_at: String(o.created_at ?? new Date().toISOString()),
     status: st,
     proof_file_id: o.proof_file_id != null ? String(o.proof_file_id) : undefined,
@@ -1248,9 +1287,11 @@ function normalizeShopActivity(raw: unknown): ShopActivityRow | null {
           ? "white_lists"
         : kindRaw === "device_slot"
           ? "device_slot"
-          : kindRaw === "subscription"
-            ? "subscription"
-            : "";
+          : kindRaw === "combo"
+            ? "combo"
+            : kindRaw === "subscription"
+              ? "subscription"
+              : "";
   if (!id || !Number.isFinite(userId) || userId <= 0 || ![1, 2, 3].includes(planId) || !kind) return null;
   const row: ShopActivityRow = {
     id,
@@ -1690,7 +1731,6 @@ function readStore(): FileStore {
       )
         .map((x) => normalizeSupportAppeal(x))
         .filter((x): x is SupportAppealRow => x != null),
-      panel_fcm_tokens: normalizePanelFcmTokens((parsed as { panel_fcm_tokens?: unknown }).panel_fcm_tokens),
       test_subscription_used_tg_ids: Array.isArray(
         (parsed as { test_subscription_used_tg_ids?: unknown }).test_subscription_used_tg_ids,
       )
@@ -1775,58 +1815,6 @@ function normalizeVpnExperiment(raw: unknown): VpnExperimentRow | null {
     created_at: String(o.created_at ?? new Date().toISOString()),
     updated_at: String(o.updated_at ?? new Date().toISOString()),
   };
-}
-
-function normalizePanelFcmTokens(raw: unknown): PanelFcmTokenRow[] {
-  if (!Array.isArray(raw)) return [];
-  const out: PanelFcmTokenRow[] = [];
-  const seen = new Set<string>();
-  for (const x of raw) {
-    if (!x || typeof x !== "object") continue;
-    const token = String((x as { token?: unknown }).token ?? "").trim();
-    if (token.length < 20 || seen.has(token)) continue;
-    seen.add(token);
-    const created = String((x as { created_at?: unknown }).created_at ?? new Date().toISOString());
-    const updated = String((x as { updated_at?: unknown }).updated_at ?? created);
-    out.push({ token, created_at: created, updated_at: updated });
-  }
-  return out;
-}
-
-export function listPanelFcmTokens(): string[] {
-  return (readStore().panel_fcm_tokens ?? []).map((r) => r.token);
-}
-
-export function registerPanelFcmToken(token: string): void {
-  const t = String(token ?? "").trim();
-  if (t.length < 20) return;
-  mutate((store) => {
-    const list = store.panel_fcm_tokens ?? [];
-    const i = list.findIndex((r) => r.token === t);
-    const now = new Date().toISOString();
-    if (i >= 0) {
-      list[i] = { ...list[i]!, updated_at: now };
-    } else {
-      list.push({ token: t, created_at: now, updated_at: now });
-    }
-    store.panel_fcm_tokens = list;
-  });
-}
-
-export function unregisterPanelFcmToken(token: string): void {
-  const t = String(token ?? "").trim();
-  if (!t) return;
-  mutate((store) => {
-    store.panel_fcm_tokens = (store.panel_fcm_tokens ?? []).filter((r) => r.token !== t);
-  });
-}
-
-export function removePanelFcmTokens(tokens: string[]): void {
-  const drop = new Set(tokens.map((x) => String(x).trim()).filter(Boolean));
-  if (drop.size === 0) return;
-  mutate((store) => {
-    store.panel_fcm_tokens = (store.panel_fcm_tokens ?? []).filter((r) => !drop.has(r.token));
-  });
 }
 
 function writeStore(store: FileStore): void {
@@ -2918,6 +2906,10 @@ export function getPaymentSession(id: string): PaymentSessionRow | undefined {
   return readStore().payment_sessions.find((s) => s.id === id);
 }
 
+export function listPaymentSessions(): PaymentSessionRow[] {
+  return readStore().payment_sessions.slice();
+}
+
 export function findAwaitingProofSessionByChat(tg_chat_id: number): PaymentSessionRow | undefined {
   return readStore().payment_sessions.find(
     (s) => s.tg_chat_id === tg_chat_id && s.status === "awaiting_proof",
@@ -2935,7 +2927,7 @@ export function startPaymentAwaitingProof(
   tg_chat_id: number,
   tg_user_id: number,
   plan_id: PaymentPlanId,
-  kind: "subscription" | "topup" | "test" | "white_lists" | "device_slot" = "subscription",
+  kind: "subscription" | "topup" | "test" | "white_lists" | "device_slot" | "combo" = "subscription",
   target_user_id?: number,
   new_subscription_name?: string,
   tgProfile?: { username?: string; first_name?: string },
@@ -2945,6 +2937,7 @@ export function startPaymentAwaitingProof(
     roulette_discount_percent?: number;
     roulette_discount_spin_id?: number;
   },
+  combo_offer_id?: string,
 ): string {
   const id = randomBytes(8).toString("hex");
   const un = (tgProfile?.username ?? "").trim().replace(/^@/, "");
@@ -2962,6 +2955,7 @@ export function startPaymentAwaitingProof(
         : {}),
       kind,
       plan_id,
+      ...(combo_offer_id && String(combo_offer_id).trim() ? { combo_offer_id: String(combo_offer_id).trim() } : {}),
       created_at: new Date().toISOString(),
       status: "awaiting_proof",
       ...(un ? { tg_username: un } : {}),
@@ -3910,6 +3904,18 @@ export function getPromoCodeByText(code: string): PromoCodeRow | undefined {
   const key = normalizePromoCodeText(code);
   if (!key) return undefined;
   return listPromoCodes().find((p) => p.code === key);
+}
+
+export function getPromoCodeById(id: string): PromoCodeRow | undefined {
+  const key = String(id ?? "").trim();
+  if (!key) return undefined;
+  return listPromoCodes().find((p) => p.id === key);
+}
+
+export function findPromoCodeUsageBySessionId(sessionId: string): PromoCodeUsageRow | undefined {
+  const sid = String(sessionId ?? "").trim();
+  if (!sid) return undefined;
+  return (readStore().promo_code_usages ?? []).find((r) => r.session_id === sid);
 }
 
 export function createPromoCode(input: {

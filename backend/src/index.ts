@@ -17,7 +17,6 @@ import whitelistVaultRouter from "./routes/whitelistVault.js";
 import dropperGameRouter from "./routes/dropperGame.js";
 import rouletteGameRouter from "./routes/rouletteGame.js";
 import supportAppealsRouter from "./routes/supportAppeals.js";
-import pushRouter from "./routes/push.js";
 import mySubRouter from "./routes/mySub.js";
 import subscriptionRouter from "./routes/subscription.js";
 import deviceLimitRouter from "./routes/deviceLimit.js";
@@ -46,6 +45,9 @@ import { startWhitelistVaultAutoCheckLoop } from "./whitelistVaultAutoCheck.js";
 import { startXrayLogsAutoCleanLoop } from "./xrayLogsAutoClean.js";
 import { initDailyGiftStore } from "./dailyGiftStore.js";
 import { initAutoCommunicationsStore } from "./autoCommunicationsStore.js";
+import { initTriggerMailingsStore } from "./triggerMailingsStore.js";
+import { initTriggerMailingsHistoryStore } from "./triggerMailingsHistoryStore.js";
+import { startTriggerMailingsLoop } from "./triggerMailingsService.js";
 import { startDailyGiftNotifyLoop } from "./telegram/dailyGiftNotify.js";
 import { mountAdminSwagger } from "./swaggerAdmin.js";
 
@@ -54,6 +56,8 @@ initSurveyDb();
 initPanelSettings();
 initDailyGiftStore();
 initAutoCommunicationsStore();
+initTriggerMailingsStore();
+initTriggerMailingsHistoryStore();
 
 {
   let dl = getDeviceLimitSettings();
@@ -159,7 +163,6 @@ app.use("/api/whitelist-vault", whitelistVaultRouter);
 app.use("/api/dropper-game", dropperGameRouter);
 app.use("/api/roulette-game", rouletteGameRouter);
 app.use("/api/support-appeals", supportAppealsRouter);
-app.use("/api/push", pushRouter);
 app.use("/api/mysub", mySubRouter);
 app.use("/sub", subscriptionRouter);
 app.use("/api/sub", subscriptionRouter);
@@ -193,6 +196,7 @@ app.listen(PORT, "0.0.0.0", () => {
     startAutoTrafficNotifyLoop();
     startAutoExpiryNotifyLoop();
     startDailyGiftNotifyLoop();
+    startTriggerMailingsLoop();
   }
   startConfigVaultAutoCheckLoop();
   startTelegramProxyAutoCheckLoop();

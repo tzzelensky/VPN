@@ -1,5 +1,5 @@
 import type { UserRow } from "./db.js";
-import { getUser, updateUserRow, userHasActiveSubscription } from "./db.js";
+import { findUsersByTelegramChatId, getUser, updateUserRow, userHasActiveSubscription } from "./db.js";
 import { pushClientListToAllDeployedServers } from "./userSync.js";
 import { sendTelegramHtml, sendTelegramPhotoBinary } from "./telegram/api.js";
 import { escHtml, plainTextForTelegramHtml } from "./telegram/format.js";
@@ -48,7 +48,10 @@ export function computeWhitelistExpiresAt(user: UserRow): string | null {
   return new Date().toISOString();
 }
 
-export function checkWhitelistPurchaseAllowed(user: UserRow): WhitelistPurchaseCheck {
+export function checkWhitelistPurchaseAllowed(
+  user: UserRow,
+  opts?: { from_combo?: boolean },
+): WhitelistPurchaseCheck {
   if (!isWhitelistVaultEnabled()) {
     return { ok: false, code: "disabled", message: "Белые списки сейчас недоступны." };
   }
@@ -69,11 +72,33 @@ export function checkWhitelistPurchaseAllowed(user: UserRow): WhitelistPurchaseC
       message: "Белые списки можно подключить только к активной подписке.",
     };
   }
+  if (user.whitelist_happ_enabled === 1) {
+    return {
+      ok: false,
+      code: "already_active",
+      message: "Белые списки уже подключены к вашей подписке.",
+    };
+  }
+  const wlAccess = getWhitelistAccessState(user);
+  if (wlAccess.status === "active" || wlAccess.status === "suspended") {
+    return {
+      ok: false,
+      code: "already_active",
+      message: "Белые списки уже подключены к вашей подписке.",
+    };
+  }
   if (userHasPaidWhitelistProduct(user)) {
     return {
       ok: false,
       code: "already_active",
       message: "Белые списки уже подключены к вашей подписке.",
+    };
+  }
+  if (!opts?.from_combo && user.total_gb <= 0) {
+    return {
+      ok: false,
+      code: "unlimited_traffic",
+      message: "На безлимитном тарифе покупка белых списков недоступна.",
     };
   }
   return { ok: true };
@@ -102,25 +127,72 @@ export function findActiveSubscriptionForTg(tgId: number, users: UserRow[]): Use
 }
 
 export function findWhitelistPurchaseTarget(tgId: number, users: UserRow[]): UserRow | undefined {
-  const canBuy = users.filter((u) => checkWhitelistPurchaseAllowed(u).ok);
+  const canBuy = listWhitelistPurchaseTargets(users);
   if (canBuy.length > 0) return canBuy[0];
   return findActiveSubscriptionForTg(tgId, users);
+}
+
+export function listWhitelistPurchaseTargets(users: UserRow[]): UserRow[] {
+  return users.filter((u) => checkWhitelistPurchaseAllowed(u).ok);
+}
+
+export function tgUserCanBuyWhitelist(tgUserId: number): boolean {
+  if (!isWhitelistPurchaseVisible()) return false;
+  const linked = findUsersByTelegramChatId(tgUserId);
+  return linked.some((u) => checkWhitelistPurchaseAllowed(u).ok);
+}
+
+export function buildWhitelistStateForSubscription(user: UserRow): {
+  can_buy: boolean;
+  status: "none" | "active" | "suspended" | "expired";
+  block_reason: string | null;
+  active_until: string | null;
+  remaining_days: number | null;
+} {
+  if (!isWhitelistVaultEnabled()) {
+    return { can_buy: false, status: "none", block_reason: null, active_until: null, remaining_days: null };
+  }
+  const check = checkWhitelistPurchaseAllowed(user);
+  const wlState = getWhitelistAccessState(user);
+  let status: "none" | "active" | "suspended" | "expired" = "none";
+  if (userHasWhitelistEntitlement(user)) {
+    if (wlState.status === "active") status = "active";
+    else if (wlState.status === "suspended") status = "suspended";
+    else if (wlState.status === "expired") status = "expired";
+  }
+  let activeUntil: string | null = null;
+  if (status === "active") {
+    const expiresMs = resolveWhitelistExpiryMs(user);
+    if (expiresMs != null && expiresMs > 0) activeUntil = new Date(expiresMs).toISOString();
+  }
+  return {
+    can_buy: check.ok && status !== "active" && status !== "suspended",
+    status,
+    block_reason:
+      status === "active" || status === "suspended"
+        ? "Белые списки уже подключены к этой подписке."
+        : check.ok
+          ? null
+          : check.message,
+    active_until: activeUntil,
+    remaining_days: wlState.remaining_days,
+  };
 }
 
 export function buildWhitelistOfferForMiniApp(linked: UserRow[], tgId?: number) {
   const visible = isWhitelistPurchaseVisible();
   const settings = getWhitelistVaultSettings();
   const price = getWhitelistPurchasePriceRub();
-  const purchaseTarget =
-    tgId != null && Number.isFinite(tgId) ? findWhitelistPurchaseTarget(tgId, linked) : linked.find((u) => checkWhitelistPurchaseAllowed(u).ok);
+  const eligible = listWhitelistPurchaseTargets(linked);
+  const purchaseTarget = eligible[0] ?? (tgId != null ? findActiveSubscriptionForTg(tgId, linked) : linked[0]);
   const wlUser = linked.find((u) => userHasWhitelistEntitlement(u));
   const wlState = wlUser ? getWhitelistAccessState(wlUser) : null;
   let status: "hidden" | "not_connected" | "connected" | "suspended" | "expired" = "hidden";
   if (!visible) status = "hidden";
-  else if (!wlUser || !wlState || wlState.status === "none") status = "not_connected";
-  else if (wlState.status === "active") status = "connected";
-  else if (wlState.status === "suspended") status = "suspended";
-  else if (wlState.status === "expired") status = "expired";
+  else if (wlUser && wlState?.status === "active") status = "connected";
+  else if (wlUser && wlState?.status === "suspended") status = "suspended";
+  else if (wlUser && wlState?.status === "expired") status = "expired";
+  else if (eligible.length > 0 || !wlUser || !wlState || wlState.status === "none") status = "not_connected";
   else status = "not_connected";
 
   let activeUntil: string | null = null;
@@ -132,7 +204,7 @@ export function buildWhitelistOfferForMiniApp(linked: UserRow[], tgId?: number) 
       activeUntil = null;
     }
   }
-  const canBuy = visible && !!purchaseTarget && checkWhitelistPurchaseAllowed(purchaseTarget).ok;
+  const canBuy = visible && eligible.length > 0;
   return {
     visible,
     status,
@@ -142,8 +214,11 @@ export function buildWhitelistOfferForMiniApp(linked: UserRow[], tgId?: number) 
     remaining_days: wlState?.remaining_days ?? null,
     access_status: wlState?.status ?? "none",
     can_buy: canBuy,
-    block_reason: canBuy ? null : describeWhitelistPurchaseBlock(purchaseTarget ?? findActiveSubscriptionForTg(tgId ?? 0, linked)),
+    block_reason: canBuy
+      ? null
+      : describeWhitelistPurchaseBlock(purchaseTarget ?? findActiveSubscriptionForTg(tgId ?? 0, linked)),
     purchase_user_id: purchaseTarget?.id ?? null,
+    eligible_subscription_ids: eligible.map((u) => u.id),
     instruction: {
       title: settings.instruction.title,
       text: settings.instruction.text,
@@ -177,19 +252,26 @@ export async function activateWhitelistPurchaseAfterPayment(input: {
   payment_id: string;
   amount: number;
   tg_chat_id: number;
-}): Promise<{ ok: boolean; error?: string; purchase?: WhiteListPurchaseRow }> {
-  const check = checkWhitelistPurchaseAllowed(input.user);
+  /** false = уведомление клиенту отправит вызывающий код (paymentFlow) */
+  notify_user?: boolean;
+  from_combo?: boolean;
+}): Promise<{ ok: boolean; error?: string; purchase?: WhiteListPurchaseRow; instruction_sent?: boolean }> {
+  const pending = listWhitelistPurchases().find((p) => p.payment_id === input.payment_id);
+  const check = checkWhitelistPurchaseAllowed(input.user, { from_combo: input.from_combo });
   if (!check.ok) {
-    if (check.code === "already_active") {
-      return { ok: true, purchase: getLatestPaidWhitelistPurchase(input.user.id) };
+    // Повторная/идемпотентная оплата: если есть pending по этому платежу — всё равно активируем.
+    if (check.code !== "already_active" || !pending || pending.status === "paid") {
+      if (check.code === "already_active") {
+        return { ok: true, purchase: getLatestPaidWhitelistPurchase(input.user.id), instruction_sent: false };
+      }
+      console.error("[whitelist-purchase] activation blocked", check);
+      return { ok: false, error: check.message };
     }
-    console.error("[whitelist-purchase] activation blocked", check);
-    return { ok: false, error: check.message };
   }
 
   const expiresAt = computeWhitelistExpiresAt(input.user);
   const expiresMs = expiresAt ? Date.parse(expiresAt) : 0;
-  let purchase = listWhitelistPurchases().find((p) => p.payment_id === input.payment_id);
+  let purchase = pending;
   if (!purchase) {
     purchase = createWhitelistPurchase({
       user_id: input.user.id,
@@ -233,34 +315,45 @@ export async function activateWhitelistPurchaseAfterPayment(input: {
     console.error("[whitelist-purchase] push after activation:", e);
   }
 
-  try {
-    await sendWhitelistSuccessInstruction(input.tg_chat_id);
-    markWhitelistPurchaseInstruction(purchase.id, true, null);
-    console.log("[whitelist-purchase] instruction sent", { user_id: input.user.id });
-  } catch (e) {
-    const err = e instanceof Error ? e.message : String(e);
-    markWhitelistPurchaseInstruction(purchase.id, false, err);
-    console.error("[whitelist-purchase] instruction send error", err);
+  let instruction_sent = false;
+  if (input.notify_user !== false) {
+    try {
+      await sendWhitelistSuccessInstruction(input.tg_chat_id);
+      markWhitelistPurchaseInstruction(purchase.id, true, null);
+      instruction_sent = true;
+      console.log("[whitelist-purchase] instruction sent", { user_id: input.user.id });
+    } catch (e) {
+      const err = e instanceof Error ? e.message : String(e);
+      markWhitelistPurchaseInstruction(purchase.id, false, err);
+      console.error("[whitelist-purchase] instruction send error", err);
+    }
   }
 
-  await notifyAdminWhitelistPurchaseSuccess(input.user, input.amount);
-  return { ok: true, purchase };
+  return { ok: true, purchase, instruction_sent };
 }
 
 export async function sendWhitelistInstructionToChat(chatId: number): Promise<void> {
   const settings = getWhitelistVaultSettings();
   const title = settings.instruction.title.trim() || "Как обновить подписку";
   const text = plainTextForTelegramHtml(settings.instruction.text);
-  const body = text ? `<b>${escHtml(title)}</b>\n\n${escHtml(text)}` : `<b>${escHtml(title)}</b>`;
+  let body = text ? `<b>${escHtml(title)}</b>\n\n${escHtml(text)}` : `<b>${escHtml(title)}</b>`;
+  if (body.length > 1024) body = `${body.slice(0, 1023)}…`;
   const photo = readWhitelistInstructionPhoto(settings.instruction.photo_path);
   if (photo) {
-    await sendTelegramPhotoBinary(chatId, photo.bytes, {
-      caption: body,
-      filename: "instruction.jpg",
-      mimeType: photo.mime,
-      parse_mode: "HTML",
-    });
-    return;
+    try {
+      await sendTelegramPhotoBinary(chatId, photo.bytes, {
+        caption: body,
+        filename: "instruction.jpg",
+        mimeType: photo.mime,
+        parse_mode: "HTML",
+      });
+      return;
+    } catch (e) {
+      console.error(
+        "[whitelist-purchase] instruction photo failed, fallback to text:",
+        e instanceof Error ? e.message : e,
+      );
+    }
   }
   await sendTelegramHtml(chatId, body);
 }
@@ -268,28 +361,13 @@ export async function sendWhitelistInstructionToChat(chatId: number): Promise<vo
 export async function sendWhitelistSuccessInstruction(chatId: number): Promise<void> {
   const intro =
     "✅ <b>Белые списки подключены!</b>\n\n" +
-    "Мы добавили дополнительные VLESS-ключи в вашу подписку.\n\n" +
+    "Мы добавили дополнительные ключи в вашу подписку.\n\n" +
     "Чтобы изменения появились в приложении, обновите подписку по инструкции ниже.";
   await sendTelegramHtml(chatId, intro);
-  await sendWhitelistInstructionToChat(chatId);
-}
-
-async function notifyAdminWhitelistPurchaseSuccess(user: UserRow, amount: number): Promise<void> {
-  const admins = getTelegramPaymentNotifyChatIds();
-  if (!admins.length) return;
-  const dt = new Date().toLocaleString("ru-RU");
-  const body =
-    `✅ <b>Пользователь купил белые списки</b>\n\n` +
-    `Пользователь: ${escHtml(user.name)}\n` +
-    `Telegram ID: <code>${escHtml(String(user.tg_id ?? "").trim() || "—")}</code>\n` +
-    `Сумма: <b>${amount} ₽</b>\n` +
-    `Время: ${escHtml(dt)}`;
-  for (const chatId of admins) {
-    try {
-      await sendTelegramHtml(chatId, body);
-    } catch {
-      /* ignore */
-    }
+  try {
+    await sendWhitelistInstructionToChat(chatId);
+  } catch (e) {
+    console.error("[whitelist-purchase] instruction details failed:", e instanceof Error ? e.message : e);
   }
 }
 

@@ -12,6 +12,7 @@ import {
   testServerStream,
 } from "../api";
 import DashboardLayout from "../components/DashboardLayout";
+import PageLoadingState from "../components/PageLoadingState";
 import AddServerModal from "../components/AddServerModal";
 import LiveLogPanel, { type LogLine } from "../components/LiveLogPanel";
 import ServerCard, { type ServerBusyAction } from "../components/ServerCard";
@@ -19,6 +20,7 @@ import ServerSubscriptionSettingsPanel from "../components/ServerSubscriptionSet
 
 export default function ServersPage({ onLogout }: { onLogout: () => void }) {
   const [servers, setServers] = useState<ServerDto[]>([]);
+  const [loading, setLoading] = useState(true);
   const [msg, setMsg] = useState<{ type: "ok" | "err"; text: string } | null>(null);
   const [activity, setActivity] = useState<{ title: string; lines: LogLine[] } | null>(null);
   const [busyId, setBusyId] = useState<number | null>(null);
@@ -29,6 +31,7 @@ export default function ServersPage({ onLogout }: { onLogout: () => void }) {
   const refresh = useCallback(async () => {
     const s = await listServers();
     setServers(s);
+    setLoading(false);
   }, []);
 
   useEffect(() => {
@@ -116,7 +119,9 @@ export default function ServersPage({ onLogout }: { onLogout: () => void }) {
 
       <section className="panel">
         <h1 style={{ fontSize: "1.1rem" }}>Список</h1>
-        {servers.length === 0 ? (
+        {loading ? (
+          <PageLoadingState />
+        ) : servers.length === 0 ? (
           <p className="sub" style={{ marginBottom: 0 }}>
             Пока нет серверов — нажмите «Добавить сервер».
           </p>

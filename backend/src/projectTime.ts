@@ -49,6 +49,45 @@ export function isSameLocalDay(a: number, b: number, tz = projectTimezone()): bo
   return localYmdInTz(a, tz) === localYmdInTz(b, tz);
 }
 
+/** Триггерные рассылки: отправка с 12:00 включительно до 22:00 (22:00 уже нельзя). */
+export const TRIGGER_SEND_WINDOW_START_HOUR = 12;
+export const TRIGGER_SEND_WINDOW_END_HOUR = 22;
+
+export function isTriggerSendWindowOpen(ts = Date.now(), tz = projectTimezone()): boolean {
+  const { hour } = localHmInTz(ts, tz);
+  return hour >= TRIGGER_SEND_WINDOW_START_HOUR && hour < TRIGGER_SEND_WINDOW_END_HOUR;
+}
+
+function utcMsForLocalHm(ymd: string, hour: number, minute: number, tz: string): number {
+  const target = hour * 60 + minute;
+  const [y, mo, d] = ymd.split("-").map(Number);
+  let lo = Date.UTC(y, mo - 1, d) - 12 * 3600_000;
+  let hi = lo + 36 * 3600_000;
+  for (let i = 0; i < 48; i++) {
+    const mid = Math.floor((lo + hi) / 2);
+    const midYmd = localYmdInTz(mid, tz);
+    const midHm = localHmInTz(mid, tz);
+    const midTotal = midHm.hour * 60 + midHm.minute;
+    if (midYmd < ymd || (midYmd === ymd && midTotal < target)) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo;
+}
+
+/** Ближайший момент отправки триггера (>= ts) в разрешённом окне. */
+export function nextTriggerSendWindowOpen(ts = Date.now(), tz = projectTimezone()): number {
+  if (isTriggerSendWindowOpen(ts, tz)) return ts;
+  const { hour } = localHmInTz(ts, tz);
+  const ymd = localYmdInTz(ts, tz);
+  if (hour < TRIGGER_SEND_WINDOW_START_HOUR) {
+    return utcMsForLocalHm(ymd, TRIGGER_SEND_WINDOW_START_HOUR, 0, tz);
+  }
+  const [y, m, d] = ymd.split("-").map(Number);
+  const nextDay = new Date(Date.UTC(y, m - 1, d + 1));
+  const nextYmd = localYmdInTz(nextDay.getTime(), tz);
+  return utcMsForLocalHm(nextYmd, TRIGGER_SEND_WINDOW_START_HOUR, 0, tz);
+}
+
 /** Сколько полных календарных суток до даты окончания (0 = сегодня). */
 export function calendarDaysUntilExpiry(expiryTime: number, now = Date.now(), tz = projectTimezone()): number {
   if (!expiryTime || expiryTime <= 0) return -1;

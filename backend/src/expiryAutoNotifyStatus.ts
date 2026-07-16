@@ -1,4 +1,5 @@
 import { getAutoCommunicationsConfig } from "./autoCommunicationsStore.js";
+import { expiryAutoNotifyBootTimestamp } from "./telegram/expiryNotify.js";
 import { calendarDaysUntilExpiry, localHmInTz, localYmdInTz, projectTimezone } from "./projectTime.js";
 import type { UserRow } from "./db.js";
 
@@ -30,7 +31,10 @@ export function expiryAutoNotifyStatusForUser(
       return { status: "sent", hint: "Уведомление об истечении отправлено" };
     }
     if (!targetChatId(u)) return { status: "error", hint: "Нет Telegram Chat ID" };
-    return { status: "waiting", hint: `Истечение — в ${pad2(cfg.notify_hour)}:${pad2(cfg.notify_minute)}` };
+    if (u.expiry_time <= expiryAutoNotifyBootTimestamp()) {
+      return { status: null, hint: "" };
+    }
+    return { status: "waiting", hint: "Отправка в течение минуты после истечения" };
   }
 
   const daysLeft = calendarDaysUntilExpiry(u.expiry_time, now, tz);

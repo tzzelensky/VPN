@@ -50,7 +50,6 @@ const ROUTE_FILES = {
   "dropperGame.ts": { mount: "/api/dropper-game", tag: "Dropper game" },
   "rouletteGame.ts": { mount: "/api/roulette-game", tag: "Roulette game" },
   "supportAppeals.ts": { mount: "/api/support-appeals", tag: "Support appeals" },
-  "push.ts": { mount: "/api/push", tag: "Push" },
   "mySub.ts": { mount: "/api/mysub", tag: "MySub (WebApp)", auth: false },
   "subscription.ts": { mount: "/api/subscription", tag: "Subscription", auth: false },
   "deviceLimit.ts": { mount: "/api/device-limit", tag: "Device limit" },

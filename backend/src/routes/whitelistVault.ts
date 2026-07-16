@@ -8,20 +8,28 @@ import {
   bulkAssignWhitelistVaultKeys,
   bulkDeleteWhitelistVaultKeys,
   bulkRenameWhitelistVaultKeys,
+  createWhitelistVaultGroup,
   createWhitelistVaultKey,
   deleteAllWhitelistVaultKeys,
+  deleteWhitelistVaultGroup,
   deleteWhitelistVaultKey,
   getWhitelistVaultKey,
   importWhitelistVaultUris,
   listWhitelistPurchases,
   listWhitelistVaultChecks,
+  listWhitelistVaultGroups,
   listWhitelistVaultKeys,
+  manuallyRemoveWhitelistKeyFromSubscriptions,
+  manuallyRestoreWhitelistKeyToSubscriptions,
   purgeWhitelistVaultChecksOlderThanDays,
+  resetAllWhitelistPurchases,
   saveWhitelistInstructionSettings,
   saveWhitelistPurchaseSettings,
   saveWhitelistVaultSettings,
   setWhitelistVaultKeyAssignment,
+  updateWhitelistVaultGroup,
   updateWhitelistVaultKey,
+  whitelistGroupForApi,
   whitelistKeyForApi,
 } from "../whitelistVaultDb.js";
 import {
@@ -63,13 +71,28 @@ function mapKeys(keys: ReturnType<typeof listWhitelistVaultKeys>) {
   return keys.map((k) => whitelistKeyForApi(k, includeRaw()));
 }
 
+function mapGroups(keys: ReturnType<typeof listWhitelistVaultKeys>) {
+  return listWhitelistVaultGroups().map((g) => whitelistGroupForApi(g, keys));
+}
+
+function vaultPayload() {
+  const keys = listWhitelistVaultKeys();
+  return {
+    ...getWhitelistVaultOverview(),
+    keys: mapKeys(keys),
+    groups: mapGroups(keys),
+  };
+}
+
 function parseAssignment(body: Record<string, unknown>): {
   assignment_mode?: WhitelistAssignmentMode;
   assigned_user_ids?: number[];
 } {
   const modeRaw = body.assignment_mode != null ? String(body.assignment_mode).trim().toLowerCase() : undefined;
   const assignment_mode =
-    modeRaw === "all" || modeRaw === "selected" || modeRaw === "none" ? modeRaw : undefined;
+    modeRaw === "all" || modeRaw === "selected" || modeRaw === "none" || modeRaw === "purchasers"
+      ? modeRaw
+      : undefined;
   const assigned_user_ids = Array.isArray(body.assigned_user_ids)
     ? body.assigned_user_ids.map((x) => Math.floor(Number(x))).filter((n) => n > 0)
     : undefined;
@@ -77,10 +100,7 @@ function parseAssignment(body: Record<string, unknown>): {
 }
 
 router.get("/", (_req, res) => {
-  res.json({
-    ...getWhitelistVaultOverview(),
-    keys: mapKeys(listWhitelistVaultKeys()),
-  });
+  res.json(vaultPayload());
 });
 
 router.get("/settings", (_req, res) => {
@@ -142,6 +162,16 @@ router.patch("/settings", (req, res) => {
 
 router.get("/purchases", (_req, res) => {
   res.json({ purchases: listWhitelistPurchases(200) });
+});
+
+/** Сброс всех покупок БС: пользователи снова могут купить белые списки. */
+router.post("/purchases/reset-all", (_req, res) => {
+  try {
+    const result = resetAllWhitelistPurchases();
+    res.json({ ok: true, ...result });
+  } catch (e) {
+    res.status(500).json({ error: e instanceof Error ? e.message : String(e) });
+  }
 });
 
 router.patch("/purchase-settings", (req, res) => {
@@ -306,6 +336,7 @@ router.post("/import-json", (req, res) => {
             include_in_sale: b.include_in_sale === true || b.include_in_sale === 1 || b.include_in_sale === "1",
             notify_on_fail: !(b.notify_on_fail === false || b.notify_on_fail === 0 || b.notify_on_fail === "0"),
             source_type: "json_import",
+            client_json: jsonText,
             assignment_mode: assign.assignment_mode,
             assigned_user_ids: assign.assigned_user_ids,
           }),
@@ -362,11 +393,55 @@ router.post("/check-all", (_req, res) => {
       already_running,
       total,
       checked: 0,
-      ...getWhitelistVaultOverview(),
-      keys: mapKeys(listWhitelistVaultKeys()),
+      ...vaultPayload(),
     });
   } catch (e) {
     res.status(500).json({ error: e instanceof Error ? e.message : String(e) });
+  }
+});
+
+router.post("/groups", (req, res) => {
+  try {
+    const b = (req.body ?? {}) as Record<string, unknown>;
+    const name = String(b.name ?? "").trim();
+    const keyIds = Array.isArray(b.key_ids)
+      ? b.key_ids.map((x) => Math.floor(Number(x))).filter((n) => n > 0)
+      : Array.isArray(b.ids)
+        ? b.ids.map((x) => Math.floor(Number(x))).filter((n) => n > 0)
+        : [];
+    const group = createWhitelistVaultGroup(name, keyIds);
+    res.status(201).json({ group: whitelistGroupForApi(group, listWhitelistVaultKeys()), ...vaultPayload() });
+  } catch (e) {
+    res.status(400).json({ error: e instanceof Error ? e.message : String(e) });
+  }
+});
+
+router.patch("/groups/:groupId", (req, res) => {
+  try {
+    const id = Math.floor(Number(req.params.groupId));
+    const b = (req.body ?? {}) as Record<string, unknown>;
+    const group = updateWhitelistVaultGroup(id, {
+      name: b.name != null ? String(b.name) : undefined,
+      remove_on_unavailable:
+        b.remove_on_unavailable !== undefined ? b.remove_on_unavailable === true || b.remove_on_unavailable === 1 : undefined,
+      checks_before_remove:
+        b.checks_before_remove !== undefined && Number.isFinite(Number(b.checks_before_remove))
+          ? Number(b.checks_before_remove)
+          : undefined,
+    });
+    res.json({ group: whitelistGroupForApi(group, listWhitelistVaultKeys()), ...vaultPayload() });
+  } catch (e) {
+    res.status(400).json({ error: e instanceof Error ? e.message : String(e) });
+  }
+});
+
+router.delete("/groups/:groupId", (req, res) => {
+  try {
+    const id = Math.floor(Number(req.params.groupId));
+    deleteWhitelistVaultGroup(id);
+    res.json({ ok: true, ...vaultPayload() });
+  } catch (e) {
+    res.status(400).json({ error: e instanceof Error ? e.message : String(e) });
   }
 });
 
@@ -387,7 +462,7 @@ router.post("/bulk/assignment", (req, res) => {
     const b = (req.body ?? {}) as Record<string, unknown>;
     const ids = Array.isArray(b.ids) ? b.ids.map((x) => Math.floor(Number(x))).filter((n) => n > 0) : [];
     const mode = String(b.assignment_mode ?? "selected").trim().toLowerCase() as WhitelistAssignmentMode;
-    if (mode !== "none" && mode !== "all" && mode !== "selected") {
+    if (mode !== "none" && mode !== "all" && mode !== "selected" && mode !== "purchasers") {
       res.status(400).json({ error: "Некорректный режим назначения" });
       return;
     }
@@ -457,6 +532,12 @@ router.patch("/:id", (req, res) => {
           : undefined,
       notify_on_fail:
         b.notify_on_fail !== undefined ? !(b.notify_on_fail === false || b.notify_on_fail === 0 || b.notify_on_fail === "0") : undefined,
+      remove_on_unavailable:
+        b.remove_on_unavailable !== undefined ? b.remove_on_unavailable === true || b.remove_on_unavailable === 1 : undefined,
+      checks_before_remove:
+        b.checks_before_remove !== undefined && Number.isFinite(Number(b.checks_before_remove))
+          ? Number(b.checks_before_remove)
+          : undefined,
       assignment_mode: assign.assignment_mode,
       assigned_user_ids: assign.assigned_user_ids,
     });
@@ -481,7 +562,7 @@ router.post("/:id/assignment", (req, res) => {
     const id = Math.floor(Number(req.params.id));
     const b = (req.body ?? {}) as Record<string, unknown>;
     const mode = String(b.assignment_mode ?? "none").trim().toLowerCase() as WhitelistAssignmentMode;
-    if (mode !== "none" && mode !== "all" && mode !== "selected") {
+    if (mode !== "none" && mode !== "all" && mode !== "selected" && mode !== "purchasers") {
       res.status(400).json({ error: "Некорректный режим назначения" });
       return;
     }
@@ -490,6 +571,26 @@ router.post("/:id/assignment", (req, res) => {
       : [];
     const key = setWhitelistVaultKeyAssignment(id, mode, userIds);
     res.json({ key: whitelistKeyForApi(key, includeRaw()) });
+  } catch (e) {
+    res.status(400).json({ error: e instanceof Error ? e.message : String(e) });
+  }
+});
+
+router.post("/:id/remove-from-subscriptions", (req, res) => {
+  try {
+    const id = Math.floor(Number(req.params.id));
+    const key = manuallyRemoveWhitelistKeyFromSubscriptions(id);
+    res.json({ key: whitelistKeyForApi(key, includeRaw()), ...vaultPayload() });
+  } catch (e) {
+    res.status(400).json({ error: e instanceof Error ? e.message : String(e) });
+  }
+});
+
+router.post("/:id/restore-to-subscriptions", (req, res) => {
+  try {
+    const id = Math.floor(Number(req.params.id));
+    const key = manuallyRestoreWhitelistKeyToSubscriptions(id);
+    res.json({ key: whitelistKeyForApi(key, includeRaw()), ...vaultPayload() });
   } catch (e) {
     res.status(400).json({ error: e instanceof Error ? e.message : String(e) });
   }

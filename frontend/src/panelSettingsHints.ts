@@ -29,6 +29,8 @@ export const PANEL_HINTS = {
   subscriptionBanner:
     "Текст и кнопка в VPN-клиенте (Happ, v2rayTun): блок под статистикой подписки + Telegram-кнопка. В Mini App не показывается.",
   subscriptionBannerText: "Каждая строка — отдельная строка в блоке. Поддерживаются эмодзи.",
+  subscriptionBannerWhitelistText:
+    "Дополнительный текст только для подписок с подключёнными белыми списками. У остальных этот текст не показывается.",
   subscriptionBannerTelegram: "Ссылка на чат поддержки: https://t.me/username или @username.",
   subscriptionBannerLinkText: "Текст кликабельной ссылки в строке про поддержку.",
   maskSecrets: "UUID, токены и ключи отображаются частично скрытыми.",

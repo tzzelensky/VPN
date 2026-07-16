@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import DashboardLayout from "../components/DashboardLayout";
 import ClientPickerModal from "../components/ClientPickerModal";
-import Spinner from "../components/Spinner";
+import PageLoadingState from "../components/PageLoadingState";
 import {
   deleteDailyGiftPrize,
   deleteDailyGiftSchedule,
@@ -432,13 +432,13 @@ export default function DailyGiftPage({ onLogout }: { onLogout: () => void }) {
           </div>
         </header>
 
-        {loading ? (
-          <div className="daily-gift-page__loading">
-            <Spinner /> Загрузка…
-          </div>
-        ) : null}
-
         {msg ? <div className={`flash ${msg.type === "ok" ? "ok" : "err"}`}>{msg.text}</div> : null}
+
+        {loading && !data ? (
+          <section className="panel">
+            <PageLoadingState />
+          </section>
+        ) : null}
 
         {data ? (
           <div className="daily-gift-page__stack">

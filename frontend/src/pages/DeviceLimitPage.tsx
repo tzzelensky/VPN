@@ -2,6 +2,8 @@ import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import AdminModalBackdrop from "../components/AdminModalBackdrop";
 import DashboardLayout from "../components/DashboardLayout";
 import SettingsToggleRow from "../components/SettingsToggleRow";
+import PageLoadingState from "../components/PageLoadingState";
+import PanelTabs from "../components/PanelTabs";
 import Spinner from "../components/Spinner";
 import {
   addAdminDeviceSlots,
@@ -323,7 +325,7 @@ export default function DeviceLimitPage({ onLogout }: { onLogout: () => void }) 
 
         {loading && !overview ? (
           <section className="panel">
-            <Spinner /> Загрузка…
+            <PageLoadingState />
           </section>
         ) : null}
 
@@ -356,33 +358,21 @@ export default function DeviceLimitPage({ onLogout }: { onLogout: () => void }) 
           </section>
         ) : null}
 
-        <section className="panel referral-tabs-bar device-limit-tabs-bar">
-          <div className="referral-main-tabs device-limit-main-tabs" role="tablist">
-            {(
-              [
-                ["settings", "Настройки"],
-                ["subscriptions", "Подписки"],
-                ["purchases", "Покупки"],
-                ["events", "Журнал"],
-                ["diagnose", "Диагностика"],
-              ] as const
-            ).map(([k, label]) => (
-              <button
-                key={k}
-                type="button"
-                role="tab"
-                aria-selected={tab === k}
-                className={tab === k ? "active" : ""}
-                onClick={() => {
-                  setTab(k);
-                  if (k !== "events") setEventSubFilter(null);
-                }}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-        </section>
+        <PanelTabs
+          className="device-limit-tabs-bar"
+          tabs={[
+            { id: "settings", label: "Настройки" },
+            { id: "subscriptions", label: "Подписки" },
+            { id: "purchases", label: "Покупки" },
+            { id: "events", label: "Журнал" },
+            { id: "diagnose", label: "Диагностика" },
+          ]}
+          value={tab}
+          onChange={(k) => {
+            setTab(k);
+            if (k !== "events") setEventSubFilter(null);
+          }}
+        />
 
         {tab === "settings" && settings ? (
           <section className="panel device-limit-settings-panel">

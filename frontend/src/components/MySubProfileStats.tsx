@@ -177,6 +177,32 @@ function SubscriptionStatsCard({ sub, title }: { sub: Sub; title?: string }) {
   );
 }
 
+/** Статус БС для карточки профиля — по выбранной подписке, иначе глобальный оффер. */
+function resolveProfileWhitelist(subscription: Sub | undefined, whitelist: Whitelist | undefined): Whitelist | undefined {
+  if (!whitelist || whitelist.status === "hidden" || !whitelist.visible) return whitelist;
+  const subWl = subscription?.whitelist;
+  if (!subWl) return whitelist;
+
+  const statusMap = {
+    none: "not_connected",
+    active: "connected",
+    suspended: "suspended",
+    expired: "expired",
+  } as const;
+  const status = statusMap[subWl.status] ?? "not_connected";
+  const connected = status === "connected" || status === "suspended";
+
+  return {
+    ...whitelist,
+    status,
+    can_buy: Boolean(subWl.can_buy) && !connected,
+    active_until: subWl.active_until ?? null,
+    remaining_days: subWl.remaining_days ?? null,
+    access_status: subWl.status,
+    block_reason: subWl.block_reason ?? whitelist.block_reason ?? null,
+  };
+}
+
 function WhitelistStatsCard({ wl, sub }: { wl: Whitelist; sub?: Sub }) {
   if (!wl.visible || wl.status === "hidden") return null;
 
@@ -277,7 +303,8 @@ export default function MySubProfileStats({
   whitelist: Whitelist | undefined;
   subscriptionTitle?: string;
 }) {
-  if (!subscription && (!whitelist || whitelist.status === "hidden")) {
+  const profileWl = resolveProfileWhitelist(subscription, whitelist);
+  if (!subscription && (!profileWl || profileWl.status === "hidden")) {
     return (
       <div className="mysub-profile-stats-empty">
         <p>Нет активной подписки для отображения статистики.</p>
@@ -288,7 +315,7 @@ export default function MySubProfileStats({
   return (
     <div className="mysub-profile-stats">
       {subscription ? <SubscriptionStatsCard sub={subscription} title={subscriptionTitle} /> : null}
-      {whitelist ? <WhitelistStatsCard wl={whitelist} sub={subscription} /> : null}
+      {profileWl ? <WhitelistStatsCard wl={profileWl} sub={subscription} /> : null}
     </div>
   );
 }

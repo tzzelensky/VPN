@@ -1,7 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import DashboardLayout from "../components/DashboardLayout";
+import PageLoadingState from "../components/PageLoadingState";
 import DualListPicker, { type DualListItem } from "../components/DualListPicker";
 import {
+  bulkAssignConfigVaultKeys,
+  bulkRenameConfigVaultKeys,
   checkAllConfigVaultKeys,
   checkConfigVaultKey,
   configVaultExportUrl,
@@ -70,6 +73,7 @@ function parseErr(e: unknown): string {
 export default function ConfigVaultPage({ onLogout }: { onLogout: () => void }) {
   const { confirmDangerous, maskSecret } = usePanelSettings();
   const [data, setData] = useState<ConfigVaultOverviewDto | null>(null);
+  const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState<{ type: "ok" | "err"; text: string } | null>(null);
 
@@ -109,8 +113,12 @@ export default function ConfigVaultPage({ onLogout }: { onLogout: () => void }) 
   const [formSubscriptionUserIds, setFormSubscriptionUserIds] = useState<number[]>([]);
   const [usersPickerOpen, setUsersPickerOpen] = useState(false);
   const [usersPickerTitle, setUsersPickerTitle] = useState("");
+  const [usersPickerPurpose, setUsersPickerPurpose] = useState<"form" | "assign-one" | "assign-bulk" | null>(null);
   const [assignKey, setAssignKey] = useState<ConfigVaultKeyDto | null>(null);
   const [subscriptionTargetsOpen, setSubscriptionTargetsOpen] = useState(false);
+  const [selectedKeyIds, setSelectedKeyIds] = useState<number[]>([]);
+  const [bulkRenameOpen, setBulkRenameOpen] = useState(false);
+  const [bulkRemark, setBulkRemark] = useState("");
 
   const showToast = useCallback((type: "ok" | "err", text: string) => {
     setToast({ type, text });
@@ -120,6 +128,7 @@ export default function ConfigVaultPage({ onLogout }: { onLogout: () => void }) 
   const reload = useCallback(async () => {
     const r = await loadConfigVault();
     setData(r);
+    setLoading(false);
     return r;
   }, []);
 
@@ -351,13 +360,26 @@ export default function ConfigVaultPage({ onLogout }: { onLogout: () => void }) 
 
   const configVaultUserPickerItems = useMemo((): DualListItem[] => {
     return users.map((u) => {
-      const title = (u.name || u.email || `Клиент #${u.id}`).trim();
+      const title = (u.name || u.email || `Подписка #${u.id}`).trim();
       return { id: u.id, label: `#${u.id} ${title}` };
     });
   }, [users]);
 
-  function openSubscriptionUsersPicker(title: string, ids: number[]) {
+  function clearKeySelection() {
+    setSelectedKeyIds([]);
+  }
+
+  function toggleKeySelected(id: number) {
+    setSelectedKeyIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  }
+
+  function openSubscriptionUsersPicker(
+    title: string,
+    purpose: "form" | "assign-one" | "assign-bulk",
+    ids: number[],
+  ) {
     setUsersPickerTitle(title);
+    setUsersPickerPurpose(purpose);
     setFormSubscriptionUserIds(ids);
     setFormSubscriptionMode("selected");
     setUsersPickerOpen(true);
@@ -382,7 +404,7 @@ export default function ConfigVaultPage({ onLogout }: { onLogout: () => void }) 
   async function handleSaveSubscriptionTargets() {
     if (!assignKey) return;
     if (formSubscriptionMode === "selected" && formSubscriptionUserIds.length === 0) {
-      showToast("err", "Выберите хотя бы одного пользователя");
+      showToast("err", "Выберите хотя бы одну подписку");
       return;
     }
     await runBusy(async () => {
@@ -402,13 +424,63 @@ export default function ConfigVaultPage({ onLogout }: { onLogout: () => void }) 
     setFormSubscriptionUserIds(ids);
     setFormSubscriptionMode("selected");
     setUsersPickerOpen(false);
+    const purpose = usersPickerPurpose;
+    setUsersPickerPurpose(null);
+
+    if (purpose === "assign-one" && assignKey) {
+      await runBusy(async () => {
+        await setConfigVaultSubscriptionTargets(assignKey.id, "selected", ids);
+        await reload();
+        setAssignKey(null);
+        setSubscriptionTargetsOpen(false);
+        showToast("ok", "Подписки обновлены");
+      });
+      return;
+    }
+
+    if (purpose === "assign-bulk") {
+      if (selectedKeyIds.length === 0) return;
+      await runBusy(async () => {
+        const r = await bulkAssignConfigVaultKeys({
+          ids: selectedKeyIds,
+          subscription_mode: "selected",
+          subscription_user_ids: ids,
+        });
+        await reload();
+        clearKeySelection();
+        showToast(
+          "ok",
+          `Назначено ключей: ${r.updated}${r.errors.length ? `, ошибок: ${r.errors.length}` : ""}`,
+        );
+      });
+    }
+  }
+
+  async function handleBulkRename() {
+    const name = bulkRemark.trim();
+    if (!name) {
+      showToast("err", "Укажите название");
+      return;
+    }
+    if (selectedKeyIds.length === 0) return;
+    await runBusy(async () => {
+      const r = await bulkRenameConfigVaultKeys({ ids: selectedKeyIds, remark: name });
+      await reload();
+      clearKeySelection();
+      setBulkRenameOpen(false);
+      setBulkRemark("");
+      showToast(
+        "ok",
+        `Переименовано: ${r.updated}${r.errors.length ? `, ошибок: ${r.errors.length}` : ""}`,
+      );
+    });
   }
 
   function renderSubscriptionTargetFields() {
     return (
       <>
         <label className="field">
-          <span>Кому добавлять в подписку</span>
+          <span>Кому добавлять в подписки</span>
           <select
             className="input"
             value={formSubscriptionMode}
@@ -416,14 +488,14 @@ export default function ConfigVaultPage({ onLogout }: { onLogout: () => void }) 
               const mode = e.target.value as ConfigVaultSubscriptionModeDto;
               setFormSubscriptionMode(mode);
               if (mode === "selected") {
-                openSubscriptionUsersPicker("Кому в подписках", formSubscriptionUserIds);
+                openSubscriptionUsersPicker("Выбор подписок", "form", formSubscriptionUserIds);
               } else {
                 setFormSubscriptionUserIds([]);
               }
             }}
           >
-            <option value="all">Всем пользователям</option>
-            <option value="selected">Выбранным пользователям</option>
+            <option value="all">Всем подпискам</option>
+            <option value="selected">Выбранным подпискам</option>
           </select>
         </label>
         {formSubscriptionMode === "selected" && (
@@ -431,9 +503,9 @@ export default function ConfigVaultPage({ onLogout }: { onLogout: () => void }) 
             <button
               type="button"
               className="btn"
-              onClick={() => openSubscriptionUsersPicker("Кому в подписках", formSubscriptionUserIds)}
+              onClick={() => openSubscriptionUsersPicker("Выбор подписок", "form", formSubscriptionUserIds)}
             >
-              Выбрать пользователей
+              Выбрать подписки
             </button>
             <span className="muted vault-hint">Выбрано: {formSubscriptionUserIds.length}</span>
           </div>
@@ -582,12 +654,58 @@ export default function ConfigVaultPage({ onLogout }: { onLogout: () => void }) 
           </select>
         </div>
 
-        {keys.length === 0 ? (
+        {loading ? (
+          <PageLoadingState />
+        ) : keys.length === 0 ? (
           <p className="muted vault-empty">Нет ключей. Добавьте ссылку (vless/trojan/hysteria2) или импортируйте список.</p>
         ) : (
-          <div className="vault-list">
+          <>
+            {selectedKeyIds.length > 0 ? (
+              <div className="vault-bulk-bar">
+                <span className="vault-bulk-bar__count">Выбрано: {selectedKeyIds.length}</span>
+                <button
+                  type="button"
+                  className="btn btn-sm"
+                  onClick={() => {
+                    setBulkRemark("");
+                    setBulkRenameOpen(true);
+                  }}
+                >
+                  Переименовать
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-sm"
+                  onClick={() =>
+                    openSubscriptionUsersPicker(
+                      `Назначить подпискам (${selectedKeyIds.length})`,
+                      "assign-bulk",
+                      [],
+                    )
+                  }
+                >
+                  Назначить подпискам
+                </button>
+                <button type="button" className="btn btn-sm ghost" onClick={clearKeySelection}>
+                  Снять выбор
+                </button>
+              </div>
+            ) : null}
+            <div className="vault-list">
             {keys.map((k) => (
-              <article key={k.id} className="vault-row">
+              <article
+                key={k.id}
+                className={`vault-row${selectedKeyIds.includes(k.id) ? " vault-row--selected" : ""}`}
+              >
+                <div className="vault-pick">
+                  <label title="Выбрать ключ">
+                    <input
+                      type="checkbox"
+                      checked={selectedKeyIds.includes(k.id)}
+                      onChange={() => toggleKeySelected(k.id)}
+                    />
+                  </label>
+                </div>
                 <div className="vault-row-main">
                   <div className="vault-row-title">
                     <strong>{k.name}</strong>
@@ -609,7 +727,7 @@ export default function ConfigVaultPage({ onLogout }: { onLogout: () => void }) 
                     <span className="muted">Проверка: {formatDt(k.last_check_at)}</span>
                     <span className="muted">В подписках: {k.added_to_subscriptions ? "Да" : "Нет"}</span>
                     {k.added_to_subscriptions && (
-                      <span className="muted">Кому: {k.subscription_label ?? "Всем пользователям"}</span>
+                      <span className="muted">Кому: {k.subscription_label ?? "Всем подпискам"}</span>
                     )}
                   </div>
                 </div>
@@ -626,7 +744,7 @@ export default function ConfigVaultPage({ onLogout }: { onLogout: () => void }) 
                   <button
                     type="button"
                     className="btn btn-sm"
-                    disabled={busy || !k.added_to_subscriptions}
+                    disabled={busy}
                     onClick={() => void openSubscriptionTargets(k)}
                   >
                     Кому в подписках
@@ -663,8 +781,44 @@ export default function ConfigVaultPage({ onLogout }: { onLogout: () => void }) 
               </article>
             ))}
           </div>
+          </>
         )}
       </div>
+
+      {bulkRenameOpen && (
+        <div className="modal-backdrop">
+          <div className="modal modal--sm vault-modal">
+            <div className="modal-head">
+              <h2>Переименовать ({selectedKeyIds.length})</h2>
+              <button type="button" className="modal-close" onClick={() => setBulkRenameOpen(false)}>
+                ×
+              </button>
+            </div>
+            <div className="modal-body">
+              <label className="field">
+                <span>Новое название в подписке</span>
+                <input
+                  className="input"
+                  value={bulkRemark}
+                  onChange={(e) => setBulkRemark(e.target.value)}
+                  placeholder="Например: Gemini"
+                />
+              </label>
+              <p className="muted vault-hint">
+                Название попадёт в клиент (фрагмент ссылки #…) и в имя ключа. В Happ будет «Название (имя подписки)».
+              </p>
+            </div>
+            <div className="modal-footer">
+              <button type="button" className="btn" onClick={() => setBulkRenameOpen(false)}>
+                Отмена
+              </button>
+              <button type="button" className="btn primary" disabled={busy} onClick={() => void handleBulkRename()}>
+                Сохранить
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {addOpen && (
         <div className="modal-backdrop">
@@ -828,7 +982,7 @@ export default function ConfigVaultPage({ onLogout }: { onLogout: () => void }) 
                 {viewKey.added_to_subscriptions && (
                   <>
                     <dt>Кому в подписках</dt>
-                    <dd>{viewKey.subscription_label ?? "Всем пользователям"}</dd>
+                    <dd>{viewKey.subscription_label ?? "Всем подпискам"}</dd>
                   </>
                 )}
                 <dt>Активен</dt>
@@ -849,19 +1003,17 @@ export default function ConfigVaultPage({ onLogout }: { onLogout: () => void }) 
               >
                 {viewKey.added_to_subscriptions ? "Убрать из подписок" : "Добавить в подписки"}
               </button>
-              {viewKey.added_to_subscriptions && (
-                <button
-                  type="button"
-                  className="btn"
-                  disabled={busy}
-                  onClick={() => {
-                    setViewKey(null);
-                    void openSubscriptionTargets(viewKey);
-                  }}
-                >
-                  Кому в подписках
-                </button>
-              )}
+              <button
+                type="button"
+                className="btn"
+                disabled={busy}
+                onClick={() => {
+                  setViewKey(null);
+                  void openSubscriptionTargets(viewKey);
+                }}
+              >
+                Кому в подписках
+              </button>
               <button
                 type="button"
                 className="btn"
@@ -1191,11 +1343,14 @@ export default function ConfigVaultPage({ onLogout }: { onLogout: () => void }) 
       <DualListPicker
         open={usersPickerOpen}
         title={usersPickerTitle}
-        leftLabel="Доступные пользователи"
+        leftLabel="Доступные подписки"
         rightLabel="Выбрано"
         items={configVaultUserPickerItems}
         selectedIds={formSubscriptionUserIds}
-        onClose={() => setUsersPickerOpen(false)}
+        onClose={() => {
+          setUsersPickerOpen(false);
+          setUsersPickerPurpose(null);
+        }}
         onSave={(ids) => void handleSubscriptionUsersPickerSave(ids)}
       />
     </DashboardLayout>

@@ -4,13 +4,16 @@ import { fileURLToPath } from "node:url";
 import type { VlessCheckStatus } from "./configVaultTypes.js";
 import type { UserRow } from "./db.js";
 import { listUsers, updateUserRow, userHasActiveSubscription } from "./db.js";
-import { defaultNameFromUri, maskProxyUri, parseProxyUri, setProxyUriRemark } from "./configVaultUri.js";
+import { defaultNameFromUri, maskProxyUri, parseProxyUri, setProxyUriRemark, applyUserRemarkToProxyUri } from "./configVaultUri.js";
 import { isValidWhitelistVaultUri } from "./extraVless.js";
+import { formatSubscriptionNodeName } from "./subscriptionNodeName.js";
 import {
   DEFAULT_WHITELIST_VAULT_SETTINGS,
   type WhitelistAssignmentMode,
   type WhitelistKeyCheckRow,
   type WhitelistKeyRow,
+  type WhitelistGroupRow,
+  type WhitelistSubscriptionSnapshot,
   type WhitelistSourceType,
   type WhitelistVaultSettings,
   type WhiteListPurchaseRow,
@@ -24,9 +27,11 @@ const vaultPath =
 
 type VaultFile = {
   next_key_id: number;
+  next_group_id: number;
   next_check_id: number;
   next_purchase_id: number;
   keys: WhitelistKeyRow[];
+  groups: WhitelistGroupRow[];
   checks: WhitelistKeyCheckRow[];
   purchases: WhiteListPurchaseRow[];
   settings: WhitelistVaultSettings;
@@ -35,9 +40,11 @@ type VaultFile = {
 function emptyVault(): VaultFile {
   return {
     next_key_id: 1,
+    next_group_id: 1,
     next_check_id: 1,
     next_purchase_id: 1,
     keys: [],
+    groups: [],
     checks: [],
     purchases: [],
     settings: { ...DEFAULT_WHITELIST_VAULT_SETTINGS },
@@ -46,7 +53,7 @@ function emptyVault(): VaultFile {
 
 function normalizeAssignmentMode(raw: unknown): WhitelistAssignmentMode {
   const v = String(raw ?? "none").trim().toLowerCase();
-  if (v === "all" || v === "selected") return v;
+  if (v === "all" || v === "selected" || v === "purchasers") return v;
   return "none";
 }
 
@@ -141,6 +148,34 @@ function normalizePurchase(raw: unknown): WhiteListPurchaseRow | null {
   };
 }
 
+function normalizeSubscriptionSnapshot(raw: unknown): WhitelistSubscriptionSnapshot | null {
+  if (!raw || typeof raw !== "object") return null;
+  const o = raw as Record<string, unknown>;
+  const mode = normalizeAssignmentMode(o.assignment_mode);
+  return {
+    include_in_sale: o.include_in_sale === true || o.include_in_sale === 1 || o.include_in_sale === "1",
+    assignment_mode: mode,
+    assigned_user_ids: mode === "selected" ? normalizeUserIds(o.assigned_user_ids) : [],
+  };
+}
+
+function normalizeGroup(raw: unknown): WhitelistGroupRow | null {
+  if (!raw || typeof raw !== "object") return null;
+  const o = raw as Record<string, unknown>;
+  const id = Math.floor(Number(o.id));
+  const name = String(o.name ?? "").trim().slice(0, 120);
+  if (!Number.isFinite(id) || id <= 0 || !name) return null;
+  const checks = Math.floor(Number(o.checks_before_remove) || 3);
+  return {
+    id,
+    name,
+    remove_on_unavailable: o.remove_on_unavailable === true || o.remove_on_unavailable === 1 || o.remove_on_unavailable === "1",
+    checks_before_remove: Math.min(50, Math.max(1, checks)),
+    created_at: String(o.created_at ?? new Date().toISOString()),
+    updated_at: String(o.updated_at ?? o.created_at ?? new Date().toISOString()),
+  };
+}
+
 function normalizeKey(raw: unknown): WhitelistKeyRow | null {
   if (!raw || typeof raw !== "object") return null;
   const o = raw as Record<string, unknown>;
@@ -166,12 +201,19 @@ function normalizeKey(raw: unknown): WhitelistKeyRow | null {
   const source_type: WhitelistSourceType = src === "json_import" ? "json_import" : "manual_vless";
   const assignment_mode = normalizeAssignmentMode(o.assignment_mode);
   const assigned_user_ids = normalizeUserIds(o.assigned_user_ids);
+  const groupIdRaw = o.group_id != null ? Math.floor(Number(o.group_id)) : null;
+  const group_id = groupIdRaw != null && Number.isFinite(groupIdRaw) && groupIdRaw > 0 ? groupIdRaw : null;
+  const checksBeforeRemove = Math.floor(Number(o.checks_before_remove) || 3);
   return {
     id,
     name: String(o.name ?? "").trim().slice(0, 120) || defaultNameFromUri(raw_uri),
     raw_uri,
     masked_uri: String(o.masked_uri ?? "").trim() || maskProxyUri(raw_uri),
     source_type,
+    client_json:
+      typeof o.client_json === "string" && o.client_json.trim()
+        ? o.client_json.trim()
+        : null,
     active: !(o.active === false || o.active === 0 || o.active === "0"),
     include_in_sale: o.include_in_sale === true || o.include_in_sale === 1 || o.include_in_sale === "1",
     assignment_mode,
@@ -184,6 +226,15 @@ function normalizeKey(raw: unknown): WhitelistKeyRow | null {
     last_error: o.last_error != null ? String(o.last_error).slice(0, 500) : null,
     unavailable_since: o.unavailable_since != null ? String(o.unavailable_since) : null,
     notify_on_fail: !(o.notify_on_fail === false || o.notify_on_fail === 0 || o.notify_on_fail === "0"),
+    group_id,
+    remove_on_unavailable: o.remove_on_unavailable === true || o.remove_on_unavailable === 1 || o.remove_on_unavailable === "1",
+    checks_before_remove: Math.min(50, Math.max(1, checksBeforeRemove)),
+    consecutive_unavailable_checks: Math.max(0, Math.floor(Number(o.consecutive_unavailable_checks) || 0)),
+    removed_from_subscriptions:
+      o.removed_from_subscriptions === true || o.removed_from_subscriptions === 1 || o.removed_from_subscriptions === "1",
+    removed_manually: o.removed_manually === true || o.removed_manually === 1 || o.removed_manually === "1",
+    removed_at: o.removed_at != null ? String(o.removed_at) : null,
+    subscription_restore_snapshot: normalizeSubscriptionSnapshot(o.subscription_restore_snapshot),
     last_notified_status,
     last_notify_at: o.last_notify_at != null ? String(o.last_notify_at) : null,
     parsed_address: parsed.address,
@@ -240,15 +291,26 @@ function readVault(): VaultFile {
     const purchases = (Array.isArray(parsed.purchases) ? parsed.purchases : [])
       .map((x) => normalizePurchase(x))
       .filter((x): x is WhiteListPurchaseRow => x != null);
-    return {
+    const groups = (Array.isArray(parsed.groups) ? parsed.groups : [])
+      .map((x) => normalizeGroup(x))
+      .filter((x): x is WhitelistGroupRow => x != null);
+    const vault: VaultFile = {
       next_key_id: Number(parsed.next_key_id) > 0 ? Number(parsed.next_key_id) : 1,
+      next_group_id: Number(parsed.next_group_id) > 0 ? Number(parsed.next_group_id) : 1,
       next_check_id: Number(parsed.next_check_id) > 0 ? Number(parsed.next_check_id) : 1,
       next_purchase_id: Number(parsed.next_purchase_id) > 0 ? Number(parsed.next_purchase_id) : 1,
       keys,
+      groups,
       checks,
       purchases,
       settings: normalizeSettings(parsed.settings),
     };
+    // Ключи без существующей группы — сбрасываем group_id.
+    const groupIds = new Set(vault.groups.map((g) => g.id));
+    for (const k of vault.keys) {
+      if (k.group_id != null && !groupIds.has(k.group_id)) k.group_id = null;
+    }
+    return vault;
   } catch (e) {
     console.error("[whitelist-vault] read failed:", e instanceof Error ? e.message : e);
     return emptyVault();
@@ -274,6 +336,258 @@ export function isWhitelistVaultEnabled(): boolean {
 
 export function listWhitelistVaultKeys(): WhitelistKeyRow[] {
   return [...readVault().keys].sort((a, b) => b.id - a.id);
+}
+
+export function listWhitelistVaultGroups(): WhitelistGroupRow[] {
+  return [...readVault().groups].sort((a, b) => a.id - b.id);
+}
+
+export function getWhitelistVaultGroup(id: number): WhitelistGroupRow | undefined {
+  return readVault().groups.find((g) => g.id === id);
+}
+
+function purgeEmptyGroups(v: VaultFile): void {
+  const used = new Set(
+    v.keys.map((k) => k.group_id).filter((id): id is number => id != null && id > 0),
+  );
+  v.groups = v.groups.filter((g) => used.has(g.id));
+}
+
+export function getWhitelistAutoRemoveSettings(
+  key: WhitelistKeyRow,
+  group?: WhitelistGroupRow | null,
+): { remove_on_unavailable: boolean; checks_before_remove: number } {
+  const g = group ?? (key.group_id != null ? getWhitelistVaultGroup(key.group_id) : null);
+  if (g) {
+    return {
+      remove_on_unavailable: g.remove_on_unavailable,
+      checks_before_remove: g.checks_before_remove,
+    };
+  }
+  return {
+    remove_on_unavailable: key.remove_on_unavailable,
+    checks_before_remove: key.checks_before_remove,
+  };
+}
+
+function keyHasSubscriptionPresence(key: WhitelistKeyRow): boolean {
+  return key.include_in_sale || key.assignment_mode !== "none";
+}
+
+export function processWhitelistAutoSubscriptionAfterCheck(
+  keyId: number,
+  checkStatus: "available" | "unavailable" | "unstable",
+): { action: "none" | "removed" | "restored"; checks_count: number; key: WhitelistKeyRow } {
+  let key!: WhitelistKeyRow;
+  let action: "none" | "removed" | "restored" = "none";
+  let checks_count = 0;
+  mutateVault((v) => {
+    const idx = v.keys.findIndex((k) => k.id === keyId);
+    if (idx < 0) throw new Error("Ключ не найден");
+    const cur = v.keys[idx]!;
+    const group = cur.group_id != null ? v.groups.find((g) => g.id === cur.group_id) : undefined;
+    const autoRemove = getWhitelistAutoRemoveSettings(cur, group);
+    const now = new Date().toISOString();
+
+    if (checkStatus === "unavailable") {
+      const nextChecks = cur.consecutive_unavailable_checks + 1;
+      let removed_from_subscriptions = cur.removed_from_subscriptions;
+      let removed_at = cur.removed_at;
+      let snapshot = cur.subscription_restore_snapshot;
+
+      if (
+        autoRemove.remove_on_unavailable &&
+        !cur.removed_from_subscriptions &&
+        nextChecks >= autoRemove.checks_before_remove &&
+        keyHasSubscriptionPresence(cur)
+      ) {
+        removed_from_subscriptions = true;
+        removed_at = now;
+        snapshot = {
+          include_in_sale: cur.include_in_sale,
+          assignment_mode: cur.assignment_mode,
+          assigned_user_ids: [...cur.assigned_user_ids],
+        };
+        action = "removed";
+        checks_count = nextChecks;
+      }
+
+      v.keys[idx] = {
+        ...cur,
+        consecutive_unavailable_checks: nextChecks,
+        removed_from_subscriptions,
+        removed_manually: removed_from_subscriptions && action === "removed" ? false : cur.removed_manually,
+        removed_at,
+        subscription_restore_snapshot: snapshot,
+        updated_at: now,
+      };
+    } else {
+      let removed_from_subscriptions = cur.removed_from_subscriptions;
+      let removed_at = cur.removed_at;
+      let snapshot = cur.subscription_restore_snapshot;
+      let removed_manually = cur.removed_manually;
+
+      if (
+        cur.removed_from_subscriptions &&
+        !cur.removed_manually &&
+        cur.subscription_restore_snapshot &&
+        checkStatus === "available"
+      ) {
+        removed_from_subscriptions = false;
+        removed_at = null;
+        snapshot = null;
+        removed_manually = false;
+        action = "restored";
+      }
+
+      v.keys[idx] = {
+        ...cur,
+        consecutive_unavailable_checks: 0,
+        removed_from_subscriptions,
+        removed_manually,
+        removed_at,
+        subscription_restore_snapshot: snapshot,
+        updated_at: now,
+      };
+    }
+    key = v.keys[idx]!;
+  });
+  return { action, checks_count, key };
+}
+
+export function manuallyRemoveWhitelistKeyFromSubscriptions(id: number): WhitelistKeyRow {
+  let updated!: WhitelistKeyRow;
+  mutateVault((v) => {
+    const idx = v.keys.findIndex((k) => k.id === id);
+    if (idx < 0) throw new Error("Ключ не найден");
+    const cur = v.keys[idx]!;
+    if (!keyHasSubscriptionPresence(cur)) {
+      throw new Error("Ключ не выдаётся в подписках (не в продаже и не назначен)");
+    }
+    if (cur.removed_from_subscriptions) throw new Error("Ключ уже убран из подписок");
+    const now = new Date().toISOString();
+    updated = {
+      ...cur,
+      removed_from_subscriptions: true,
+      removed_manually: true,
+      removed_at: now,
+      subscription_restore_snapshot: {
+        include_in_sale: cur.include_in_sale,
+        assignment_mode: cur.assignment_mode,
+        assigned_user_ids: [...cur.assigned_user_ids],
+      },
+      updated_at: now,
+    };
+    v.keys[idx] = updated;
+  });
+  return updated!;
+}
+
+export function manuallyRestoreWhitelistKeyToSubscriptions(id: number): WhitelistKeyRow {
+  let updated!: WhitelistKeyRow;
+  mutateVault((v) => {
+    const idx = v.keys.findIndex((k) => k.id === id);
+    if (idx < 0) throw new Error("Ключ не найден");
+    const cur = v.keys[idx]!;
+    if (!cur.removed_from_subscriptions) throw new Error("Ключ не был убран из подписок");
+    const now = new Date().toISOString();
+    updated = {
+      ...cur,
+      removed_from_subscriptions: false,
+      removed_manually: false,
+      removed_at: null,
+      subscription_restore_snapshot: null,
+      consecutive_unavailable_checks: 0,
+      updated_at: now,
+    };
+    v.keys[idx] = updated;
+  });
+  return updated!;
+}
+
+export function createWhitelistVaultGroup(name: string, keyIds: number[]): WhitelistGroupRow {
+  const trimmed = name.trim().slice(0, 120);
+  if (!trimmed) throw new Error("Укажите название группы");
+  const unique = [...new Set(keyIds.map((x) => Math.floor(Number(x))).filter((n) => n > 0))];
+  if (unique.length < 2) throw new Error("Выберите минимум 2 ключа для группы");
+  let created!: WhitelistGroupRow;
+  mutateVault((v) => {
+    for (const id of unique) {
+      if (!v.keys.some((k) => k.id === id)) throw new Error(`Ключ #${id} не найден`);
+    }
+    const id = v.next_group_id++;
+    const now = new Date().toISOString();
+    created = {
+      id,
+      name: trimmed,
+      remove_on_unavailable: false,
+      checks_before_remove: 3,
+      created_at: now,
+      updated_at: now,
+    };
+    v.groups.push(created);
+    for (const keyId of unique) {
+      const idx = v.keys.findIndex((k) => k.id === keyId);
+      const cur = v.keys[idx]!;
+      v.keys[idx] = { ...cur, group_id: id, updated_at: now };
+    }
+    purgeEmptyGroups(v);
+  });
+  return created!;
+}
+
+export function updateWhitelistVaultGroup(
+  id: number,
+  patch: {
+    name?: string;
+    remove_on_unavailable?: boolean;
+    checks_before_remove?: number;
+  },
+): WhitelistGroupRow {
+  let updated!: WhitelistGroupRow;
+  mutateVault((v) => {
+    const idx = v.groups.findIndex((g) => g.id === id);
+    if (idx < 0) throw new Error("Группа не найдена");
+    const cur = v.groups[idx]!;
+    const checks =
+      patch.checks_before_remove !== undefined
+        ? Math.min(50, Math.max(1, Math.floor(Number(patch.checks_before_remove) || 3)))
+        : cur.checks_before_remove;
+    updated = {
+      ...cur,
+      name: patch.name != null ? patch.name.trim().slice(0, 120) || cur.name : cur.name,
+      remove_on_unavailable:
+        patch.remove_on_unavailable !== undefined ? patch.remove_on_unavailable === true : cur.remove_on_unavailable,
+      checks_before_remove: checks,
+      updated_at: new Date().toISOString(),
+    };
+    v.groups[idx] = updated;
+  });
+  return updated!;
+}
+
+export function deleteWhitelistVaultGroup(id: number): void {
+  mutateVault((v) => {
+    if (!v.groups.some((g) => g.id === id)) throw new Error("Группа не найдена");
+    const now = new Date().toISOString();
+    for (const k of v.keys) {
+      if (k.group_id === id) {
+        k.group_id = null;
+        k.updated_at = now;
+      }
+    }
+    v.groups = v.groups.filter((g) => g.id !== id);
+  });
+}
+
+export function whitelistGroupForApi(g: WhitelistGroupRow, keys: WhitelistKeyRow[]): Record<string, unknown> {
+  const groupKeys = keys.filter((k) => k.group_id === g.id);
+  return {
+    ...g,
+    keys_count: groupKeys.length,
+    removed_count: groupKeys.filter((k) => k.removed_from_subscriptions).length,
+    unavailable_count: groupKeys.filter((k) => k.last_check_status === "unavailable").length,
+  };
 }
 
 export function getWhitelistVaultKey(id: number): WhitelistKeyRow | undefined {
@@ -336,7 +650,7 @@ export function isWhitelistPurchaseVisible(): boolean {
 }
 
 export function countSaleWhitelistKeys(): number {
-  return listWhitelistVaultKeys().filter((k) => k.active && k.include_in_sale).length;
+  return listWhitelistVaultKeys().filter((k) => k.active && k.include_in_sale && !k.removed_from_subscriptions).length;
 }
 
 export function userHasPaidWhitelistProduct(user: UserRow): boolean {
@@ -471,6 +785,7 @@ function syncWhitelistHappForAssignment(
 
 function keyEligibleForSubscription(key: WhitelistKeyRow, user: UserRow): boolean {
   if (!key.active) return false;
+  if (key.removed_from_subscriptions) return false;
   if (userReceivesWhitelistKey(user.id, key)) return true;
   const settings = getWhitelistVaultSettings();
   if (!settings.purchase.issue_unavailable_keys && key.last_check_status === "unavailable") return false;
@@ -478,10 +793,17 @@ function keyEligibleForSubscription(key: WhitelistKeyRow, user: UserRow): boolea
   return false;
 }
 
+function countActiveWhitelistPurchasers(): number {
+  return listUsers().filter((u) => userHasActiveWhitelistAccess(u)).length;
+}
+
 export function assignedUsersCount(k: WhitelistKeyRow): number {
-  if (k.assignment_mode === "none") return 0;
   if (k.assignment_mode === "all") return listUsers().length;
-  return k.assigned_user_ids.length;
+  if (k.assignment_mode === "selected") return k.assigned_user_ids.length;
+  if (k.assignment_mode === "purchasers") return countActiveWhitelistPurchasers();
+  // Ключи «в продажу» с режимом «никому» всё равно попадают к покупателям БС.
+  if (k.include_in_sale) return countActiveWhitelistPurchasers();
+  return 0;
 }
 
 function usersCountLabel(n: number): string {
@@ -494,17 +816,51 @@ function usersCountLabel(n: number): string {
 }
 
 export function assignmentLabel(k: WhitelistKeyRow): string {
-  return usersCountLabel(assignedUsersCount(k));
+  const n = assignedUsersCount(k);
+  if (k.assignment_mode === "purchasers" || (k.assignment_mode === "none" && k.include_in_sale)) {
+    if (n === 0) return "0 с купленными БС";
+    const mod10 = n % 10;
+    const mod100 = n % 100;
+    if (mod10 === 1 && mod100 !== 11) return `${n} с купленными БС`;
+    return `${n} с купленными БС`;
+  }
+  return usersCountLabel(n);
 }
 
 export function userReceivesWhitelistKey(userId: number, key: WhitelistKeyRow): boolean {
   if (!key.active) return false;
   if (key.assignment_mode === "none") return false;
   if (key.assignment_mode === "all") return true;
+  if (key.assignment_mode === "purchasers") {
+    const user = listUsers().find((u) => u.id === userId);
+    return user != null && userHasActiveWhitelistAccess(user);
+  }
   return key.assigned_user_ids.includes(userId);
 }
 
 export function subscriptionWhitelistUrisForUser(user: UserRow): string[] {
+  return subscriptionWhitelistEntriesForUser(user).map((e) => e.uri);
+}
+
+export type WhitelistSubscriptionEntry = {
+  uri: string;
+  name: string;
+  /** Полный Happ/Xray JSON, если импортировали из JSON. */
+  client_json: Record<string, unknown> | null;
+};
+
+function parseClientJsonObject(raw: string | null | undefined): Record<string, unknown> | null {
+  if (!raw || !String(raw).trim()) return null;
+  try {
+    const parsed = JSON.parse(String(raw));
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+    return parsed as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
+export function subscriptionWhitelistEntriesForUser(user: UserRow): WhitelistSubscriptionEntry[] {
   if (!isWhitelistVaultEnabled()) return [];
   if (!userHasActiveSubscription(user)) return [];
   const hasManualAssignment = listWhitelistVaultKeys().some(
@@ -512,16 +868,39 @@ export function subscriptionWhitelistUrisForUser(user: UserRow): string[] {
   );
   if (user.whitelist_happ_enabled !== 1 && !hasManualAssignment) return [];
   const seen = new Set<string>();
-  const out: string[] = [];
-  for (const k of listWhitelistVaultKeys()) {
+  const out: WhitelistSubscriptionEntry[] = [];
+  // В Happ сверху раньше добавленные ключи (не по убыванию id как в админке).
+  const keysForSub = [...listWhitelistVaultKeys()].sort((a, b) => {
+    const ta = Date.parse(a.created_at) || 0;
+    const tb = Date.parse(b.created_at) || 0;
+    if (ta !== tb) return ta - tb;
+    return a.id - b.id;
+  });
+  for (const k of keysForSub) {
     if (!keyEligibleForSubscription(k, user)) continue;
-    const uri = k.raw_uri.trim();
+    const raw = k.raw_uri.trim();
+    if (!raw) continue;
+    const baseName = k.name || defaultNameFromUri(raw);
+    const displayName = formatSubscriptionNodeName(baseName, user.name);
+    const uri = applyUserRemarkToProxyUri(raw, baseName, user.name);
     const key = uri.toLowerCase();
-    if (!uri || seen.has(key)) continue;
+    if (seen.has(key)) continue;
     seen.add(key);
-    out.push(uri);
+    let client_json = parseClientJsonObject(k.client_json);
+    if (client_json) {
+      client_json = { ...client_json, remarks: displayName };
+    }
+    out.push({
+      uri,
+      name: displayName,
+      client_json,
+    });
   }
   return out;
+}
+
+export function userHasWhitelistClientJsonProfiles(user: UserRow): boolean {
+  return subscriptionWhitelistEntriesForUser(user).some((e) => e.client_json != null);
 }
 
 export function whitelistVaultStats(): {
@@ -538,8 +917,7 @@ export function whitelistVaultStats(): {
   const settings = getWhitelistVaultSettings();
   let assignedSum = 0;
   for (const k of keys) {
-    if (k.assignment_mode === "all") assignedSum += 1;
-    else if (k.assignment_mode === "selected") assignedSum += k.assigned_user_ids.length;
+    assignedSum += assignedUsersCount(k);
   }
   return {
     total: keys.length,
@@ -564,17 +942,21 @@ function rowFromUri(
     source_type?: WhitelistSourceType;
     assignment_mode?: WhitelistAssignmentMode;
     assigned_user_ids?: number[];
+    client_json?: string | null;
   },
 ): WhitelistKeyRow {
   const parsed = parseProxyUri(raw_uri)!;
   const now = new Date().toISOString();
   const mode = opts.assignment_mode ?? "none";
+  const client_json =
+    typeof opts.client_json === "string" && opts.client_json.trim() ? opts.client_json.trim() : null;
   return {
     id,
     name: name.trim().slice(0, 120) || defaultNameFromUri(raw_uri),
     raw_uri,
     masked_uri: maskProxyUri(raw_uri),
     source_type: opts.source_type ?? "manual_vless",
+    client_json,
     active: opts.active !== false,
     include_in_sale: opts.include_in_sale === true,
     assignment_mode: mode,
@@ -585,6 +967,14 @@ function rowFromUri(
     last_error: null,
     unavailable_since: null,
     notify_on_fail: opts.notify_on_fail !== false,
+    group_id: null,
+    remove_on_unavailable: false,
+    checks_before_remove: 3,
+    consecutive_unavailable_checks: 0,
+    removed_from_subscriptions: false,
+    removed_manually: false,
+    removed_at: null,
+    subscription_restore_snapshot: null,
     last_notified_status: null,
     last_notify_at: null,
     parsed_address: parsed.address,
@@ -611,10 +1001,24 @@ export function createWhitelistVaultKey(input: {
   source_type?: WhitelistSourceType;
   assignment_mode?: WhitelistAssignmentMode;
   assigned_user_ids?: number[];
+  client_json?: string | null;
 }): WhitelistKeyRow {
   const uri = input.raw_uri.trim();
-  const existing = listWhitelistVaultKeys().map((k) => k.raw_uri);
-  if (existing.some((x) => x.trim().toLowerCase() === uri.toLowerCase())) {
+  const existingKeys = listWhitelistVaultKeys();
+  const existing = existingKeys.find((k) => k.raw_uri.trim().toLowerCase() === uri.toLowerCase());
+  if (existing) {
+    // Повторный JSON-импорт: обновляем полный профиль, чтобы Happ получил routing/xhttp.extra.
+    if (input.client_json != null || input.source_type === "json_import") {
+      return updateWhitelistVaultKey(existing.id, {
+        name: input.name,
+        client_json: input.client_json ?? existing.client_json,
+        active: input.active,
+        include_in_sale: input.include_in_sale,
+        notify_on_fail: input.notify_on_fail,
+        assignment_mode: input.assignment_mode,
+        assigned_user_ids: input.assigned_user_ids,
+      });
+    }
     throw new Error("Такой ключ уже есть в белых списках");
   }
   if (!parseProxyUri(uri)) throw new Error("Некорректная ссылка (vless:// или hysteria2://)");
@@ -638,6 +1042,9 @@ export function updateWhitelistVaultKey(
     notify_on_fail?: boolean;
     assignment_mode?: WhitelistAssignmentMode;
     assigned_user_ids?: number[];
+    client_json?: string | null;
+    remove_on_unavailable?: boolean;
+    checks_before_remove?: number;
   },
 ): WhitelistKeyRow {
   let updated!: WhitelistKeyRow;
@@ -662,14 +1069,27 @@ export function updateWhitelistVaultKey(
       mode = resolved.mode;
       assignedIds = resolved.userIds;
     }
+    const client_json =
+      patch.client_json !== undefined
+        ? typeof patch.client_json === "string" && patch.client_json.trim()
+          ? patch.client_json.trim()
+          : null
+        : cur.client_json;
     updated = {
       ...cur,
       name: patch.name != null ? patch.name.trim().slice(0, 120) || cur.name : cur.name,
       raw_uri,
       masked_uri: maskProxyUri(raw_uri),
+      client_json,
       active: patch.active !== undefined ? patch.active !== false : cur.active,
       include_in_sale: patch.include_in_sale !== undefined ? patch.include_in_sale === true : cur.include_in_sale,
       notify_on_fail: patch.notify_on_fail !== undefined ? patch.notify_on_fail !== false : cur.notify_on_fail,
+      remove_on_unavailable:
+        patch.remove_on_unavailable !== undefined ? patch.remove_on_unavailable === true : cur.remove_on_unavailable,
+      checks_before_remove:
+        patch.checks_before_remove !== undefined
+          ? Math.min(50, Math.max(1, Math.floor(Number(patch.checks_before_remove) || 3)))
+          : cur.checks_before_remove,
       assignment_mode: mode,
       assigned_user_ids: assignedIds,
       parsed_address: parsed.address,
@@ -686,9 +1106,9 @@ export function updateWhitelistVaultKey(
     };
     v.keys[idx] = updated;
   });
-  const prevAssigned =
-    patch.assignment_mode !== undefined || patch.assigned_user_ids !== undefined ? prevAssignedIds : [];
-  syncWhitelistHappForAssignment(updated!.assignment_mode, updated!.assigned_user_ids, prevAssigned);
+  if (patch.assignment_mode !== undefined || patch.assigned_user_ids !== undefined) {
+    syncWhitelistHappForAssignment(updated!.assignment_mode, updated!.assigned_user_ids, prevAssignedIds);
+  }
   return updated!;
 }
 
@@ -696,6 +1116,7 @@ export function deleteWhitelistVaultKey(id: number): void {
   mutateVault((v) => {
     v.keys = v.keys.filter((k) => k.id !== id);
     v.checks = v.checks.filter((c) => c.key_id !== id);
+    purgeEmptyGroups(v);
   });
 }
 
@@ -709,6 +1130,7 @@ export function bulkDeleteWhitelistVaultKeys(ids: number[]): { deleted: number }
     v.keys = v.keys.filter((k) => !idSet.has(k.id));
     deleted = before - v.keys.length;
     v.checks = v.checks.filter((c) => !idSet.has(c.key_id));
+    purgeEmptyGroups(v);
   });
   return { deleted };
 }
@@ -770,7 +1192,7 @@ export function bulkAssignWhitelistVaultKeys(
   mode: WhitelistAssignmentMode,
   userIds?: number[],
 ): { updated: number; errors: string[] } {
-  if (mode !== "none" && mode !== "all" && mode !== "selected") {
+  if (mode !== "none" && mode !== "all" && mode !== "selected" && mode !== "purchasers") {
     throw new Error("Некорректный режим назначения");
   }
   if (mode === "selected" && (!userIds || userIds.length === 0)) {
@@ -958,10 +1380,15 @@ export function importWhitelistVaultUris(
 }
 
 export function whitelistKeyForApi(k: WhitelistKeyRow, includeRaw = false): Record<string, unknown> {
+  const group = k.group_id != null ? getWhitelistVaultGroup(k.group_id) : null;
+  const autoRemove = getWhitelistAutoRemoveSettings(k, group);
   const base: Record<string, unknown> = {
     ...k,
     assigned_users_count: assignedUsersCount(k),
     assignment_label: assignmentLabel(k),
+    group_name: group?.name ?? null,
+    effective_remove_on_unavailable: autoRemove.remove_on_unavailable,
+    effective_checks_before_remove: autoRemove.checks_before_remove,
   };
   if (!includeRaw) {
     delete base.raw_uri;
@@ -1016,6 +1443,89 @@ export function createWhitelistPurchase(input: {
     if (v.purchases.length > 2000) v.purchases.length = 2000;
   });
   return created!;
+}
+
+/**
+ * Сбрасывает все оплаченные/ожидающие покупки БС и снимает доступы у пользователей,
+ * чтобы можно было купить белые списки заново (и узел пропал из подписки сразу).
+ */
+export function resetAllWhitelistPurchases(): {
+  reset_purchases: number;
+  reset_users: number;
+  cleared_assignments: number;
+  users: Array<{ id: number; name: string; purchase_ids: string[] }>;
+} {
+  const now = new Date().toISOString();
+  const purchaseIdsByUser = new Map<number, string[]>();
+  let reset_purchases = 0;
+  let cleared_assignments = 0;
+
+  mutateVault((v) => {
+    for (const p of v.purchases) {
+      if (p.status === "paid" || p.status === "pending") {
+        p.status = "refunded";
+        p.updated_at = now;
+        p.activation_error = p.activation_error ?? "admin_reset";
+        reset_purchases++;
+      }
+      const list = purchaseIdsByUser.get(p.user_id) ?? [];
+      if (!list.includes(p.id)) list.push(p.id);
+      purchaseIdsByUser.set(p.user_id, list);
+    }
+
+    // Ключи «в продажу» больше не выдаём через ручное назначение после сброса —
+    // иначе БС остаётся в подписке без оплаты.
+    for (const k of v.keys) {
+      if (!k.include_in_sale) continue;
+      if (k.assignment_mode === "all") {
+        k.assignment_mode = "none";
+        k.assigned_user_ids = [];
+        k.updated_at = now;
+        cleared_assignments++;
+        continue;
+      }
+      if (k.assignment_mode === "selected" && k.assigned_user_ids.length > 0) {
+        cleared_assignments += k.assigned_user_ids.length;
+        k.assigned_user_ids = [];
+        k.assignment_mode = "none";
+        k.updated_at = now;
+      }
+    }
+  });
+
+  const usersOut: Array<{ id: number; name: string; purchase_ids: string[] }> = [];
+  let reset_users = 0;
+  const seenUser = new Set<number>();
+
+  for (const u of listUsers()) {
+    const fromPurchases = purchaseIdsByUser.get(u.id) ?? [];
+    const hasFlags =
+      u.whitelist_happ_enabled === 1 ||
+      u.whitelist_active_until > 0 ||
+      Boolean(String(u.whitelist_purchase_id ?? "").trim());
+    if (fromPurchases.length === 0 && !hasFlags) continue;
+    if (seenUser.has(u.id)) continue;
+    seenUser.add(u.id);
+
+    updateUserRow(u.id, {
+      whitelist_happ_enabled: 0,
+      whitelist_active_until: 0,
+      whitelist_purchase_id: "",
+    });
+    reset_users++;
+    usersOut.push({
+      id: u.id,
+      name: u.name,
+      purchase_ids: fromPurchases,
+    });
+  }
+
+  return {
+    reset_purchases,
+    reset_users,
+    cleared_assignments,
+    users: usersOut,
+  };
 }
 
 export function patchWhitelistPurchase(

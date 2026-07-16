@@ -4,7 +4,7 @@ import type { MySubProfileDto } from "../api";
 
 export type MySubTheme = "dark" | "light";
 export type MySubTab = MySubNavTabId;
-export type PayProduct = "subscription" | "topup" | "white_lists" | "device_slot";
+export type PayProduct = "subscription" | "topup" | "white_lists" | "device_slot" | "combo";
 
 export type MySubWebAppController = {
   data: MySubProfileDto;
@@ -35,6 +35,10 @@ export type MySubWebAppController = {
 
   payProduct: PayProduct;
   switchPayProduct: (next: PayProduct) => void;
+  payComboOfferId: string;
+  setPayComboOfferId: (id: string) => void;
+  selectedComboOffer: import("../api").ComboOfferPublicDto | null;
+  selectComboOffer: (id: string) => void;
   payPlanId: number;
   setPayPlanId: (id: number) => void;
   payIsTest: boolean;

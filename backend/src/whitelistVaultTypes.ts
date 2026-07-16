@@ -1,7 +1,7 @@
 import type { VlessCheckStatus, VlessKeyCheckRow } from "./configVaultTypes.js";
 
 export type WhitelistSourceType = "manual_vless" | "json_import";
-export type WhitelistAssignmentMode = "none" | "all" | "selected";
+export type WhitelistAssignmentMode = "none" | "all" | "selected" | "purchasers";
 
 export type WhitelistSaleDuration = "subscription_end" | "30_days" | "forever";
 
@@ -41,12 +41,34 @@ export type WhiteListPurchaseRow = {
   updated_at: string;
 };
 
+export type WhitelistSubscriptionSnapshot = {
+  include_in_sale: boolean;
+  assignment_mode: WhitelistAssignmentMode;
+  assigned_user_ids: number[];
+};
+
+export type WhitelistGroupRow = {
+  id: number;
+  name: string;
+  /** Убирать ключи группы из подписок при недоступности (общая настройка). */
+  remove_on_unavailable: boolean;
+  /** Сколько подряд неудачных проверок до снятия с подписок. */
+  checks_before_remove: number;
+  created_at: string;
+  updated_at: string;
+};
+
 export type WhitelistKeyRow = {
   id: number;
   name: string;
   raw_uri: string;
   masked_uri: string;
   source_type: WhitelistSourceType;
+  /**
+   * Полный клиентский JSON (Happ/Xray profile) — для подписки Happ отдаём его as-is,
+   * иначе routing/xhttp.extra теряются в vless://.
+   */
+  client_json: string | null;
   active: boolean;
   /** Включать ключ в продажу (покупателям). */
   include_in_sale: boolean;
@@ -58,6 +80,21 @@ export type WhitelistKeyRow = {
   last_error: string | null;
   unavailable_since: string | null;
   notify_on_fail: boolean;
+  /** Группа конфигов (null — отдельный ключ). */
+  group_id: number | null;
+  /** Для ключей вне группы: убирать из подписок при недоступности. */
+  remove_on_unavailable: boolean;
+  /** Для ключей вне группы: число проверок до снятия. */
+  checks_before_remove: number;
+  /** Подряд неудачных проверок (счётчик). */
+  consecutive_unavailable_checks: number;
+  /** Автоматически снят с подписок из-за недоступности. */
+  removed_from_subscriptions: boolean;
+  /** Снят администратором вручную — не возвращать автоматически при доступности. */
+  removed_manually: boolean;
+  removed_at: string | null;
+  /** Снимок назначения до авто-снятия (для восстановления). */
+  subscription_restore_snapshot: WhitelistSubscriptionSnapshot | null;
   last_notified_status: VlessCheckStatus | null;
   last_notify_at: string | null;
   parsed_address: string;

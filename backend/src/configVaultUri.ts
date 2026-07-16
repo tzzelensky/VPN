@@ -7,6 +7,7 @@ import {
   isValidWhitelistVaultUri,
   labelFromProxyUri,
 } from "./extraVless.js";
+import { formatSubscriptionNodeName } from "./subscriptionNodeName.js";
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -36,6 +37,14 @@ export type ParsedVlessParams = {
   publicKey: string;
   shortId: string;
   remark: string;
+  encryption: string;
+  alpn: string;
+  path: string;
+  host: string;
+  mode: string;
+  allowInsecure: boolean;
+  /** Сырой JSON из query `extra` (для xhttp). */
+  extra: string;
 };
 
 export function parseVlessUri(raw: string): ParsedVlessParams | null {
@@ -56,6 +65,17 @@ export function parseVlessUri(raw: string): ParsedVlessParams | null {
     const fingerprint = (q.get("fp") || "").trim();
     const publicKey = (q.get("pbk") || "").trim();
     const shortId = (q.get("sid") || "").trim();
+    const encryption = (q.get("encryption") || "none").trim() || "none";
+    const alpn = (q.get("alpn") || "").trim();
+    const path = (q.get("path") || "").trim();
+    const host = (q.get("host") || "").trim();
+    const mode = (q.get("mode") || "").trim();
+    const allowInsecure =
+      q.get("allowInsecure") === "1" ||
+      q.get("allowInsecure") === "true" ||
+      q.get("insecure") === "1" ||
+      q.get("insecure") === "true";
+    const extra = (q.get("extra") || "").trim();
     let remark = "";
     if (u.hash.length > 1) {
       try {
@@ -76,6 +96,13 @@ export function parseVlessUri(raw: string): ParsedVlessParams | null {
       publicKey,
       shortId,
       remark,
+      encryption,
+      alpn,
+      path,
+      host,
+      mode,
+      allowInsecure,
+      extra,
     };
   } catch {
     return null;
@@ -143,10 +170,10 @@ export function validateVlessKeyInput(name: string, rawUri: string, existingUris
   return validateConfigVaultKeyInput(name, rawUri, existingUris);
 }
 
-/** Меняет фрагмент #… в vless:// или hysteria2:// (название в клиенте). */
+/** Меняет фрагмент #… в vless:// / trojan:// / hysteria2:// (название в клиенте). */
 export function setProxyUriRemark(rawUri: string, remark: string): string | null {
   const uri = rawUri.trim();
-  if (!isValidWhitelistVaultUri(uri)) return null;
+  if (!isValidConfigVaultUri(uri)) return null;
   const name = remark.trim().slice(0, 120);
   if (!name) return null;
   const hash = `#${encodeURIComponent(name)}`;
@@ -155,10 +182,36 @@ export function setProxyUriRemark(rawUri: string, remark: string): string | null
   return parseProxyUri(next) ? next : null;
 }
 
+/** Подставляет в URI имя узла с суффиксом пользователя (как у серверов). */
+export function applyUserRemarkToProxyUri(
+  rawUri: string,
+  baseName: string,
+  userName?: string | null,
+): string {
+  const base = baseName.trim() || defaultNameFromUri(rawUri);
+  const remark = formatSubscriptionNodeName(base, userName);
+  return setProxyUriRemark(rawUri, remark) ?? rawUri;
+}
+
 export function defaultNameFromUri(uri: string, fallback = "VLESS"): string {
   const parsed = parseProxyUri(uri);
   if (parsed?.remark) return parsed.remark.slice(0, 120);
   return labelFromProxyUri(uri).slice(0, 120) || fallback;
+}
+
+function emptyLinkTransportFields(): Pick<
+  ParsedVlessParams,
+  "encryption" | "alpn" | "path" | "host" | "mode" | "allowInsecure" | "extra"
+> {
+  return {
+    encryption: "none",
+    alpn: "",
+    path: "",
+    host: "",
+    mode: "",
+    allowInsecure: false,
+    extra: "",
+  };
 }
 
 export function parseTrojanUri(raw: string): ParsedVlessParams | null {
@@ -195,6 +248,10 @@ export function parseTrojanUri(raw: string): ParsedVlessParams | null {
       publicKey: "",
       shortId: "",
       remark,
+      ...emptyLinkTransportFields(),
+      path: (q.get("path") || "").trim(),
+      host: (q.get("host") || "").trim(),
+      alpn: (q.get("alpn") || "").trim(),
     };
   } catch {
     return null;
@@ -237,6 +294,7 @@ export function parseProxyUri(raw: string): ParsedVlessParams | null {
       publicKey: "",
       shortId: "",
       remark,
+      ...emptyLinkTransportFields(),
     };
   } catch {
     return null;
@@ -302,6 +360,10 @@ function buildVlessUriFromOutbound(
     const tls = asRecord(stream?.tlsSettings);
     const sni = String(tls?.serverName ?? "").trim();
     if (sni) q.set("sni", sni);
+    const fp = String(tls?.fingerprint ?? "").trim();
+    if (fp) q.set("fp", fp);
+    const alpnArr = Array.isArray(tls?.alpn) ? tls!.alpn.map((x) => String(x).trim()).filter(Boolean) : [];
+    if (alpnArr.length) q.set("alpn", alpnArr.join(","));
   }
 
   if (network === "grpc") {
@@ -322,6 +384,24 @@ function buildVlessUriFromOutbound(
     const pathArr = request && Array.isArray(request.path) ? request.path : [];
     const path = String(pathArr[0] ?? "").trim();
     if (path) q.set("path", path);
+  } else if (network === "xhttp" || network === "splithttp" || network === "httpupgrade") {
+    const xs =
+      asRecord(stream?.xhttpSettings) ??
+      asRecord(stream?.splithttpSettings) ??
+      asRecord(stream?.httpupgradeSettings);
+    if (xs) {
+      const path = String(xs.path ?? "").trim();
+      if (path) q.set("path", path);
+      const host = String(xs.host ?? "").trim();
+      if (host) q.set("host", host);
+      const mode = String(xs.mode ?? "").trim();
+      if (mode) q.set("mode", mode);
+      const extra = xs.extra;
+      if (extra != null && (typeof extra === "object" || typeof extra === "string")) {
+        const extraStr = typeof extra === "string" ? extra.trim() : JSON.stringify(extra);
+        if (extraStr && extraStr !== "{}" && extraStr !== "null") q.set("extra", extraStr);
+      }
+    }
   }
 
   const tag = String(outbound.tag ?? "").trim();

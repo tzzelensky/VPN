@@ -3,8 +3,6 @@ dist/
 build/
 .env
 backend/.env
-backend/firebase-sa.json
-**/firebase-sa.json
 *.db
 backend/data.json
 backend/panel_settings.json

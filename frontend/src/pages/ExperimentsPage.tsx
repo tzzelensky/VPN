@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import QRCode from "qrcode";
 import DashboardLayout from "../components/DashboardLayout";
+import PageLoadingState from "../components/PageLoadingState";
 import {
   activateMobilePreset,
   checkExperimentPort,
@@ -54,6 +55,7 @@ export default function ExperimentsPage({ onLogout }: { onLogout: () => void }) 
   const [servers, setServers] = useState<ServerDto[]>([]);
   const [presets, setPresets] = useState<ExperimentPresetDto[]>([]);
   const [rows, setRows] = useState<ExperimentDto[]>([]);
+  const [loading, setLoading] = useState(true);
   const [msg, setMsg] = useState<{ type: "ok" | "err"; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const [selectedId, setSelectedId] = useState<number | null>(null);
@@ -106,6 +108,7 @@ export default function ExperimentsPage({ onLogout }: { onLogout: () => void }) 
     setRows(experiments);
     setPresets(presetRes.presets);
     setServers(s);
+    setLoading(false);
     if (mInfo) setMobileInfo(mInfo);
     if (!serverId && s.length) setServerId(s.find((x) => x.experimental_only)?.id ?? s.find((x) => x.vless_deployed)?.id ?? s[0]!.id);
   }, [serverId]);
@@ -645,7 +648,13 @@ export default function ExperimentsPage({ onLogout }: { onLogout: () => void }) 
               </tr>
             </thead>
             <tbody>
-              {rows.length === 0 ? (
+              {loading ? (
+                <tr>
+                  <td colSpan={10}>
+                    <PageLoadingState className="page-loading--inline" />
+                  </td>
+                </tr>
+              ) : rows.length === 0 ? (
                 <tr>
                   <td colSpan={10} className="muted">
                     Нет экспериментов

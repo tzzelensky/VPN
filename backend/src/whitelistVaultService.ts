@@ -1,10 +1,12 @@
 import {
   applyWhitelistVaultCheckResult,
   countSaleWhitelistKeys,
+  getWhitelistAutoRemoveSettings,
   getWhitelistVaultKey,
   getWhitelistVaultSettings,
   isWhitelistPurchaseVisible,
   listWhitelistVaultKeys,
+  processWhitelistAutoSubscriptionAfterCheck,
   saveWhitelistVaultSettings,
   setWhitelistVaultKeyChecking,
   updateWhitelistVaultNotifyState,
@@ -78,10 +80,12 @@ export async function runWhitelistVaultCheckForKey(
   const settingsAll = getWhitelistVaultSettings();
   let notification_sent = false;
   const prev_status = keyBefore.last_check_status;
+  const autoRemoveSettings = getWhitelistAutoRemoveSettings(keyBefore);
 
   const notifyUnavailable =
     settingsAll.notify_on_unavailable &&
     keyBefore.notify_on_fail &&
+    !autoRemoveSettings.remove_on_unavailable &&
     probe.status === "unavailable" &&
     prev_status !== "unavailable" &&
     notifyCooldownOk(keyBefore.last_notify_at, settingsAll.notify_cooldown_minutes);
@@ -95,7 +99,7 @@ export async function runWhitelistVaultCheckForKey(
     });
   }
 
-  const { key, check } = applyWhitelistVaultCheckResult(keyId, {
+  const { check } = applyWhitelistVaultCheckResult(keyId, {
     status: probe.status,
     attempts_total: probe.attempts_total,
     attempts_success: probe.attempts_success,
@@ -108,9 +112,20 @@ export async function runWhitelistVaultCheckForKey(
     notification_sent,
   });
 
+  const autoSub = processWhitelistAutoSubscriptionAfterCheck(keyId, probe.status);
+  let resultKey = autoSub.key;
+  if (autoSub.action === "removed") {
+    const body =
+      `⚠️ <b>Конфиг — ${escHtml(resultKey.name)} стал недоступен после ${autoSub.checks_count} проверок, конфиг был убран из подписок</b>`;
+    await notifyAdminsHtml(body);
+  } else if (autoSub.action === "restored") {
+    const body = `✅ <b>Конфиг — ${escHtml(resultKey.name)} снова доступен и возвращён в подписки</b>`;
+    await notifyAdminsHtml(body);
+  }
+
   const maskSecrets = getPanelSettings().security.maskSecrets;
   return {
-    key: whitelistKeyForApi(key, !maskSecrets),
+    key: whitelistKeyForApi(resultKey, !maskSecrets),
     check,
   };
 }

@@ -10,6 +10,8 @@ import {
   type SubscriptionShopConfig,
 } from "../db.js";
 import { requireAuth } from "../middleware/requireAuth.js";
+import { listPaymentSessionReport, payerDisplayName, clearPaymentSessionsReport } from "../paymentSessionLogService.js";
+import type { PaymentSessionLogRow } from "../paymentSessionLogStore.js";
 import { subscriptionPublicName } from "../telegram/format.js";
 import { getTestPlanRuntimeMeta } from "../testSubscription.js";
 import { refreshTestSubscriptionSegment } from "../db.js";
@@ -85,6 +87,59 @@ router.get("/activity", (_req, res) => {
       created_at: r.created_at,
     }));
   res.json({ subscriptions: currentSubscriptions.length > 0 ? currentSubscriptions : subscriptions, topups });
+});
+
+function paymentSessionKindLabel(kind: PaymentSessionLogRow["kind"]): string {
+  if (kind === "subscription") return "Подписка";
+  if (kind === "topup") return "Докупка ГБ";
+  if (kind === "test") return "Тестовая";
+  if (kind === "white_lists") return "Белые списки";
+  if (kind === "combo") return "Комбо";
+  return "Доп. устройство";
+}
+
+function paymentSessionToDto(row: PaymentSessionLogRow) {
+  return {
+    id: row.id,
+    status: row.status,
+    kind: row.kind,
+    kind_label: paymentSessionKindLabel(row.kind),
+    channel: row.channel,
+    payer_name: payerDisplayName(row),
+    tg_chat_id: row.tg_chat_id,
+    tg_user_id: row.tg_user_id,
+    tg_username: row.tg_username ?? "",
+    target_user_id: row.target_user_id ?? null,
+    target_user_name: row.target_user_name ?? "",
+    new_subscription_name: row.new_subscription_name ?? "",
+    plan_id: row.plan_id,
+    plan_title: row.plan_title,
+    tariff_line: row.tariff_line,
+    amount_rub: row.amount_rub,
+    amount_original_rub: row.amount_original_rub ?? null,
+    discount_label: row.discount_label ?? "",
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+    completed_at: row.completed_at ?? null,
+    recent_messages: row.messages.slice(-5),
+  };
+}
+
+router.get("/payment-sessions", (req, res) => {
+  const from = String(req.query.from ?? "").trim();
+  const to = String(req.query.to ?? "").trim();
+  const status = String(req.query.status ?? "all").trim();
+  const rows = listPaymentSessionReport({ from, to, status, limit: 500 });
+  res.json({ sessions: rows.map(paymentSessionToDto) });
+});
+
+router.post("/payment-sessions/clear", (req, res) => {
+  const body = (req.body ?? {}) as { from?: unknown; to?: unknown; status?: unknown };
+  const from = String(body.from ?? req.query.from ?? "").trim();
+  const to = String(body.to ?? req.query.to ?? "").trim();
+  const status = String(body.status ?? req.query.status ?? "all").trim();
+  const result = clearPaymentSessionsReport({ from, to, status });
+  res.json(result);
 });
 
 router.put("/", (req, res) => {

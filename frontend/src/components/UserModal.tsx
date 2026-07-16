@@ -16,7 +16,7 @@ import {
   userExpiredNotifyEligible,
   userExpiryNotifyEligible,
 } from "../expiryNotify";
-import type { ExtraVlessLinkDto } from "../api";
+import type { ConfigVaultLinkDto, ExtraVlessLinkDto } from "../api";
 import AddVlessKeyModal from "./AddVlessKeyModal";
 import DualListPicker from "./DualListPicker";
 import ExpiryDateTimePicker from "./ExpiryDateTimePicker";
@@ -115,6 +115,7 @@ export default function UserModal({
   const [expiryNotifyBusy, setExpiryNotifyBusy] = useState(false);
   const [expiryNotifyFlash, setExpiryNotifyFlash] = useState<{ type: "ok" | "err"; text: string } | null>(null);
   const [extraVlessLinks, setExtraVlessLinks] = useState<ExtraVlessLinkDto[]>([]);
+  const [configVaultLinks, setConfigVaultLinks] = useState<ConfigVaultLinkDto[]>([]);
   const [addVlessOpen, setAddVlessOpen] = useState(false);
   const [editingVlessLink, setEditingVlessLink] = useState<ExtraVlessLinkDto | null>(null);
   const planTouchedRef = useRef(false);
@@ -164,6 +165,7 @@ export default function UserModal({
       setSpeedLimitMbps("");
       setSelectedPlanId(0);
       setExtraVlessLinks([]);
+      setConfigVaultLinks([]);
       return;
     }
     if (!user) return;
@@ -184,6 +186,7 @@ export default function UserModal({
       Number(user.speed_limit_mbps) > 0 ? String(Math.floor(Number(user.speed_limit_mbps))) : "",
     );
     setExtraVlessLinks(user.extra_vless_links?.length ? [...user.extra_vless_links] : []);
+    setConfigVaultLinks(user.config_vault_links?.length ? [...user.config_vault_links] : []);
   }, [open, mode, userId, user, deployedServers]);
 
   useEffect(() => {
@@ -620,15 +623,31 @@ export default function UserModal({
               </button>
             </div>
             <p className="user-modal-hint" style={{ marginTop: 0 }}>
-              Вручную добавленные ссылки попадают в подписку клиента вместе с узлами панели. На сервера Xray не
-              деплоятся.
+              Вручную добавленные ссылки и ключи из конфиг-хранилища попадают в подписку клиента вместе с узлами
+              панели. На сервера Xray не деплоятся.
             </p>
-            {extraVlessLinks.length === 0 ? (
+            {extraVlessLinks.length === 0 && configVaultLinks.length === 0 ? (
               <p className="muted" style={{ margin: 0, fontSize: "0.88rem" }}>
                 Нет дополнительных ключей.
               </p>
             ) : (
               <ul className="user-extra-vless-list">
+                {configVaultLinks.map((link) => {
+                  const uriPreview = link.masked_uri || link.uri;
+                  return (
+                    <li key={`vault-${link.vault_key_id}`} className="user-extra-vless-item user-extra-vless-item--vault">
+                      <div className="user-extra-vless-meta">
+                        <strong>
+                          {link.name}
+                          <span className="user-extra-vless-badge">Конфиг-хранилище</span>
+                        </strong>
+                        <span className="mono user-extra-vless-uri" title={link.uri}>
+                          {uriPreview.length > 72 ? `${uriPreview.slice(0, 72)}…` : uriPreview}
+                        </span>
+                      </div>
+                    </li>
+                  );
+                })}
                 {extraVlessLinks.map((link) => (
                   <li key={link.id} className="user-extra-vless-item">
                     <div className="user-extra-vless-meta">

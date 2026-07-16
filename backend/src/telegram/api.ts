@@ -235,16 +235,75 @@ export async function sendTelegramPhoto(
   chatId: number,
   photoFileId: string,
   caption: string,
-  opts?: { reply_markup?: unknown; parse_mode?: "HTML" },
+  opts?: { reply_markup?: unknown; parse_mode?: "HTML"; reply_to_message_id?: number },
 ): Promise<void> {
   const r = await tgCall<unknown>("sendPhoto", {
     chat_id: chatId,
     photo: photoFileId,
     caption,
     parse_mode: opts?.parse_mode ?? "HTML",
+    ...(opts?.reply_to_message_id ? { reply_to_message_id: opts.reply_to_message_id } : {}),
     ...(opts?.reply_markup ? { reply_markup: opts.reply_markup } : {}),
   });
   if (!r.ok) throw new Error(r.description ?? "sendPhoto failed");
+}
+
+export async function editMessageText(
+  chatId: number,
+  messageId: number,
+  text: string,
+  opts?: { parse_mode?: "HTML"; reply_markup?: unknown },
+): Promise<void> {
+  const r = await tgCall<unknown>("editMessageText", {
+    chat_id: chatId,
+    message_id: messageId,
+    text,
+    parse_mode: opts?.parse_mode ?? "HTML",
+    disable_web_page_preview: true,
+    ...(opts?.reply_markup !== undefined ? { reply_markup: opts.reply_markup } : {}),
+  });
+  if (!r.ok) {
+    console.error("[telegram] editMessageText failed:", r.description);
+  }
+}
+
+export async function sendTelegramDocument(
+  chatId: number,
+  document: string,
+  opts?: { caption?: string; parse_mode?: "HTML"; reply_to_message_id?: number },
+): Promise<void> {
+  const r = await tgCall<unknown>("sendDocument", {
+    chat_id: chatId,
+    document,
+    ...(opts?.caption ? { caption: opts.caption, parse_mode: opts?.parse_mode ?? "HTML" } : {}),
+    ...(opts?.reply_to_message_id ? { reply_to_message_id: opts.reply_to_message_id } : {}),
+  });
+  if (!r.ok) throw new Error(r.description ?? "sendDocument failed");
+}
+
+export async function sendTelegramDocumentBinary(
+  chatId: number,
+  bytes: Uint8Array,
+  opts?: {
+    caption?: string;
+    mimeType?: string;
+    filename?: string;
+    parse_mode?: "HTML";
+    reply_to_message_id?: number;
+  },
+): Promise<void> {
+  const form = new FormData();
+  form.set("chat_id", String(chatId));
+  if (opts?.caption) {
+    form.set("caption", opts.caption);
+    form.set("parse_mode", opts?.parse_mode ?? "HTML");
+  }
+  if (opts?.reply_to_message_id) form.set("reply_to_message_id", String(opts.reply_to_message_id));
+  const mime = (opts?.mimeType ?? "image/png").trim() || "image/png";
+  const filename = (opts?.filename ?? "check.png").trim() || "check.png";
+  form.set("document", new Blob([Buffer.from(bytes)], { type: mime }), filename);
+  const r = await tgMultipartCall<unknown>("sendDocument", form);
+  if (!r.ok) throw new Error(r.description ?? "sendDocument failed");
 }
 
 export async function editMessageCaption(
@@ -268,13 +327,21 @@ export async function editMessageCaption(
 export async function sendTelegramPhotoBinary(
   chatId: number,
   bytes: Uint8Array,
-  opts?: { caption?: string; mimeType?: string; filename?: string; parse_mode?: "HTML"; reply_markup?: unknown },
+  opts?: {
+    caption?: string;
+    mimeType?: string;
+    filename?: string;
+    parse_mode?: "HTML";
+    reply_markup?: unknown;
+    reply_to_message_id?: number;
+  },
 ): Promise<void> {
   const form = new FormData();
   form.set("chat_id", String(chatId));
   if (opts?.caption) form.set("caption", opts.caption);
   form.set("parse_mode", opts?.parse_mode ?? "HTML");
   if (opts?.reply_markup) form.set("reply_markup", JSON.stringify(opts.reply_markup));
+  if (opts?.reply_to_message_id) form.set("reply_to_message_id", String(opts.reply_to_message_id));
   const mime = (opts?.mimeType ?? "image/jpeg").trim() || "image/jpeg";
   const filename = (opts?.filename ?? "photo.jpg").trim() || "photo.jpg";
   form.set("photo", new Blob([Buffer.from(bytes)], { type: mime }), filename);

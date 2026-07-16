@@ -138,7 +138,40 @@ export async function sendExpiredSubscriptionReminder(u: UserRow, opts?: { manua
   updateUserRow(u.id, { expiry_notify_state: "expired", expiry_warn_sent_day: "" });
 }
 
-export async function runAutoExpiryNotificationsOnce(opts?: { force?: boolean }): Promise<void> {
+/** Не слать «истекла» подпискам, которые уже были просрочены при старте процесса (без ретро-рассылки). */
+let expiryAutoNotifyBootAt = Date.now();
+
+export function expiryAutoNotifyBootTimestamp(): number {
+  return expiryAutoNotifyBootAt;
+}
+
+function shouldAutoNotifyExpired(u: UserRow, now = Date.now()): boolean {
+  if (u.expiry_notify_state === "expired") return false;
+  if (!u.expiry_time || u.expiry_time <= 0) return false;
+  if (u.expiry_time > now) return false;
+  // Подписка истекла до запуска API — не досылаем (в т.ч. пропущенные ранее).
+  if (u.expiry_time <= expiryAutoNotifyBootAt) return false;
+  return Boolean(targetChatId(u));
+}
+
+export async function runAutoExpiredNotificationsOnce(): Promise<void> {
+  const cfg = getAutoCommunicationsConfig().expiry;
+  if (!cfg.enabled || !getTelegramBotToken()) return;
+
+  const now = Date.now();
+  for (const u of listUsers()) {
+    if (u.enable === 0) continue;
+    if (cfg.skip_test_subscriptions && u.is_test_subscription === 1) continue;
+    if (!shouldAutoNotifyExpired(u, now)) continue;
+    try {
+      await sendExpiredSubscriptionReminder(u, { manual: false });
+    } catch (e) {
+      console.error("[telegram] expired notify:", u.id, e instanceof Error ? e.message : e);
+    }
+  }
+}
+
+export async function runAutoExpiryWarnNotificationsOnce(opts?: { force?: boolean }): Promise<void> {
   const cfg = getAutoCommunicationsConfig().expiry;
   if (!cfg.enabled || !getTelegramBotToken()) return;
   if (!opts?.force && !isExpiryAutoNotifyWindow()) return;
@@ -152,10 +185,11 @@ export async function runAutoExpiryNotificationsOnce(opts?: { force?: boolean })
     if (cfg.skip_test_subscriptions && u.is_test_subscription === 1) continue;
     if (!u.expiry_time || u.expiry_time <= 0) continue;
     if (!targetChatId(u)) continue;
+    if (u.expiry_time <= now) continue;
 
     const daysLeft = calendarDaysUntilExpiry(u.expiry_time, now, tz);
 
-    if (u.expiry_time > now && daysLeft > cfg.days_before) {
+    if (daysLeft > cfg.days_before) {
       if (u.expiry_warn_sent_day || u.expiry_notify_state || u.expiry_warn_error_day) {
         updateUserRow(u.id, {
           expiry_warn_sent_day: "",
@@ -163,16 +197,6 @@ export async function runAutoExpiryNotificationsOnce(opts?: { force?: boolean })
           expiry_warn_error_day: "",
           expiry_notify_state: "",
         });
-      }
-      continue;
-    }
-
-    if (u.expiry_time <= now) {
-      if (u.expiry_notify_state === "expired") continue;
-      try {
-        await sendExpiredSubscriptionReminder(u, { manual: false });
-      } catch (e) {
-        console.error("[telegram] expired notify:", u.id, e instanceof Error ? e.message : e);
       }
       continue;
     }
@@ -191,31 +215,52 @@ export async function runAutoExpiryNotificationsOnce(opts?: { force?: boolean })
   }
 }
 
+export async function runAutoExpiryNotificationsOnce(opts?: { force?: boolean }): Promise<void> {
+  await runAutoExpiredNotificationsOnce();
+  await runAutoExpiryWarnNotificationsOnce(opts);
+}
+
 export function startAutoExpiryNotifyLoop(): void {
+  expiryAutoNotifyBootAt = Date.now();
   const CHECK_MS = 60_000;
-  let lastTickKey = "";
-  let busy = false;
-  const tick = async () => {
-    if (busy) return;
+  let lastWarnTickKey = "";
+  let busyWarn = false;
+  let busyExpired = false;
+
+  const tickExpired = async () => {
+    if (busyExpired) return;
+    busyExpired = true;
+    try {
+      await runAutoExpiredNotificationsOnce();
+    } finally {
+      busyExpired = false;
+    }
+  };
+
+  const tickWarn = async () => {
+    if (busyWarn) return;
     if (!isExpiryAutoNotifyWindow()) return;
     const cfg = getAutoCommunicationsConfig().expiry;
     const tz = projectTimezone();
     const key = `${localYmdInTz(Date.now(), tz)}-${cfg.notify_hour}:${cfg.notify_minute}`;
-    if (key === lastTickKey) return;
-    lastTickKey = key;
-    busy = true;
+    if (key === lastWarnTickKey) return;
+    lastWarnTickKey = key;
+    busyWarn = true;
     try {
-      await runAutoExpiryNotificationsOnce();
+      await runAutoExpiryWarnNotificationsOnce();
     } finally {
-      busy = false;
+      busyWarn = false;
     }
   };
+
+  const tick = () => {
+    void tickExpired();
+    void tickWarn();
+  };
   void tick();
-  setInterval(() => {
-    void tick();
-  }, CHECK_MS);
+  setInterval(tick, CHECK_MS);
   const cfg = getAutoCommunicationsConfig().expiry;
   console.log(
-    `[telegram] expiry notify loop started (daily ${String(cfg.notify_hour).padStart(2, "0")}:${String(cfg.notify_minute).padStart(2, "0")} ${projectTimezone()})`,
+    `[telegram] expiry notify loop started (warn daily ${String(cfg.notify_hour).padStart(2, "0")}:${String(cfg.notify_minute).padStart(2, "0")} ${projectTimezone()}, expired check each minute)`,
   );
 }

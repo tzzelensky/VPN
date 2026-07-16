@@ -4,6 +4,8 @@ import DashboardLayout from "../components/DashboardLayout";
 import ClientPickerModal from "../components/ClientPickerModal";
 import SurveysPanel from "../components/SurveysPanel";
 import AutoBroadcastsPanel from "../components/AutoBroadcastsPanel";
+import TriggeredMailingsPanel from "../components/TriggeredMailingsPanel";
+import PanelTabs from "../components/PanelTabs";
 import { usePanelSettings } from "../panelSettingsContext";
 import {
   createCommunicationSegment,
@@ -118,7 +120,7 @@ async function prepareCompressedPhoto(file: File): Promise<{ base64: string; mim
   };
 }
 
-type CommsTab = "broadcasts" | "surveys" | "history" | "auto";
+type CommsTab = "broadcasts" | "surveys" | "history" | "auto" | "triggers";
 
 export default function CommunicationsPage({ onLogout }: { onLogout: () => void }) {
   const { settings: panelSettings } = usePanelSettings();
@@ -466,47 +468,27 @@ export default function CommunicationsPage({ onLogout }: { onLogout: () => void 
         <p className="sub users-hero-sub">
           Рассылки и опросы в Telegram: глобально, выборочно или по сегменту.
         </p>
-        <div className="comms-tabs" role="tablist">
-          <button
-            type="button"
-            role="tab"
-            aria-selected={commsTab === "broadcasts"}
-            className={commsTab === "broadcasts" ? "primary" : "ghost"}
-            onClick={() => setCommsTab("broadcasts")}
-          >
-            Рассылки
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={commsTab === "surveys"}
-            className={commsTab === "surveys" ? "primary" : "ghost"}
-            onClick={() => setCommsTab("surveys")}
-          >
-            Опросы
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={commsTab === "auto"}
-            className={commsTab === "auto" ? "primary" : "ghost"}
-            onClick={() => setCommsTab("auto")}
-          >
-            Авто-рассылки
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={commsTab === "history"}
-            className={commsTab === "history" ? "primary" : "ghost"}
-            onClick={() => setCommsTab("history")}
-          >
-            История отправок
-          </button>
-        </div>
+        <PanelTabs
+          tabs={[
+            { id: "broadcasts", label: "Рассылки" },
+            { id: "triggers", label: "Триггерные рассылки" },
+            { id: "surveys", label: "Опросы" },
+            { id: "auto", label: "Авто-рассылки" },
+            { id: "history", label: "История отправок" },
+          ]}
+          value={commsTab}
+          onChange={setCommsTab}
+          className="comms-main-tabs-bar"
+        />
         {commsTab === "broadcasts" && msg ? <div className={`flash ${msg.type === "ok" ? "ok" : "err"}`}>{msg.text}</div> : null}
         {commsTab === "broadcasts" && photoNotice ? <div className="flash ok">{photoNotice}</div> : null}
       </section>
+
+      {commsTab === "triggers" ? (
+        <section className="panel comms-panel">
+          <TriggeredMailingsPanel />
+        </section>
+      ) : null}
 
       {commsTab === "surveys" ? (
         <section className="panel comms-panel">

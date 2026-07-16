@@ -39,6 +39,7 @@ import {
   onAdminPaymentConfirm,
   onAdminPaymentReject,
   onPaymentProofPhoto,
+  onPaymentProofText,
   onReferralRewardChosen,
   onTestSubscriptionGet,
   onVpnPlanChosen,
@@ -48,15 +49,24 @@ import {
   sendVpnPlanPicker,
   sendWhitelistInstructionMenu,
   sendWhitelistPurchaseMenu,
+  sendWhitelistPurchaseMenuForTarget,
   onWhitelistPurchaseStart,
   onDeviceSlotPurchaseStart,
+  onComboChosen,
   vpnPlansKeyboardPromo,
   gbTopUpPlansKeyboardPromo,
   setPromoPendingCodeForChat,
 } from "./paymentFlow.js";
 import { tgUserCanBuyDeviceSlot, isDeviceLimitActiveForUser } from "../deviceLimitEffective.js";
-import { isTestSubscriptionEligible } from "../testSubscription.js";
-import { isWhitelistPurchaseVisible } from "../whitelistVaultDb.js";
+import { isTestSubscriptionEligible, tgUserCanBuyGb, userCanBuyGbTopup } from "../testSubscription.js";
+import { checkWhitelistPurchaseAllowed, tgUserCanBuyWhitelist } from "../whitelistPurchaseService.js";
+import {
+  isWelcomeSeriesTriggerActive,
+  parseTriggerClickCallback,
+  recordTriggerButtonClick,
+  recordUserActivity,
+  triggerOnGuestStart,
+} from "../triggerMailingsService.js";
 import {
   cancelSupportAppealCompose,
   clearSupportAppealDraft,
@@ -257,9 +267,9 @@ function menuFlags(fromId: number) {
     support: isSupportAppealsEnabled(),
     admin: isAdminTg(fromId),
     adminClientsButton: panelSettings.telegram.adminClientsButtonEnabled !== false,
-    buyGb: linked.length > 0 && linked.some((u) => u.is_test_subscription !== 1),
+    buyGb: tgUserCanBuyGb(fromId),
     buyDevice: tgUserCanBuyDeviceSlot(fromId),
-    whitelist: isWhitelistPurchaseVisible(),
+    whitelist: tgUserCanBuyWhitelist(fromId),
   };
 }
 
@@ -340,6 +350,10 @@ async function sendWelcome(chatId: number, from: TgUser): Promise<void> {
     await sendMainMenuLinked(chatId, from);
     return;
   }
+  if (isWelcomeSeriesTriggerActive()) {
+    triggerOnGuestStart(chatId, from.id, from.username);
+    return;
+  }
   const sales = getSubscriptionShop().sales_disabled;
   await sendTelegramHtml(chatId, guestWelcomeHtml(from), newUserReply(sales, isTestSubscriptionEligible(from.id)));
 }
@@ -363,6 +377,8 @@ export async function handleTelegramUpdate(body: unknown): Promise<void> {
     console.warn("[telegram] message without from, skipped update_id=", u.update_id);
     return;
   }
+
+  recordUserActivity(msg.chat.id, msg.from.username);
 
   const text = (msg.text ?? "").trim();
   const chatId = msg.chat.id;
@@ -568,6 +584,9 @@ export async function handleTelegramUpdate(body: unknown): Promise<void> {
   if (text) {
     const handledSurveyFb = await handleSurveyFeedbackText(chatId, text);
     if (handledSurveyFb) return;
+
+    const handledPaymentText = await onPaymentProofText(chatId, text);
+    if (handledPaymentText) return;
   }
 
   if (msg.photo?.length) {
@@ -656,12 +675,16 @@ export async function handleTelegramUpdate(body: unknown): Promise<void> {
     return;
   }
   if (normalized === "докупить гб") {
-    const linked = linkedUsers(from.id).filter((u) => u.is_test_subscription !== 1);
-    if (linked.length > 1) {
-      await sendTelegramHtml(chatId, "<b>Выберите подписку для докупки ГБ:</b>", paymentTargetKeyboard(linked, "gb"));
+    const gbTargets = linkedUsers(from.id).filter(userCanBuyGbTopup);
+    if (gbTargets.length === 0) {
+      await sendGbTopUpPlanPicker(chatId, from.id);
       return;
     }
-    await sendGbTopUpPlanPicker(chatId, from.id, linked[0]?.id);
+    if (gbTargets.length > 1) {
+      await sendTelegramHtml(chatId, "<b>Выберите подписку для докупки ГБ:</b>", paymentTargetKeyboard(gbTargets, "gb"));
+      return;
+    }
+    await sendGbTopUpPlanPicker(chatId, from.id, gbTargets[0]!.id);
     return;
   }
   if (normalized === "белые списки" || normalized === "белые списки для покупки") {
@@ -712,6 +735,14 @@ async function handleCallback(q: CallbackQuery, rawUpdate?: unknown): Promise<vo
   if (chatId == null) {
     await answerCallbackQuery(q.id, { text: "Нет чата", show_alert: true });
     return;
+  }
+
+  recordUserActivity(chatId, q.from.username);
+
+  const tmClick = parseTriggerClickCallback(data);
+  if (tmClick) {
+    recordTriggerButtonClick(tmClick.campaignId, tmClick.stepId);
+    data = tmClick.action;
   }
 
   const linked = linkedUsers(fromId);
@@ -825,7 +856,11 @@ async function handleCallback(q: CallbackQuery, rawUpdate?: unknown): Promise<vo
 
     if (data === "buygb") {
       await answerCallbackQuery(q.id);
-      const gbTargets = linked.filter((u) => u.is_test_subscription !== 1);
+      const gbTargets = linked.filter(userCanBuyGbTopup);
+      if (gbTargets.length === 0) {
+        await sendGbTopUpPlanPicker(chatId, fromId);
+        return;
+      }
       if (gbTargets.length > 1) {
         await sendTelegramHtml(
           chatId,
@@ -834,7 +869,7 @@ async function handleCallback(q: CallbackQuery, rawUpdate?: unknown): Promise<vo
         );
         return;
       }
-      await sendGbTopUpPlanPicker(chatId, fromId, gbTargets[0]?.id);
+      await sendGbTopUpPlanPicker(chatId, fromId, gbTargets[0]!.id);
       return;
     }
 
@@ -846,6 +881,24 @@ async function handleCallback(q: CallbackQuery, rawUpdate?: unknown): Promise<vo
     if (data === "wlinstr") {
       await answerCallbackQuery(q.id);
       await sendWhitelistInstructionMenu(chatId);
+      return;
+    }
+    const wlsel = /^wlsel:(\d+)$/.exec(data);
+    if (wlsel) {
+      const userId = Number(wlsel[1]);
+      const row = getUser(userId);
+      const tgKey = String(fromId).trim();
+      if (!row || String(row.tg_id ?? "").trim() !== tgKey) {
+        await answerCallbackQuery(q.id, { text: "Нет доступа к этой подписке.", show_alert: true });
+        return;
+      }
+      const check = checkWhitelistPurchaseAllowed(row);
+      if (!check.ok) {
+        await answerCallbackQuery(q.id, { text: check.message, show_alert: true });
+        return;
+      }
+      await answerCallbackQuery(q.id);
+      await sendWhitelistPurchaseMenuForTarget(chatId, fromId, userId);
       return;
     }
     const wlb = /^wlbuy:(\d+)$/.exec(data);
@@ -1010,6 +1063,13 @@ async function handleCallback(q: CallbackQuery, rawUpdate?: unknown): Promise<vo
         await answerCallbackQuery(q.id, { text: "Нет доступа к этой подписке.", show_alert: true });
         return;
       }
+      if (!userCanBuyGbTopup(row)) {
+        await answerCallbackQuery(q.id, {
+          text: row.total_gb <= 0 ? "Безлимит — докупка ГБ недоступна." : "Докупка ГБ недоступна для этой подписки.",
+          show_alert: true,
+        });
+        return;
+      }
       await answerCallbackQuery(q.id);
       await sendGbTopUpPlanPicker(chatId, fromId, userId);
       return;
@@ -1046,6 +1106,17 @@ async function handleCallback(q: CallbackQuery, rawUpdate?: unknown): Promise<vo
         "<b>Выберите подписку:</b>",
         pickSubscriptionKeyboard(linked.map((x) => ({ id: x.id, name: x.name }))),
       );
+      return;
+    }
+
+    const pcombo = /^pcombo:([^:]+)(?::(\d+|new))?$/.exec(data);
+    if (pcombo) {
+      const offerId = String(pcombo[1] ?? "").trim();
+      const suffix = pcombo[2];
+      const isNewFlow = suffix === "new";
+      const targetUserId = suffix && suffix !== "new" ? Number(suffix) : undefined;
+      await answerCallbackQuery(q.id);
+      await onComboChosen(chatId, fromId, offerId, targetUserId, q.from, isNewFlow);
       return;
     }
 

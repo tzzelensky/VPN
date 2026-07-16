@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import DashboardLayout from "../components/DashboardLayout";
+import PageLoadingState from "../components/PageLoadingState";
 import PurchaseDiscountsTab from "../components/PurchaseDiscountsTab";
 import ExpiryDateTimePicker from "../components/ExpiryDateTimePicker";
 import {
@@ -29,6 +30,7 @@ function toExpiryIsoFromMs(ms: number): string {
 export default function PromoCodesPage({ onLogout }: { onLogout: () => void }) {
   const [tab, setTab] = useState<"promos" | "discounts">("promos");
   const [promos, setPromos] = useState<PromoCodeDto[]>([]);
+  const [loading, setLoading] = useState(true);
   const [shop, setShop] = useState<SubscriptionShopDto | null>(null);
   const [name, setName] = useState("");
   const [code, setCode] = useState("");
@@ -78,6 +80,7 @@ export default function PromoCodesPage({ onLogout }: { onLogout: () => void }) {
     const [data, s] = await Promise.all([listPromoCodes(), loadSubscriptionShop()]);
     setPromos(data.promos);
     setShop(s);
+    setLoading(false);
   }
 
   useEffect(() => {
@@ -552,7 +555,9 @@ export default function PromoCodesPage({ onLogout }: { onLogout: () => void }) {
               </select>
             </div>
             <div className="promos-list-scroll">
-              {promos.length === 0 ? (
+              {loading ? (
+                <PageLoadingState />
+              ) : promos.length === 0 ? (
                 <p className="sub promo-list-empty">
                   Пока нет промокодов.
                   <br />

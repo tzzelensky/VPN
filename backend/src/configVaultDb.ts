@@ -9,9 +9,16 @@ import {
   type VlessKeyCheckRow,
   type VlessKeyRow,
 } from "./configVaultTypes.js";
-import { defaultNameFromUri, maskProxyUri, parseProxyUri } from "./configVaultUri.js";
+import {
+  applyUserRemarkToProxyUri,
+  defaultNameFromUri,
+  maskProxyUri,
+  parseProxyUri,
+  setProxyUriRemark,
+} from "./configVaultUri.js";
 import { isValidConfigVaultUri } from "./extraVless.js";
 import type { UserRow } from "./db.js";
+import { formatSubscriptionNodeName } from "./subscriptionNodeName.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const dataFile = process.env.DATA_PATH ?? path.join(__dirname, "..", "data.json");
@@ -33,12 +40,12 @@ function normalizeUserIds(raw: unknown): number[] {
 }
 
 function usersCountLabel(n: number): string {
-  if (n === 0) return "0 пользователей";
+  if (n === 0) return "0 подписок";
   const mod10 = n % 10;
   const mod100 = n % 100;
-  if (mod10 === 1 && mod100 !== 11) return `${n} пользователь`;
-  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 10 || mod100 >= 20)) return `${n} пользователя`;
-  return `${n} пользователей`;
+  if (mod10 === 1 && mod100 !== 11) return `${n} подписка`;
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 10 || mod100 >= 20)) return `${n} подписки`;
+  return `${n} подписок`;
 }
 
 type VaultFile = {
@@ -265,15 +272,34 @@ export function userReceivesConfigVaultKey(userId: number, key: VlessKeyRow): bo
 }
 
 export function subscriptionVaultUrisForUser(user: UserRow): string[] {
+  return configVaultLinksForUser(user).map((x) => x.uri);
+}
+
+export type ConfigVaultSubscriptionLink = {
+  vault_key_id: number;
+  name: string;
+  uri: string;
+  masked_uri: string;
+};
+
+export function configVaultLinksForUser(user: UserRow): ConfigVaultSubscriptionLink[] {
+  const out: ConfigVaultSubscriptionLink[] = [];
   const seen = new Set<string>();
-  const out: string[] = [];
   for (const k of listConfigVaultKeys()) {
     if (!userReceivesConfigVaultKey(user.id, k)) continue;
-    const uri = k.raw_uri.trim();
+    const raw = k.raw_uri.trim();
+    if (!raw) continue;
+    const displayName = formatSubscriptionNodeName(k.name || defaultNameFromUri(raw), user.name);
+    const uri = applyUserRemarkToProxyUri(raw, k.name || defaultNameFromUri(raw), user.name);
     const key = uri.toLowerCase();
-    if (!uri || seen.has(key)) continue;
+    if (seen.has(key)) continue;
     seen.add(key);
-    out.push(uri);
+    out.push({
+      vault_key_id: k.id,
+      name: displayName,
+      uri,
+      masked_uri: maskProxyUri(uri),
+    });
   }
   return out;
 }
@@ -286,7 +312,7 @@ export function subscriptionUsersCount(key: VlessKeyRow): number {
 
 export function configVaultSubscriptionLabel(key: VlessKeyRow): string {
   if (!key.added_to_subscriptions) return "—";
-  if (key.subscription_mode === "all") return "Всем пользователям";
+  if (key.subscription_mode === "all") return "Всем подпискам";
   return usersCountLabel(key.subscription_user_ids.length);
 }
 
@@ -391,7 +417,13 @@ export function updateConfigVaultKey(
       const parsed = parseProxyUri(raw_uri);
       if (!parsed) throw new Error("Некорректная ссылка");
     }
-    const parsed = parseProxyUri(raw_uri)!;
+    const nextName = patch.name != null ? patch.name.trim().slice(0, 120) || cur.name : cur.name;
+    let nextUri = raw_uri;
+    if (patch.name != null && patch.raw_uri == null) {
+      const withRemark = setProxyUriRemark(raw_uri, nextName);
+      if (withRemark) nextUri = withRemark;
+    }
+    const parsed = parseProxyUri(nextUri)!;
     let subscription_mode = patch.subscription_mode ?? cur.subscription_mode;
     let subscription_user_ids = cur.subscription_user_ids;
     if (patch.subscription_mode !== undefined || patch.subscription_user_ids !== undefined) {
@@ -403,9 +435,9 @@ export function updateConfigVaultKey(
     }
     updated = {
       ...cur,
-      name: patch.name != null ? patch.name.trim().slice(0, 120) || cur.name : cur.name,
-      raw_uri,
-      masked_uri: maskProxyUri(raw_uri),
+      name: nextName,
+      raw_uri: nextUri,
+      masked_uri: maskProxyUri(nextUri),
       active: patch.active !== undefined ? patch.active !== false : cur.active,
       notify_on_fail: patch.notify_on_fail !== undefined ? patch.notify_on_fail !== false : cur.notify_on_fail,
       subscription_mode,
@@ -454,10 +486,72 @@ export function setConfigVaultSubscriptionTargets(
   mode: ConfigVaultSubscriptionMode,
   userIds?: number[],
 ): VlessKeyRow {
-  return updateConfigVaultKey(id, {
+  const updated = updateConfigVaultKey(id, {
     subscription_mode: mode,
     subscription_user_ids: userIds,
   });
+  return setConfigVaultKeyInSubscriptions(updated.id, true);
+}
+
+export function bulkRenameConfigVaultKeys(
+  ids: number[],
+  remark: string,
+): { updated: number; errors: string[] } {
+  const name = remark.trim().slice(0, 120);
+  if (!name) throw new Error("Укажите название");
+  const unique = [...new Set(ids.map((x) => Math.floor(Number(x))).filter((n) => n > 0))];
+  if (unique.length === 0) throw new Error("Выберите ключи");
+  let updated = 0;
+  const errors: string[] = [];
+  for (const id of unique) {
+    try {
+      const key = getConfigVaultKey(id);
+      if (!key) {
+        errors.push(`Ключ #${id}: не найден`);
+        continue;
+      }
+      const nextUri = setProxyUriRemark(key.raw_uri, name);
+      if (!nextUri) {
+        errors.push(`Ключ #${id}: не удалось обновить ссылку`);
+        continue;
+      }
+      updateConfigVaultKey(id, { name, raw_uri: nextUri });
+      updated += 1;
+    } catch (e) {
+      errors.push(`Ключ #${id}: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+  return { updated, errors };
+}
+
+export function bulkAssignConfigVaultKeys(
+  ids: number[],
+  mode: ConfigVaultSubscriptionMode,
+  userIds?: number[],
+): { updated: number; errors: string[] } {
+  if (mode !== "all" && mode !== "selected") {
+    throw new Error("Некорректный режим назначения");
+  }
+  if (mode === "selected" && (!userIds || userIds.length === 0)) {
+    throw new Error("Выберите подписки");
+  }
+  const unique = [...new Set(ids.map((x) => Math.floor(Number(x))).filter((n) => n > 0))];
+  if (unique.length === 0) throw new Error("Выберите ключи");
+  let updated = 0;
+  const errors: string[] = [];
+  for (const id of unique) {
+    try {
+      if (!getConfigVaultKey(id)) {
+        errors.push(`Ключ #${id}: не найден`);
+        continue;
+      }
+      setConfigVaultSubscriptionTargets(id, mode, userIds);
+      updated += 1;
+    } catch (e) {
+      errors.push(`Ключ #${id}: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+  return { updated, errors };
 }
 
 export function setConfigVaultKeyChecking(id: number): void {

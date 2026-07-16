@@ -6,6 +6,7 @@ import {
   extractVlessLinkHintsFromConfig,
 } from "./vlessLinkHints.js";
 import { DEFAULT_SNIFF_DEST_OVERRIDE, parseDnsFromXrayConfig, parseSniffingFromInbound } from "./subscriptionXrayShared.js";
+import { formatSubscriptionNodeName } from "./subscriptionNodeName.js";
 
 export const SUBSCRIPTION_FINGERPRINTS = [
   "chrome",
@@ -473,8 +474,7 @@ export function resolveSubscriptionRemarks(
   user?: Pick<UserRow, "name">,
 ): string {
   const base = settings.remarks.trim() || defaultSubscriptionSettings(server).remarks;
-  if (user?.name?.trim()) return `${base} (${user.name.trim()})`;
-  return base;
+  return formatSubscriptionNodeName(base, user?.name);
 }
 
 export function generateRealityShortId(): string {

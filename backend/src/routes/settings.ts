@@ -149,6 +149,11 @@ router.patch("/", (req, res) => {
     next.panel.subscriptionBanner = {
       enabled: bannerIn.enabled === true,
       text: String(bannerIn.text ?? prevBanner.text ?? "").trim().slice(0, 2000),
+      whitelistText: String(
+        (bannerIn as { whitelistText?: unknown }).whitelistText ?? prevBanner.whitelistText ?? "",
+      )
+        .trim()
+        .slice(0, 2000),
       telegramUrl: tgUrl.slice(0, 500),
       telegramLinkText:
         String(bannerIn.telegramLinkText ?? prevBanner.telegramLinkText ?? "тех. поддержку").trim().slice(0, 120) ||

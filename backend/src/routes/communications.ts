@@ -22,6 +22,7 @@ import { normalizeAutoCommunicationsConfig } from "../autoCommunicationsTypes.js
 import { sendTelegramHtml, sendTelegramPhotoBinary, telegramHasDialog } from "../telegram/api.js";
 import { getTelegramBotToken, getTelegramWebAppUrl } from "../telegram/env.js";
 import { runAutoExpiryNotificationsOnce } from "../telegram/expiryNotify.js";
+import triggerMailingsRouter from "./triggerMailings.js";
 
 const router = Router();
 router.use(requireAuth);
@@ -461,5 +462,6 @@ router.post("/send", async (req, res) => {
 });
 
 router.use("/surveys", surveysRouter);
+router.use("/trigger-mailings", triggerMailingsRouter);
 
 export default router;

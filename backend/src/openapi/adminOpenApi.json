@@ -46,9 +46,6 @@
       "name": "Purchase discounts"
     },
     {
-      "name": "Push"
-    },
-    {
       "name": "Referral program"
     },
     {
@@ -1729,6 +1726,116 @@
         ],
         "summary": "Включает или выключает ключ во всех подписках.",
         "description": "Включает или выключает ключ во всех подписках.\n\n**HTTP:** `POST /api/config-vault/{id}/subscriptions`\n\n**Файл:** `configVault.ts`\n\n**Требуется сессия** (cookie `tzadmin.sid`)",
+        "responses": {
+          "200": {
+            "description": "Успех"
+          },
+          "400": {
+            "description": "Неверный запрос",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Не авторизован",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Не найдено"
+          },
+          "500": {
+            "description": "Ошибка сервера"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/config-vault/bulk/assignment": {
+      "post": {
+        "tags": [
+          "Config vault"
+        ],
+        "summary": "`POST /api/config-vault/bulk/assignment`",
+        "description": "**HTTP:** `POST /api/config-vault/bulk/assignment`\n\n**Файл:** `configVault.ts`\n\n**Требуется сессия**",
+        "responses": {
+          "200": {
+            "description": "Успех"
+          },
+          "400": {
+            "description": "Неверный запрос",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Не авторизован",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Не найдено"
+          },
+          "500": {
+            "description": "Ошибка сервера"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/config-vault/bulk/rename": {
+      "post": {
+        "tags": [
+          "Config vault"
+        ],
+        "summary": "`POST /api/config-vault/bulk/rename`",
+        "description": "**HTTP:** `POST /api/config-vault/bulk/rename`\n\n**Файл:** `configVault.ts`\n\n**Требуется сессия**",
         "responses": {
           "200": {
             "description": "Успех"
@@ -6226,204 +6333,6 @@
         ]
       }
     },
-    "/api/push/register": {
-      "delete": {
-        "tags": [
-          "Push"
-        ],
-        "summary": "Удаляет FCM-токен мобильного приложения.",
-        "description": "Удаляет FCM-токен мобильного приложения.\n\n**HTTP:** `DELETE /api/push/register`\n\n**Файл:** `push.ts`\n\n**Требуется сессия** (cookie `tzadmin.sid`)",
-        "responses": {
-          "200": {
-            "description": "Успех"
-          },
-          "400": {
-            "description": "Неверный запрос",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Не авторизован",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Не найдено"
-          },
-          "500": {
-            "description": "Ошибка сервера"
-          }
-        },
-        "security": [
-          {
-            "sessionCookie": []
-          }
-        ]
-      },
-      "post": {
-        "tags": [
-          "Push"
-        ],
-        "summary": "Регистрирует FCM-токен мобильного приложения панели.",
-        "description": "Регистрирует FCM-токен мобильного приложения панели.\n\n**HTTP:** `POST /api/push/register`\n\n**Файл:** `push.ts`\n\n**Требуется сессия** (cookie `tzadmin.sid`)",
-        "responses": {
-          "200": {
-            "description": "Успех"
-          },
-          "400": {
-            "description": "Неверный запрос",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Не авторизован",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Не найдено"
-          },
-          "500": {
-            "description": "Ошибка сервера"
-          }
-        },
-        "security": [
-          {
-            "sessionCookie": []
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "additionalProperties": true
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/push/status": {
-      "get": {
-        "tags": [
-          "Push"
-        ],
-        "summary": "Статус FCM: настроен ли push и сколько устройств зарегистрировано.",
-        "description": "Статус FCM: настроен ли push и сколько устройств зарегистрировано.\n\n**HTTP:** `GET /api/push/status`\n\n**Файл:** `push.ts`\n\n**Требуется сессия** (cookie `tzadmin.sid`)",
-        "responses": {
-          "200": {
-            "description": "Успех"
-          },
-          "400": {
-            "description": "Неверный запрос",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Не авторизован",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Не найдено"
-          },
-          "500": {
-            "description": "Ошибка сервера"
-          }
-        },
-        "security": [
-          {
-            "sessionCookie": []
-          }
-        ]
-      }
-    },
-    "/api/push/test": {
-      "post": {
-        "tags": [
-          "Push"
-        ],
-        "summary": "Отправляет тестовое push-уведомление на все зарегистрированные устройства.",
-        "description": "Отправляет тестовое push-уведомление на все зарегистрированные устройства.\n\n**HTTP:** `POST /api/push/test`\n\n**Файл:** `push.ts`\n\n**Требуется сессия** (cookie `tzadmin.sid`)",
-        "responses": {
-          "200": {
-            "description": "Успех"
-          },
-          "400": {
-            "description": "Неверный запрос",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Не авторизован",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Не найдено"
-          },
-          "500": {
-            "description": "Ошибка сервера"
-          }
-        },
-        "security": [
-          {
-            "sessionCookie": []
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "additionalProperties": true
-              }
-            }
-          }
-        }
-      }
-    },
     "/api/referral-program/": {
       "get": {
         "tags": [
@@ -9504,6 +9413,106 @@
         ]
       }
     },
+    "/api/sub-shop/payment-sessions": {
+      "get": {
+        "tags": [
+          "Subscription shop"
+        ],
+        "summary": "`GET /api/sub-shop/payment-sessions`",
+        "description": "**HTTP:** `GET /api/sub-shop/payment-sessions`\n\n**Файл:** `subscriptionShop.ts (alias)`\n\n**Требуется сессия**",
+        "responses": {
+          "200": {
+            "description": "Успех"
+          },
+          "400": {
+            "description": "Неверный запрос",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Не авторизован",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Не найдено"
+          },
+          "500": {
+            "description": "Ошибка сервера"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ]
+      }
+    },
+    "/api/sub-shop/payment-sessions/clear": {
+      "post": {
+        "tags": [
+          "Subscription shop"
+        ],
+        "summary": "`POST /api/sub-shop/payment-sessions/clear`",
+        "description": "**HTTP:** `POST /api/sub-shop/payment-sessions/clear`\n\n**Файл:** `subscriptionShop.ts (alias)`\n\n**Требуется сессия**",
+        "responses": {
+          "200": {
+            "description": "Успех"
+          },
+          "400": {
+            "description": "Неверный запрос",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Не авторизован",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Не найдено"
+          },
+          "500": {
+            "description": "Ошибка сервера"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/sub-shop/test-subscriptions": {
       "get": {
         "tags": [
@@ -9815,6 +9824,106 @@
             "sessionCookie": []
           }
         ]
+      }
+    },
+    "/api/subscription-shop/payment-sessions": {
+      "get": {
+        "tags": [
+          "Subscription shop"
+        ],
+        "summary": "`GET /api/subscription-shop/payment-sessions`",
+        "description": "**HTTP:** `GET /api/subscription-shop/payment-sessions`\n\n**Файл:** `subscriptionShop.ts`\n\n**Требуется сессия**",
+        "responses": {
+          "200": {
+            "description": "Успех"
+          },
+          "400": {
+            "description": "Неверный запрос",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Не авторизован",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Не найдено"
+          },
+          "500": {
+            "description": "Ошибка сервера"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ]
+      }
+    },
+    "/api/subscription-shop/payment-sessions/clear": {
+      "post": {
+        "tags": [
+          "Subscription shop"
+        ],
+        "summary": "`POST /api/subscription-shop/payment-sessions/clear`",
+        "description": "**HTTP:** `POST /api/subscription-shop/payment-sessions/clear`\n\n**Файл:** `subscriptionShop.ts`\n\n**Требуется сессия**",
+        "responses": {
+          "200": {
+            "description": "Успех"
+          },
+          "400": {
+            "description": "Неверный запрос",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Не авторизован",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Не найдено"
+          },
+          "500": {
+            "description": "Ошибка сервера"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          }
+        }
       }
     },
     "/api/subscription-shop/test-subscriptions": {
@@ -12472,6 +12581,116 @@
         ]
       }
     },
+    "/api/whitelist-vault/{id}/remove-from-subscriptions": {
+      "post": {
+        "tags": [
+          "Whitelist vault"
+        ],
+        "summary": "`POST /api/whitelist-vault/{id}/remove-from-subscriptions`",
+        "description": "**HTTP:** `POST /api/whitelist-vault/{id}/remove-from-subscriptions`\n\n**Файл:** `whitelistVault.ts`\n\n**Требуется сессия**",
+        "responses": {
+          "200": {
+            "description": "Успех"
+          },
+          "400": {
+            "description": "Неверный запрос",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Не авторизован",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Не найдено"
+          },
+          "500": {
+            "description": "Ошибка сервера"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/whitelist-vault/{id}/restore-to-subscriptions": {
+      "post": {
+        "tags": [
+          "Whitelist vault"
+        ],
+        "summary": "`POST /api/whitelist-vault/{id}/restore-to-subscriptions`",
+        "description": "**HTTP:** `POST /api/whitelist-vault/{id}/restore-to-subscriptions`\n\n**Файл:** `whitelistVault.ts`\n\n**Требуется сессия**",
+        "responses": {
+          "200": {
+            "description": "Успех"
+          },
+          "400": {
+            "description": "Неверный запрос",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Не авторизован",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Не найдено"
+          },
+          "500": {
+            "description": "Ошибка сервера"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/whitelist-vault/bulk/assignment": {
       "post": {
         "tags": [
@@ -12644,6 +12863,159 @@
         ],
         "summary": "Запускает фоновую проверку всех ключей белых списков.",
         "description": "Запускает фоновую проверку всех ключей белых списков.\n\n**HTTP:** `POST /api/whitelist-vault/check-all`\n\n**Файл:** `whitelistVault.ts`\n\n**Требуется сессия** (cookie `tzadmin.sid`)",
+        "responses": {
+          "200": {
+            "description": "Успех"
+          },
+          "400": {
+            "description": "Неверный запрос",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Не авторизован",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Не найдено"
+          },
+          "500": {
+            "description": "Ошибка сервера"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/whitelist-vault/groups": {
+      "post": {
+        "tags": [
+          "Whitelist vault"
+        ],
+        "summary": "`POST /api/whitelist-vault/groups`",
+        "description": "**HTTP:** `POST /api/whitelist-vault/groups`\n\n**Файл:** `whitelistVault.ts`\n\n**Требуется сессия**",
+        "responses": {
+          "200": {
+            "description": "Успех"
+          },
+          "400": {
+            "description": "Неверный запрос",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Не авторизован",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Не найдено"
+          },
+          "500": {
+            "description": "Ошибка сервера"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/whitelist-vault/groups/{groupId}": {
+      "delete": {
+        "tags": [
+          "Whitelist vault"
+        ],
+        "summary": "`DELETE /api/whitelist-vault/groups/{groupId}`",
+        "description": "**HTTP:** `DELETE /api/whitelist-vault/groups/{groupId}`\n\n**Файл:** `whitelistVault.ts`\n\n**Требуется сессия**",
+        "responses": {
+          "200": {
+            "description": "Успех"
+          },
+          "400": {
+            "description": "Неверный запрос",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Не авторизован",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Не найдено"
+          },
+          "500": {
+            "description": "Ошибка сервера"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ]
+      },
+      "patch": {
+        "tags": [
+          "Whitelist vault"
+        ],
+        "summary": "`PATCH /api/whitelist-vault/groups/{groupId}`",
+        "description": "**HTTP:** `PATCH /api/whitelist-vault/groups/{groupId}`\n\n**Файл:** `whitelistVault.ts`\n\n**Требуется сессия**",
         "responses": {
           "200": {
             "description": "Успех"
@@ -13210,6 +13582,61 @@
         ]
       }
     },
+    "/api/whitelist-vault/purchases/reset-all": {
+      "post": {
+        "tags": [
+          "Whitelist vault"
+        ],
+        "summary": "Сброс всех покупок белых списков — пользователи снова могут купить БС.",
+        "description": "Сброс всех покупок белых списков — пользователи снова могут купить БС.\n\n**HTTP:** `POST /api/whitelist-vault/purchases/reset-all`\n\n**Файл:** `whitelistVault.ts`\n\n**Требуется сессия** (cookie `tzadmin.sid`)",
+        "responses": {
+          "200": {
+            "description": "Успех"
+          },
+          "400": {
+            "description": "Неверный запрос",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Не авторизован",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Не найдено"
+          },
+          "500": {
+            "description": "Ошибка сервера"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/whitelist-vault/settings": {
       "get": {
         "tags": [
@@ -13529,6 +13956,106 @@
             "sessionCookie": []
           }
         ]
+      }
+    },
+    "/sub-shop/payment-sessions": {
+      "get": {
+        "tags": [
+          "Subscription shop"
+        ],
+        "summary": "`GET /sub-shop/payment-sessions`",
+        "description": "**HTTP:** `GET /sub-shop/payment-sessions`\n\n**Файл:** `subscriptionShop.ts (alias)`\n\n**Требуется сессия**",
+        "responses": {
+          "200": {
+            "description": "Успех"
+          },
+          "400": {
+            "description": "Неверный запрос",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Не авторизован",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Не найдено"
+          },
+          "500": {
+            "description": "Ошибка сервера"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ]
+      }
+    },
+    "/sub-shop/payment-sessions/clear": {
+      "post": {
+        "tags": [
+          "Subscription shop"
+        ],
+        "summary": "`POST /sub-shop/payment-sessions/clear`",
+        "description": "**HTTP:** `POST /sub-shop/payment-sessions/clear`\n\n**Файл:** `subscriptionShop.ts (alias)`\n\n**Требуется сессия**",
+        "responses": {
+          "200": {
+            "description": "Успех"
+          },
+          "400": {
+            "description": "Неверный запрос",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Не авторизован",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Не найдено"
+          },
+          "500": {
+            "description": "Ошибка сервера"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          }
+        }
       }
     },
     "/sub-shop/test-subscriptions": {

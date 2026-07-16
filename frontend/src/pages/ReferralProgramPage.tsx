@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import DashboardLayout from "../components/DashboardLayout";
+import PanelTabs from "../components/PanelTabs";
 import DualListPicker from "../components/DualListPicker";
+import PageLoadingState from "../components/PageLoadingState";
 import Spinner from "../components/Spinner";
 import {
   grantReferralAdminGift,
@@ -351,7 +353,7 @@ export default function ReferralProgramPage({ onLogout }: { onLogout: () => void
 
       {loading || !cfg ? (
         <section className="panel">
-          <Spinner /> Загрузка…
+          <PageLoadingState />
         </section>
       ) : (
         <>
@@ -396,37 +398,15 @@ export default function ReferralProgramPage({ onLogout }: { onLogout: () => void
             </div>
           </section>
 
-          <section className="panel referral-tabs-bar">
-            <div className="referral-main-tabs" role="tablist">
-              <button
-                type="button"
-                className={mainTab === "settings" ? "active" : ""}
-                role="tab"
-                aria-selected={mainTab === "settings"}
-                onClick={() => setMainTab("settings")}
-              >
-                Настройки
-              </button>
-              <button
-                type="button"
-                className={mainTab === "report" ? "active" : ""}
-                role="tab"
-                aria-selected={mainTab === "report"}
-                onClick={() => setMainTab("report")}
-              >
-                Отчёт
-              </button>
-              <button
-                type="button"
-                className={mainTab === "history" ? "active" : ""}
-                role="tab"
-                aria-selected={mainTab === "history"}
-                onClick={() => setMainTab("history")}
-              >
-                История изменений
-              </button>
-            </div>
-          </section>
+          <PanelTabs
+            tabs={[
+              { id: "settings", label: "Настройки" },
+              { id: "report", label: "Отчёт" },
+              { id: "history", label: "История изменений" },
+            ]}
+            value={mainTab}
+            onChange={setMainTab}
+          />
 
           {mainTab === "report" ? (
             <section className="panel referral-report-panel">

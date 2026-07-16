@@ -122,7 +122,7 @@ export function setSubscriptionUserHeaders(
     // Keeping these headers unset prevents intermittent 500 on /sub/*:
     // "Invalid character in header content".
   } else {
-    const bannerAnnounce = subscriptionBannerAnnounceHeader();
+    const bannerAnnounce = subscriptionBannerAnnounceHeader(user);
     if (bannerAnnounce) {
       res.setHeader("announce", bannerAnnounce);
     }

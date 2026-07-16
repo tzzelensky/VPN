@@ -25,6 +25,7 @@ import {
 import { isAdminMobileShell } from "../adminMobile";
 import { subscriptionLabel } from "../subscriptionLabel";
 import DashboardLayout from "../components/DashboardLayout";
+import PageLoadingState from "../components/PageLoadingState";
 import Spinner from "../components/Spinner";
 import UserModal from "../components/UserModal";
 import { notifyUsersChanged, USERS_CHANGED_EVENT } from "../usersEvents";
@@ -53,11 +54,33 @@ function formatUsedGb(u: UserDto): string {
 }
 
 function nodesCountLabel(u: UserDto, previewCount: number | undefined, deployedTotal: number): string {
+  if (!clientAlive(u)) return "0";
+  const base = u.subscription_nodes_count;
+  if (base != null) {
+    if (previewCount != null && previewCount > base) return String(previewCount);
+    return String(base);
+  }
   if (previewCount != null) return String(previewCount);
-  if (u.subscription_server_ids?.length) return String(u.subscription_server_ids.length);
+  const servers = u.subscription_server_ids?.length ?? 0;
+  const vault = u.config_vault_links?.length ?? 0;
+  const manual = u.extra_vless_links?.length ?? 0;
+  if (servers + vault + manual > 0) return String(servers + vault + manual);
+  if (servers > 0) return String(servers);
   if (u.subscription_server_count > 0) return String(u.subscription_server_count);
-  if (deployedTotal > 0) return String(deployedTotal);
+  if (deployedTotal > 0) return String(deployedTotal + vault);
   return "—";
+}
+
+function nodesSubLabel(u: UserDto): string {
+  if (!clientAlive(u)) return "неактивна";
+  const servers = u.subscription_server_ids?.length ?? 0;
+  const vault = u.config_vault_links?.length ?? 0;
+  if (servers > 0 && vault > 0) return `${servers} + ${vault} хран.`;
+  if (servers > 0) {
+    return u.subscription_server_count === 0 ? `все (${servers})` : `${servers} узл.`;
+  }
+  if (u.subscription_server_count > 0) return `≤ ${u.subscription_server_count}`;
+  return vault > 0 ? `+${vault} хран.` : "все";
 }
 
 function trafficPercent(u: UserDto): number {
@@ -200,6 +223,7 @@ type UsersTab = "active" | "inactive";
 
 export default function UsersPage({ onLogout }: { onLogout: () => void }) {
   const [users, setUsers] = useState<UserDto[]>(() => readUsersListCache()?.users ?? []);
+  const [pageLoading, setPageLoading] = useState(() => !(readUsersListCache()?.users?.length));
   const [msg, setMsg] = useState<{ type: "ok" | "err"; text: string } | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [previews, setPreviews] = useState<Record<number, { count: number }>>(
@@ -467,6 +491,8 @@ export default function UsersPage({ onLogout }: { onLogout: () => void }) {
         void runBackgroundStatsSync();
       } catch (e) {
         setMsg({ type: "err", text: String(e) });
+      } finally {
+        setPageLoading(false);
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- начальная загрузка один раз
@@ -1184,7 +1210,9 @@ export default function UsersPage({ onLogout }: { onLogout: () => void }) {
             />
           </div>
         </div>
-        {filteredUsers.length === 0 ? (
+        {pageLoading && users.length === 0 ? (
+          <PageLoadingState />
+        ) : filteredUsers.length === 0 ? (
           <p className="sub" style={{ marginBottom: 0 }}>
             {searchQuery.trim()
               ? "Ничего не найдено."
@@ -1550,15 +1578,7 @@ export default function UsersPage({ onLogout }: { onLogout: () => void }) {
                         <div className="ud-nodes-cell">
                           <div className="ud-nodes-body">
                             <div className="ud-nodes-main">{nodesCountLabel(u, previews[u.id]?.count, deployedServers.length)}</div>
-                            <div className="muted ud-nodes-sub">
-                              {u.subscription_server_ids?.length
-                                ? u.subscription_server_count === 0
-                                  ? `все (${u.subscription_server_ids.length})`
-                                  : `${u.subscription_server_ids.length} узл.`
-                                : u.subscription_server_count > 0
-                                  ? `≤ ${u.subscription_server_count}`
-                                  : "все"}
-                            </div>
+                            <div className="muted ud-nodes-sub">{nodesSubLabel(u)}</div>
                           </div>
                           {renderHideUserButton(u)}
                         </div>

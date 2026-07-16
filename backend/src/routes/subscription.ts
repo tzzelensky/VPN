@@ -11,7 +11,11 @@ import { getRequestClientIp } from "../deviceLimitSubscription.js";
 import { getDeviceLimitSubscriptionPressure } from "../deviceLimitHappPush.js";
 import { setRecentSubscriptionDeviceHit } from "../deviceLimitStore.js";
 import { parseDeviceFromRequest, isUsefulDeviceName } from "../deviceNameFromUa.js";
-import { resolveSubscriptionBase64 } from "../subscriptionResolve.js";
+import { resolveSubscriptionBase64, resolveSubscriptionLinks } from "../subscriptionResolve.js";
+import {
+  buildHappJsonSubscriptionBody,
+  shouldServeHappJsonSubscription,
+} from "../happSubscriptionJson.js";
 import { isDeviceLimitActiveForUser } from "../deviceLimitEffective.js";
 import { activeDeviceSlots, allowedDeviceSlots, resolveDeviceIdFromRequest, resolveSubscriptionDeviceId } from "../userDeviceSlots.js";
 import { setSubscriptionUserHeaders } from "../subscriptionMeta.js";
@@ -140,19 +144,29 @@ router.get("/:token", async (req, res) => {
     });
 
     setSubscriptionUserHeaders(res, headerUser, { deviceLimitPressure });
-    res.setHeader("Content-Type", "text/plain; charset=utf-8");
     res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, private");
     res.setHeader("Pragma", "no-cache");
 
-    res.send(
-      resolveSubscriptionBase64(subUser, {
-        apply_device_limit: true,
-        device_limit_denied: deviceLimitDenied,
-        device_limit_registered: deviceLimitRegistered,
-        device_limit_reason: deviceLimitReason,
-        device_limit_pressure: deviceLimitPressure,
-      }),
-    );
+    const resolveCtx = {
+      apply_device_limit: true as const,
+      device_limit_denied: deviceLimitDenied,
+      device_limit_registered: deviceLimitRegistered,
+      device_limit_reason: deviceLimitReason,
+      device_limit_pressure: deviceLimitPressure,
+    };
+
+    if (shouldServeHappJsonSubscription(subUser, userAgent)) {
+      const links = resolveSubscriptionLinks(subUser, resolveCtx);
+      const happ = buildHappJsonSubscriptionBody(subUser, links);
+      if (happ) {
+        res.setHeader("Content-Type", happ.contentType);
+        res.send(happ.body);
+        return;
+      }
+    }
+
+    res.setHeader("Content-Type", "text/plain; charset=utf-8");
+    res.send(resolveSubscriptionBase64(subUser, resolveCtx));
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     res.status(500).send(msg);

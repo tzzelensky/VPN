@@ -27,6 +27,8 @@ import { logCommunicationMessage } from "../communicationLog.js";
 import { sendTelegramMessage } from "../telegram/api.js";
 import { sendExpiredSubscriptionReminder, sendExpiryRenewalReminder } from "../telegram/expiryNotify.js";
 import { expiryAutoNotifyStatusForUser } from "../expiryAutoNotifyStatus.js";
+import { configVaultLinksForUser } from "../configVaultDb.js";
+import { subscriptionVlessLinksForUser } from "../subscriptionLinks.js";
 import { runAutoTrafficNotificationsOnce } from "../telegram/trafficNotify.js";
 import { pullTrafficFromAllDeployedServers } from "../xrayStatsPull.js";
 import { refreshMissingSubscriptionHintsIfDue } from "../subscriptionHintsRefresh.js";
@@ -145,6 +147,11 @@ function deviceSlotDto(u: UserRow, slot: UserRow["device_slots"][number]) {
   };
 }
 
+function subscriptionNodesCount(u: UserRow): number {
+  if (!userAllowedOnServers(u)) return 0;
+  return subscriptionVlessLinksForUser(u).length;
+}
+
 function userDto(u: UserRow) {
   const expiryAuto = expiryAutoNotifyStatusForUser(u);
   return {
@@ -187,6 +194,8 @@ function userDto(u: UserRow) {
     dropper_tickets: u.dropper_tickets,
     dropper_wins: dropperWinsForClientRow(u),
     extra_vless_links: u.extra_vless_links ?? [],
+    config_vault_links: configVaultLinksForUser(u),
+    subscription_nodes_count: subscriptionNodesCount(u),
     expiry_auto_notify_status: expiryAuto.status,
     expiry_auto_notify_hint: expiryAuto.hint,
     created_at: u.created_at,

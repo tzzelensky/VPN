@@ -76,6 +76,7 @@ export default function PanelSettingsModal({ open, onClose }: { open: boolean; o
       ...{
         enabled: false,
         text: "",
+        whitelistText: "",
         telegramUrl: "",
         telegramLinkText: "тех. поддержку",
       },
@@ -332,6 +333,7 @@ export default function PanelSettingsModal({ open, onClose }: { open: boolean; o
                           ...(d.panel.subscriptionBanner ?? {
                             enabled: false,
                             text: "",
+                            whitelistText: "",
                             telegramUrl: "",
                             telegramLinkText: "тех. поддержку",
                           }),
@@ -356,6 +358,30 @@ export default function PanelSettingsModal({ open, onClose }: { open: boolean; o
                             panel: {
                               ...d.panel,
                               subscriptionBanner: { ...d.panel.subscriptionBanner, text: e.target.value },
+                            },
+                          }))
+                        }
+                      />
+                    </div>
+                    <div className="form-field">
+                      <FieldLabel
+                        label="Текст для белых списков (Happ)"
+                        hint={PANEL_HINTS.subscriptionBannerWhitelistText}
+                      />
+                      <textarea
+                        className="comms-textarea"
+                        rows={4}
+                        placeholder={"🪄 Белые списки подключены — обновите подписку 🔄"}
+                        value={draft.panel.subscriptionBanner.whitelistText ?? ""}
+                        onChange={(e) =>
+                          patchDraft((d) => ({
+                            ...d,
+                            panel: {
+                              ...d.panel,
+                              subscriptionBanner: {
+                                ...d.panel.subscriptionBanner,
+                                whitelistText: e.target.value,
+                              },
                             },
                           }))
                         }

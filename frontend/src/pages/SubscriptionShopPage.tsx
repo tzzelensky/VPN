@@ -12,7 +12,13 @@ import {
   type TopUpShopPlanDto,
 } from "../api";
 import DashboardLayout from "../components/DashboardLayout";
+import PanelTabs from "../components/PanelTabs";
+import PageLoadingState from "../components/PageLoadingState";
+import PaymentSessionsPanel from "../components/PaymentSessionsPanel";
+import ComboSubscriptionsPanel from "../components/ComboSubscriptionsPanel";
 import Spinner from "../components/Spinner";
+
+type ShopTab = "settings" | "combo" | "payment_sessions";
 
 function cloneShop(s: SubscriptionShopDto): SubscriptionShopDto {
   return {
@@ -27,6 +33,7 @@ function cloneShop(s: SubscriptionShopDto): SubscriptionShopDto {
       days: s.test_plan?.days ?? 3,
       price_rub: s.test_plan?.price_rub ?? 10,
     },
+    combo_offers: (s.combo_offers ?? []).map((o) => ({ ...o })),
   };
 }
 
@@ -41,6 +48,7 @@ export default function SubscriptionShopPage({ onLogout }: { onLogout: () => voi
   });
   const [testSubs, setTestSubs] = useState<TestSubscriptionEntryDto[]>([]);
   const [testDeleteBusyId, setTestDeleteBusyId] = useState<number>(0);
+  const [mainTab, setMainTab] = useState<ShopTab>("settings");
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -126,26 +134,44 @@ export default function SubscriptionShopPage({ onLogout }: { onLogout: () => voi
             </p>
           </div>
           <div className="users-hero-actions">
-            <button type="button" className="ghost" disabled={loading} onClick={() => void refresh()}>
-              Обновить
-            </button>
-            <button type="button" className="primary" disabled={saving || !shop} onClick={() => void onSave()}>
-              {saving ? (
-                <>
-                  <Spinner /> Сохранение…
-                </>
-              ) : (
-                "Сохранить"
-              )}
-            </button>
+            {mainTab === "settings" ? (
+              <>
+                <button type="button" className="ghost" disabled={loading} onClick={() => void refresh()}>
+                  Обновить
+                </button>
+                <button type="button" className="primary" disabled={saving || !shop} onClick={() => void onSave()}>
+                  {saving ? (
+                    <>
+                      <Spinner /> Сохранение…
+                    </>
+                  ) : (
+                    "Сохранить"
+                  )}
+                </button>
+              </>
+            ) : null}
           </div>
         </div>
         {msg ? <div className={`flash ${msg.type === "ok" ? "ok" : "err"}`}>{msg.text}</div> : null}
       </section>
 
-      {loading || !shop ? (
+      <PanelTabs
+        tabs={[
+          { id: "settings", label: "Тарифы" },
+          { id: "combo", label: "Комбо-подписки" },
+          { id: "payment_sessions", label: "Сессии оплаты" },
+        ]}
+        value={mainTab}
+        onChange={setMainTab}
+      />
+
+      {mainTab === "combo" ? (
+        <ComboSubscriptionsPanel />
+      ) : mainTab === "payment_sessions" ? (
+        <PaymentSessionsPanel />
+      ) : loading || !shop ? (
         <section className="panel">
-          <Spinner /> Загрузка…
+          <PageLoadingState />
         </section>
       ) : (
         <>

@@ -21,6 +21,8 @@ export type PanelSectionKey =
 export type PanelSubscriptionBanner = {
   enabled: boolean;
   text: string;
+  /** Текст в Happ только для подписок с подключёнными белыми списками. */
+  whitelistText: string;
   telegramUrl: string;
   telegramLinkText: string;
 };

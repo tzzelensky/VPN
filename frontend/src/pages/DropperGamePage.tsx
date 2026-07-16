@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { subscriptionLabel } from "../subscriptionLabel";
 import DashboardLayout from "../components/DashboardLayout";
+import PanelTabs from "../components/PanelTabs";
+import PageLoadingState from "../components/PageLoadingState";
 import Spinner from "../components/Spinner";
 import {
   getPrizeColor,
@@ -418,7 +420,7 @@ export default function DropperGamePage({ onLogout }: { onLogout: () => void }) 
     return (
       <DashboardLayout onLogout={onLogout}>
         <section className="panel">
-          <Spinner /> Загрузка…
+          <PageLoadingState />
         </section>
       </DashboardLayout>
     );
@@ -455,27 +457,19 @@ export default function DropperGamePage({ onLogout }: { onLogout: () => void }) 
           </div>
         </div>
         {msg ? <div className={`flash ${msg.type === "ok" ? "ok" : "err"}`}>{msg.text}</div> : null}
-        <div className="game-admin-tabs" role="tablist">
-          {([
-            ["general", "Общие"],
-            ["dropper", "Дроппер"],
-            ["roulette", "Рулетка"],
-            ["tickets", "Билеты"],
-            ["reports", "Отчёты"],
-          ] as const).map(([id, label]) => (
-            <button
-              key={id}
-              type="button"
-              role="tab"
-              aria-selected={adminTab === id}
-              className={adminTab === id ? "primary" : "ghost"}
-              onClick={() => setAdminTab(id)}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
       </section>
+
+      <PanelTabs
+        tabs={[
+          { id: "general", label: "Общие" },
+          { id: "dropper", label: "Дроппер" },
+          { id: "roulette", label: "Рулетка" },
+          { id: "tickets", label: "Билеты" },
+          { id: "reports", label: "Отчёты" },
+        ]}
+        value={adminTab}
+        onChange={setAdminTab}
+      />
 
       {adminTab === "general" && gameSettings ? (
       <section className="panel">

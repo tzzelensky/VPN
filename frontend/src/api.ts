@@ -478,6 +478,10 @@ export type UserDto = {
   /** Победы в дроппере: при том же tg_id — общее число для Telegram; иначе по строке подписки. */
   dropper_wins: number;
   extra_vless_links: ExtraVlessLinkDto[];
+  /** Ключи из конфиг-хранилища, попадающие в подписку этого клиента (только чтение). */
+  config_vault_links?: ConfigVaultLinkDto[];
+  /** Число строк в подписке (серверы + хранилище + прочее); 0 если подписка неактивна. */
+  subscription_nodes_count?: number;
   /** Статус авто-напоминания о сроке: sent | waiting | error | null */
   expiry_auto_notify_status?: "sent" | "waiting" | "error" | null;
   expiry_auto_notify_hint?: string;
@@ -489,6 +493,13 @@ export type ExtraVlessLinkDto = {
   id: string;
   uri: string;
   label: string;
+};
+
+export type ConfigVaultLinkDto = {
+  vault_key_id: number;
+  name: string;
+  uri: string;
+  masked_uri: string;
 };
 
 export type UserDeviceSlotDto = {
@@ -915,12 +926,40 @@ export type TestSubscriptionPlanDto = {
   price_rub: number;
 };
 
+export type ComboSubscriptionOfferDto = {
+  id: string;
+  enabled: boolean;
+  title: string;
+  plan_id: number;
+  include_white_lists: boolean;
+  include_topup: boolean;
+  topup_plan_id: number;
+  include_device_slot: boolean;
+  discount_percent: number;
+};
+
+export type ComboOfferPublicDto = ComboSubscriptionOfferDto & {
+  original_rub: number;
+  final_rub: number;
+  discount_rub: number;
+  plan_title: string;
+  addon_labels: string[];
+  eligible: boolean;
+  block_reason: string | null;
+  parts?: Array<{ label: string; price_rub: number }>;
+  eligible_subscription_ids?: number[];
+  eligible_subscription_names?: string[];
+  for_subscription_hint?: string | null;
+  preferred_subscription_id?: number | null;
+};
+
 export type SubscriptionShopDto = {
   sales_disabled: boolean;
   payment_url: string;
   plans: SubscriptionShopPlanDto[];
   topup_plans: TopUpShopPlanDto[];
   test_plan: TestSubscriptionPlanDto;
+  combo_offers?: ComboSubscriptionOfferDto[];
 };
 
 export type SubscriptionShopActivityEntry = { line: string; created_at: string };
@@ -957,6 +996,79 @@ export async function loadSubscriptionShopActivity(): Promise<{
   topups: SubscriptionShopActivityEntry[];
 }> {
   const res = await fetch("/api/subscription-shop/activity", { credentials: "include" });
+  return handle(res);
+}
+
+export type PaymentSessionLogStatus =
+  | "awaiting_proof"
+  | "pending_admin"
+  | "confirmed"
+  | "rejected"
+  | "cancelled";
+
+export type PaymentSessionChatMessageDto = {
+  at: string;
+  direction: "bot" | "user";
+  text: string;
+  has_photo?: boolean;
+};
+
+export type PaymentSessionReportRowDto = {
+  id: string;
+  status: PaymentSessionLogStatus;
+  kind: string;
+  kind_label: string;
+  channel: "chat" | "webapp";
+  payer_name: string;
+  tg_chat_id: number;
+  tg_user_id: number;
+  tg_username: string;
+  target_user_id: number | null;
+  target_user_name: string;
+  new_subscription_name: string;
+  plan_id: number;
+  plan_title: string;
+  tariff_line: string;
+  amount_rub: number;
+  amount_original_rub: number | null;
+  discount_label: string;
+  created_at: string;
+  updated_at: string;
+  completed_at: string | null;
+  recent_messages: PaymentSessionChatMessageDto[];
+};
+
+export async function loadPaymentSessionsReport(opts?: {
+  from?: string;
+  to?: string;
+  status?: string;
+}): Promise<{ sessions: PaymentSessionReportRowDto[] }> {
+  const q = new URLSearchParams();
+  if (opts?.from) q.set("from", opts.from);
+  if (opts?.to) q.set("to", opts.to);
+  if (opts?.status) q.set("status", opts.status);
+  const qs = q.toString();
+  const res = await fetch(`/api/subscription-shop/payment-sessions${qs ? `?${qs}` : ""}`, {
+    credentials: "include",
+  });
+  return handle(res);
+}
+
+export async function clearPaymentSessionsReport(opts?: {
+  from?: string;
+  to?: string;
+  status?: string;
+}): Promise<{ removed: number; bot_sessions_cancelled: number }> {
+  const res = await fetch("/api/subscription-shop/payment-sessions/clear", {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      from: opts?.from ?? "",
+      to: opts?.to ?? "",
+      status: opts?.status ?? "all",
+    }),
+  });
   return handle(res);
 }
 
@@ -1187,6 +1299,137 @@ export async function saveAutoCommunicationsConfig(
 export async function runExpiryAutoBroadcastsNow(): Promise<{ ok: boolean }> {
   const res = await fetch("/api/communications/auto-broadcasts/run-expiry", {
     method: "POST",
+    credentials: "include",
+  });
+  return handle(res);
+}
+
+export type TriggerButtonDto = {
+  text: string;
+  kind: "callback" | "url";
+  callback?: string;
+  url?: string;
+};
+
+export type TriggerMessageStepDto = {
+  id: string;
+  name: string;
+  enabled: boolean;
+  schedule_kind: "immediate" | "delay_minutes" | "days_before_expiry" | "days_after_expiry" | "days_inactive";
+  schedule_value: number;
+  text_html: string;
+  image_data_url?: string;
+  buttons: TriggerButtonDto[];
+};
+
+export type TriggerCampaignDto = {
+  id: string;
+  title: string;
+  description: string;
+  enabled: boolean;
+  priority: number;
+  steps: TriggerMessageStepDto[];
+  manual_audience?: TriggerAudience;
+};
+
+export type TriggerAudience = "all" | "active" | "expired" | "new" | "paid" | "unpaid";
+
+export type TriggerStepStatsDto = {
+  triggered: number;
+  sent: number;
+  delivered: number;
+  clicks: number;
+  payments: number;
+  revenue_rub: number;
+  payment_delay_ms_sum: number;
+  payment_delay_count: number;
+};
+
+export type TriggerMailingsConfigDto = {
+  globally_enabled: boolean;
+  campaigns: TriggerCampaignDto[];
+  updated_at: string;
+};
+
+export type TriggerMailingsStateDto = {
+  config: TriggerMailingsConfigDto;
+  stats: Record<string, Record<string, TriggerStepStatsDto>>;
+};
+
+export async function loadTriggerMailings(): Promise<TriggerMailingsStateDto> {
+  const res = await fetch("/api/communications/trigger-mailings", { credentials: "include" });
+  return handle(res);
+}
+
+export async function saveTriggerMailings(config: TriggerMailingsConfigDto): Promise<TriggerMailingsStateDto> {
+  const res = await fetch("/api/communications/trigger-mailings", {
+    method: "PUT",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ config }),
+  });
+  return handle(res);
+}
+
+export async function sendTriggerMailingTest(body: {
+  campaign_id: string;
+  step_id: string;
+  user_id?: number;
+  tg_chat_id?: number;
+  variant_id?: string;
+}): Promise<{ ok: boolean; error?: string }> {
+  const res = await fetch("/api/communications/trigger-mailings/test", {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  return handle(res);
+}
+
+export async function sendTriggerManualCampaign(
+  campaign_id: string,
+  audience?: TriggerAudience,
+): Promise<{ sent: number; errors: string[] }> {
+  const res = await fetch("/api/communications/trigger-mailings/send-manual", {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ campaign_id, audience }),
+  });
+  return handle(res);
+}
+
+export type TriggerMailingHistoryEntryDto = {
+  id: string;
+  sent_at: string;
+  campaign_id: string;
+  campaign_title: string;
+  step_id: string;
+  step_name: string;
+  variant_id?: string;
+  text_preview: string;
+  has_image: boolean;
+  tg_chat_id: number;
+  tg_user_id: number;
+  user_id?: number;
+  user_name: string;
+  delivered: boolean;
+  is_test: boolean;
+};
+
+export async function listTriggerMailingsHistory(opts?: {
+  limit?: number;
+  from?: string;
+  to?: string;
+  campaign_id?: string;
+}): Promise<{ items: TriggerMailingHistoryEntryDto[] }> {
+  const q = new URLSearchParams();
+  q.set("limit", String(opts?.limit ?? 200));
+  if (opts?.from) q.set("from", opts.from);
+  if (opts?.to) q.set("to", opts.to);
+  if (opts?.campaign_id) q.set("campaign_id", opts.campaign_id);
+  const res = await fetch(`/api/communications/trigger-mailings/history?${q}`, {
     credentials: "include",
   });
   return handle(res);
@@ -1605,6 +1848,13 @@ export type MySubProfileDto = {
     };
     devices?: MySubDevicesInfoDto;
     daily_gift?: MySubDailyGiftDto;
+    whitelist?: {
+      can_buy: boolean;
+      status: "none" | "active" | "suspended" | "expired";
+      block_reason?: string | null;
+      active_until?: string | null;
+      remaining_days?: number | null;
+    };
   }>;
   device_limit?: {
     enabled: boolean;
@@ -1616,6 +1866,7 @@ export type MySubProfileDto = {
   payment_url: string;
   plans: Array<{ id: number; title: string; total_gb: number; days: number; price_rub: number }>;
   topup_plans: Array<{ id: number; title: string; add_gb: number; price_rub: number }>;
+  combo_offers?: ComboOfferPublicDto[];
   test_plan?: {
     enabled: boolean;
     available: boolean;
@@ -1700,6 +1951,7 @@ export type MySubProfileDto = {
     can_buy: boolean;
     block_reason?: string | null;
     purchase_user_id?: number | null;
+    eligible_subscription_ids?: number[];
     instruction: {
       title: string;
       text: string;
@@ -1778,7 +2030,7 @@ export type MySubDevicesInfoDto = {
 
 export async function sendMySubPaymentProof(payload: {
   init_data: string;
-  pay_kind?: "subscription" | "topup" | "test" | "white_lists" | "device_slot";
+  pay_kind?: "subscription" | "topup" | "test" | "white_lists" | "device_slot" | "combo";
   user_id?: number;
   plan_id: number;
   photo_base64: string;
@@ -1786,6 +2038,7 @@ export async function sendMySubPaymentProof(payload: {
   photo_name?: string;
   new_subscription_name?: string;
   promo_code?: string;
+  combo_offer_id?: string;
 }): Promise<{ ok: boolean }> {
   const res = await fetch("/api/mysub/webapp/payment-proof", {
     method: "POST",
@@ -2961,6 +3214,33 @@ export async function setConfigVaultSubscriptionTargets(
   return handleVault(res);
 }
 
+export async function bulkRenameConfigVaultKeys(body: {
+  ids: number[];
+  remark: string;
+}): Promise<{ updated: number; errors: string[]; keys: ConfigVaultKeyDto[] }> {
+  const res = await fetch("/api/config-vault/bulk/rename", {
+    method: "POST",
+    credentials: "include",
+    headers: jsonHeaders,
+    body: JSON.stringify(body),
+  });
+  return handleVault(res);
+}
+
+export async function bulkAssignConfigVaultKeys(body: {
+  ids: number[];
+  subscription_mode: ConfigVaultSubscriptionModeDto;
+  subscription_user_ids?: number[];
+}): Promise<{ updated: number; errors: string[]; keys: ConfigVaultKeyDto[] }> {
+  const res = await fetch("/api/config-vault/bulk/assignment", {
+    method: "POST",
+    credentials: "include",
+    headers: jsonHeaders,
+    body: JSON.stringify(body),
+  });
+  return handleVault(res);
+}
+
 export async function checkConfigVaultKey(id: number): Promise<{ key: ConfigVaultKeyDto; check: ConfigVaultCheckDto }> {
   const res = await fetch(`/api/config-vault/${id}/check`, { method: "POST", credentials: "include" });
   return handleVault(res);
@@ -3058,7 +3338,7 @@ export async function fetchConfigVaultKeyRaw(id: number): Promise<{ key: ConfigV
   return handleVault(res);
 }
 
-export type WhitelistAssignmentModeDto = "none" | "all" | "selected";
+export type WhitelistAssignmentModeDto = "none" | "all" | "selected" | "purchasers";
 
 export type WhitelistVaultKeyDto = {
   id: number;
@@ -3072,11 +3352,33 @@ export type WhitelistVaultKeyDto = {
   assigned_user_ids?: number[];
   assigned_users_count: number;
   assignment_label: string;
+  group_id?: number | null;
+  group_name?: string | null;
+  remove_on_unavailable?: boolean;
+  checks_before_remove?: number;
+  effective_remove_on_unavailable?: boolean;
+  effective_checks_before_remove?: number;
+  consecutive_unavailable_checks?: number;
+  removed_from_subscriptions?: boolean;
+  removed_manually?: boolean;
+  removed_at?: string | null;
   last_check_at: string | null;
   last_check_status: VlessCheckStatusDto;
   last_check_latency_ms: number | null;
   last_error: string | null;
   notify_on_fail: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+export type WhitelistVaultGroupDto = {
+  id: number;
+  name: string;
+  remove_on_unavailable: boolean;
+  checks_before_remove: number;
+  keys_count: number;
+  removed_count: number;
+  unavailable_count: number;
   created_at: string;
   updated_at: string;
 };
@@ -3141,6 +3443,7 @@ export type WhitelistVaultOverviewDto = {
   sale_keys_count?: number;
   settings: WhitelistVaultSettingsDto;
   keys: WhitelistVaultKeyDto[];
+  groups?: WhitelistVaultGroupDto[];
 };
 
 export async function loadWhitelistVault(): Promise<WhitelistVaultOverviewDto> {
@@ -3186,6 +3489,8 @@ export async function updateWhitelistVaultKey(
     active: boolean;
     include_in_sale: boolean;
     notify_on_fail: boolean;
+    remove_on_unavailable: boolean;
+    checks_before_remove: number;
     assignment_mode: WhitelistAssignmentModeDto;
     assigned_user_ids: number[];
   }>,
@@ -3225,6 +3530,26 @@ export async function checkWhitelistVaultKey(
   return handleVault(res);
 }
 
+export async function removeWhitelistVaultKeyFromSubscriptions(
+  id: number,
+): Promise<WhitelistVaultOverviewDto & { key: WhitelistVaultKeyDto }> {
+  const res = await fetch(`/api/whitelist-vault/${id}/remove-from-subscriptions`, {
+    method: "POST",
+    credentials: "include",
+  });
+  return handleVault(res);
+}
+
+export async function restoreWhitelistVaultKeyToSubscriptions(
+  id: number,
+): Promise<WhitelistVaultOverviewDto & { key: WhitelistVaultKeyDto }> {
+  const res = await fetch(`/api/whitelist-vault/${id}/restore-to-subscriptions`, {
+    method: "POST",
+    credentials: "include",
+  });
+  return handleVault(res);
+}
+
 export async function bulkRenameWhitelistVaultKeys(body: {
   ids: number[];
   remark: string;
@@ -3261,6 +3586,44 @@ export async function bulkDeleteWhitelistVaultKeys(body: {
     credentials: "include",
     headers: jsonHeaders,
     body: JSON.stringify(body),
+  });
+  return handleVault(res);
+}
+
+export async function createWhitelistVaultGroup(body: {
+  name: string;
+  key_ids: number[];
+}): Promise<WhitelistVaultOverviewDto & { group: WhitelistVaultGroupDto }> {
+  const res = await fetch("/api/whitelist-vault/groups", {
+    method: "POST",
+    credentials: "include",
+    headers: jsonHeaders,
+    body: JSON.stringify(body),
+  });
+  return handleVault(res);
+}
+
+export async function updateWhitelistVaultGroup(
+  id: number,
+  body: Partial<{
+    name: string;
+    remove_on_unavailable: boolean;
+    checks_before_remove: number;
+  }>,
+): Promise<WhitelistVaultOverviewDto & { group: WhitelistVaultGroupDto }> {
+  const res = await fetch(`/api/whitelist-vault/groups/${id}`, {
+    method: "PATCH",
+    credentials: "include",
+    headers: jsonHeaders,
+    body: JSON.stringify(body),
+  });
+  return handleVault(res);
+}
+
+export async function deleteWhitelistVaultGroup(id: number): Promise<WhitelistVaultOverviewDto> {
+  const res = await fetch(`/api/whitelist-vault/groups/${id}`, {
+    method: "DELETE",
+    credentials: "include",
   });
   return handleVault(res);
 }
@@ -3341,6 +3704,20 @@ export async function fetchWhitelistVaultKeyRaw(
 
 export async function listWhitelistPurchases(): Promise<{ purchases: WhitelistPurchaseRowDto[] }> {
   const res = await fetch("/api/whitelist-vault/purchases", { credentials: "include" });
+  return handleVault(res);
+}
+
+export async function resetAllWhitelistPurchases(): Promise<{
+  ok: boolean;
+  reset_purchases: number;
+  reset_users: number;
+  cleared_assignments?: number;
+  users: Array<{ id: number; name: string; purchase_ids: string[] }>;
+}> {
+  const res = await fetch("/api/whitelist-vault/purchases/reset-all", {
+    method: "POST",
+    credentials: "include",
+  });
   return handleVault(res);
 }
 

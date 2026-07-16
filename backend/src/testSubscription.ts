@@ -39,9 +39,14 @@ export function isNewUserPaymentAllowed(tgUserId: number): boolean {
   return !getSubscriptionShop().sales_disabled;
 }
 
-/** Докупка ГБ доступна, если есть хотя бы одна не тестовая подписка. */
+/** Докупка ГБ: не тестовая подписка и не безлимит (total_gb > 0). */
+export function userCanBuyGbTopup(user: { is_test_subscription?: number; total_gb?: number }): boolean {
+  return user.is_test_subscription !== 1 && (Number(user.total_gb) || 0) > 0;
+}
+
+/** Докупка ГБ доступна, если есть хотя бы одна подходящая подписка. */
 export function tgUserCanBuyGb(tgUserId: number): boolean {
   const linked = findUsersByTelegramChatId(tgUserId);
   if (linked.length === 0) return false;
-  return linked.some((u) => u.is_test_subscription !== 1);
+  return linked.some(userCanBuyGbTopup);
 }

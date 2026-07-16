@@ -1,5 +1,7 @@
 import { Router } from "express";
 import {
+  bulkAssignConfigVaultKeys,
+  bulkRenameConfigVaultKeys,
   createConfigVaultKey,
   deleteConfigVaultKey,
   getConfigVaultKey,
@@ -171,6 +173,37 @@ router.post("/import-json", (req, res) => {
       keys: mapKeys(listConfigVaultKeys()),
       parsed_uris: items.map((x) => x.uri),
     });
+  } catch (e) {
+    res.status(400).json({ error: e instanceof Error ? e.message : String(e) });
+  }
+});
+
+router.post("/bulk/rename", (req, res) => {
+  try {
+    const b = (req.body ?? {}) as Record<string, unknown>;
+    const ids = Array.isArray(b.ids) ? b.ids.map((x) => Math.floor(Number(x))).filter((n) => n > 0) : [];
+    const remark = String(b.remark ?? b.name ?? "").trim();
+    const result = bulkRenameConfigVaultKeys(ids, remark);
+    res.json({ ...result, keys: mapKeys(listConfigVaultKeys()) });
+  } catch (e) {
+    res.status(400).json({ error: e instanceof Error ? e.message : String(e) });
+  }
+});
+
+router.post("/bulk/assignment", (req, res) => {
+  try {
+    const b = (req.body ?? {}) as Record<string, unknown>;
+    const ids = Array.isArray(b.ids) ? b.ids.map((x) => Math.floor(Number(x))).filter((n) => n > 0) : [];
+    const modeRaw = String(b.subscription_mode ?? "selected").trim().toLowerCase();
+    if (modeRaw !== "all" && modeRaw !== "selected") {
+      res.status(400).json({ error: "Некорректный режим назначения" });
+      return;
+    }
+    const userIds = Array.isArray(b.subscription_user_ids)
+      ? b.subscription_user_ids.map((x) => Math.floor(Number(x))).filter((n) => n > 0)
+      : [];
+    const result = bulkAssignConfigVaultKeys(ids, modeRaw, userIds);
+    res.json({ ...result, keys: mapKeys(listConfigVaultKeys()) });
   } catch (e) {
     res.status(400).json({ error: e instanceof Error ? e.message : String(e) });
   }
