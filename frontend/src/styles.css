@@ -17004,19 +17004,19 @@ html[data-theme="light"] .panel-about-api-link:hover {
 .comms-wiz-confirm-hero {
   display: flex;
   flex-direction: column;
-  gap: 0.2rem;
-  margin: 0 0 0.85rem;
+  gap: 0.15rem;
+  margin: 0 0 0.65rem;
 }
 
 .comms-wiz-send-hero-label,
 .comms-wiz-confirm-hero-label {
-  font-size: 0.75rem;
+  font-size: 0.72rem;
   color: var(--muted);
 }
 
 .comms-wiz-send-hero-count,
 .comms-wiz-confirm-hero-count {
-  font-size: 1.45rem;
+  font-size: 1.25rem;
   font-weight: 700;
   letter-spacing: -0.02em;
   line-height: 1.2;
@@ -17024,19 +17024,20 @@ html[data-theme="light"] .panel-about-api-link:hover {
 
 .comms-wiz-props {
   list-style: none;
-  margin: 0 0 1rem;
+  margin: 0 0 0.85rem;
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 0.4rem;
+  gap: 0.28rem;
 }
 
 .comms-wiz-props li {
   display: grid;
-  grid-template-columns: 7.5rem minmax(0, 1fr);
-  gap: 0.5rem;
+  grid-template-columns: 5.5rem minmax(0, 1fr);
+  gap: 0.4rem;
   align-items: baseline;
-  font-size: 0.88rem;
+  font-size: 0.84rem;
+  line-height: 1.35;
 }
 
 .comms-wiz-props li > span:first-child {
@@ -17049,53 +17050,65 @@ html[data-theme="light"] .panel-about-api-link:hover {
   word-break: break-word;
 }
 
+.comms-wiz-send {
+  width: 100%;
+  max-width: 320px;
+  padding: 0.85rem 0.95rem;
+}
+
+.comms-wiz-send .comms-wiz-h2 {
+  margin-bottom: 0.55rem;
+  font-size: 1rem;
+}
+
 .comms-wiz-send-actions {
   display: flex;
   justify-content: flex-start;
 }
 
 .comms-wiz-send-actions .primary {
-  min-width: 160px;
-  min-height: 44px;
+  min-width: 120px;
+  min-height: 40px;
+  padding: 0.45rem 1rem;
 }
 
-.comms-wiz-confirm-modal {
-  width: min(100%, 520px);
-  max-width: 520px;
+.modal.comms-wiz-confirm-modal {
+  width: min(100%, 380px);
+  max-width: 380px;
   margin: auto;
-  padding: 1rem 1.1rem 0.95rem;
-  height: auto;
-  max-height: min(90vh, 560px);
+  padding: 0.9rem 1rem 0.85rem;
+  height: fit-content;
+  max-height: min(90vh, 520px);
   overflow: auto;
   box-sizing: border-box;
 }
 
 .comms-wiz-confirm-title {
-  margin: 0 0 0.85rem;
-  font-size: 1.05rem;
+  margin: 0 0 0.65rem;
+  font-size: 1rem;
   font-weight: 650;
 }
 
 .comms-wiz-confirm-note {
-  margin: 0 0 0.85rem;
-  font-size: 0.82rem;
+  margin: 0 0 0.65rem;
+  font-size: 0.78rem;
   color: var(--muted);
-  line-height: 1.4;
+  line-height: 1.35;
 }
 
 .comms-wiz-confirm-warn {
-  margin: 0 0 0.85rem;
-  padding: 0.55rem 0.7rem;
-  border-radius: 10px;
+  margin: 0 0 0.65rem;
+  padding: 0.45rem 0.6rem;
+  border-radius: 8px;
   border: 1px solid color-mix(in srgb, #e53935 35%, var(--border));
   background: color-mix(in srgb, #e53935 10%, var(--surface));
   color: color-mix(in srgb, #b71c1c 70%, var(--text));
-  font-size: 0.82rem;
-  line-height: 1.4;
+  font-size: 0.78rem;
+  line-height: 1.35;
 }
 
 .comms-wiz-confirm-preview-wrap {
-  margin: 0 0 0.9rem;
+  margin: 0 0 0.75rem;
 }
 
 .comms-wiz-confirm-preview-toggle {
@@ -17106,10 +17119,10 @@ html[data-theme="light"] .panel-about-api-link:hover {
   background: transparent;
   color: var(--muted);
   font: inherit;
-  font-size: 0.82rem;
+  font-size: 0.8rem;
   cursor: pointer;
   padding: 0;
-  margin-bottom: 0.5rem;
+  margin-bottom: 0.4rem;
 }
 
 .comms-wiz-confirm-preview-toggle:hover {
@@ -17119,8 +17132,8 @@ html[data-theme="light"] .panel-about-api-link:hover {
 .comms-wiz-confirm-actions {
   display: flex;
   justify-content: flex-end;
-  gap: 0.5rem;
-  margin-top: 0.25rem;
+  gap: 0.45rem;
+  margin-top: 0.15rem;
 }
 
 .comms-tg-preview {
