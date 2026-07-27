@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import AdminModalBackdrop from "../AdminModalBackdrop";
 import { buttonLabel, type MessageButtonId } from "./commsTypes";
 
 type Props = {
@@ -100,7 +101,7 @@ export default function SendConfirmBar({
       </section>
 
       {confirmOpen && needsConfirm ? (
-        <div className="modal-backdrop" onClick={onCancelConfirm}>
+        <AdminModalBackdrop onClick={onCancelConfirm}>
           <div
             className="modal comms-wiz-confirm-modal"
             role="dialog"
@@ -187,7 +188,7 @@ export default function SendConfirmBar({
               </button>
             </div>
           </div>
-        </div>
+        </AdminModalBackdrop>
       ) : null}
     </>
   );

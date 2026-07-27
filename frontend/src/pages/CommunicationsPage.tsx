@@ -4,6 +4,7 @@ import SurveysPanel from "../components/SurveysPanel";
 import AutoBroadcastsPanel from "../components/AutoBroadcastsPanel";
 import TriggeredMailingsPanel from "../components/TriggeredMailingsPanel";
 import PanelTabs from "../components/PanelTabs";
+import AdminModalBackdrop from "../components/AdminModalBackdrop";
 import BroadcastWizard from "../components/comms/BroadcastWizard";
 import { usePanelSettings } from "../panelSettingsContext";
 import {
@@ -266,24 +267,45 @@ export default function CommunicationsPage({ onLogout }: { onLogout: () => void 
       ) : null}
 
       {historyRecipients ? (
-        <div className="modal-backdrop" onClick={() => setHistoryRecipients(null)}>
-          <div className="modal-card" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
-            <h3>Получатели</h3>
-            <p className="field-hint">{historyRecipients.source_label}</p>
-            <div className="comms-selected-chips" style={{ marginTop: "0.75rem" }}>
-              {historyRecipients.recipients.map((r) => (
-                <span key={`${historyRecipients.id}-${r.user_id}-${r.user_name}`} className="comms-chip">
-                  {r.user_name}
-                </span>
-              ))}
+        <AdminModalBackdrop onClick={() => setHistoryRecipients(null)}>
+          <div
+            className="modal comms-history-recipients-modal"
+            onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="comms-history-recipients-title"
+          >
+            <div className="modal-head">
+              <h2 id="comms-history-recipients-title">Получатели</h2>
+              <button
+                type="button"
+                className="ghost modal-close"
+                aria-label="Закрыть"
+                onClick={() => setHistoryRecipients(null)}
+              >
+                ×
+              </button>
             </div>
-            <div className="row-actions" style={{ marginTop: "1rem" }}>
+            <div className="modal-body">
+              <p className="field-hint" style={{ marginTop: 0 }}>
+                {historyRecipients.source_label}
+                {historyRecipients.segment_name ? ` · ${historyRecipients.segment_name}` : ""}
+              </p>
+              <div className="comms-selected-chips" style={{ marginTop: "0.65rem", maxHeight: "50vh", overflow: "auto" }}>
+                {historyRecipients.recipients.map((r) => (
+                  <span key={`${historyRecipients.id}-${r.user_id}-${r.user_name}`} className="comms-chip">
+                    {r.user_name}
+                  </span>
+                ))}
+              </div>
+            </div>
+            <div className="modal-footer">
               <button type="button" className="ghost" onClick={() => setHistoryRecipients(null)}>
                 Закрыть
               </button>
             </div>
           </div>
-        </div>
+        </AdminModalBackdrop>
       ) : null}
     </DashboardLayout>
   );

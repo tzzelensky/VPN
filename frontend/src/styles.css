@@ -17116,6 +17116,18 @@ html[data-theme="light"] .panel-about-api-link:hover {
   padding: 0.45rem 1.1rem;
 }
 
+.modal.comms-history-recipients-modal {
+  width: min(100%, 480px);
+  max-width: 480px;
+  margin: 2rem auto;
+  padding: 0;
+  overflow: hidden;
+}
+
+.modal.comms-history-recipients-modal .modal-body {
+  padding-bottom: 0.75rem;
+}
+
 .modal.comms-wiz-confirm-modal {
   width: min(100%, 380px);
   max-width: 380px;
