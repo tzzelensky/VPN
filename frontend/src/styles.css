@@ -17004,8 +17004,8 @@ html[data-theme="light"] .panel-about-api-link:hover {
 .comms-wiz-confirm-hero {
   display: flex;
   flex-direction: column;
-  gap: 0.15rem;
-  margin: 0 0 0.65rem;
+  gap: 0.1rem;
+  margin: 0;
 }
 
 .comms-wiz-send-hero-label,
@@ -17016,15 +17016,16 @@ html[data-theme="light"] .panel-about-api-link:hover {
 
 .comms-wiz-send-hero-count,
 .comms-wiz-confirm-hero-count {
-  font-size: 1.25rem;
+  font-size: 1.15rem;
   font-weight: 700;
   letter-spacing: -0.02em;
   line-height: 1.2;
+  white-space: nowrap;
 }
 
 .comms-wiz-props {
   list-style: none;
-  margin: 0 0 0.85rem;
+  margin: 0;
   padding: 0;
   display: flex;
   flex-direction: column;
@@ -17052,24 +17053,67 @@ html[data-theme="light"] .panel-about-api-link:hover {
 
 .comms-wiz-send {
   width: 100%;
-  max-width: 320px;
-  padding: 0.85rem 0.95rem;
+  max-width: none;
+  padding: 0.7rem 1rem;
 }
 
 .comms-wiz-send .comms-wiz-h2 {
-  margin-bottom: 0.55rem;
-  font-size: 1rem;
+  margin: 0;
+  font-size: 0.95rem;
+  white-space: nowrap;
+}
+
+.comms-wiz-send-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem 1.25rem;
+  flex-wrap: wrap;
+}
+
+.comms-wiz-send-main {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.65rem 1.35rem;
+  min-width: 0;
+  flex: 1;
+}
+
+.comms-wiz-send .comms-wiz-props {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 0.35rem 1.1rem;
+  align-items: center;
+}
+
+.comms-wiz-send .comms-wiz-props li {
+  display: inline-flex;
+  grid-template-columns: none;
+  gap: 0.35rem;
+  align-items: baseline;
+  white-space: nowrap;
+}
+
+.comms-wiz-send .comms-wiz-props li > span:last-child {
+  font-weight: 550;
+  max-width: 14rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .comms-wiz-send-actions {
   display: flex;
-  justify-content: flex-start;
+  justify-content: flex-end;
+  flex-shrink: 0;
+  margin-left: auto;
 }
 
 .comms-wiz-send-actions .primary {
-  min-width: 120px;
+  min-width: 132px;
   min-height: 40px;
-  padding: 0.45rem 1rem;
+  padding: 0.45rem 1.1rem;
 }
 
 .modal.comms-wiz-confirm-modal {
@@ -17081,6 +17125,10 @@ html[data-theme="light"] .panel-about-api-link:hover {
   max-height: min(90vh, 520px);
   overflow: auto;
   box-sizing: border-box;
+}
+
+.comms-wiz-confirm-hero {
+  margin: 0 0 0.65rem;
 }
 
 .comms-wiz-confirm-title {
@@ -17134,6 +17182,11 @@ html[data-theme="light"] .panel-about-api-link:hover {
   justify-content: flex-end;
   gap: 0.45rem;
   margin-top: 0.15rem;
+}
+
+.comms-wiz-confirm-modal .comms-wiz-props {
+  margin: 0 0 0.85rem;
+  flex-direction: column;
 }
 
 .comms-tg-preview {
@@ -17429,5 +17482,18 @@ html[data-theme="light"] .comms-wiz-confirm-warn {
 
   .comms-wiz-audience-grid {
     grid-template-columns: 1fr;
+  }
+
+  .comms-wiz-send-row {
+    align-items: stretch;
+  }
+
+  .comms-wiz-send-actions {
+    width: 100%;
+    margin-left: 0;
+  }
+
+  .comms-wiz-send-actions .primary {
+    width: 100%;
   }
 }

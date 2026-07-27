@@ -67,31 +67,35 @@ export default function SendConfirmBar({
   return (
     <>
       <section className="comms-wiz-card comms-wiz-send">
-        <h2 className="comms-wiz-h2">Отправка</h2>
-        <div className="comms-wiz-send-hero">
-          <span className="comms-wiz-send-hero-label">Будет отправлено</span>
-          <strong className="comms-wiz-send-hero-count">
-            {recipientCount} {recipientsLabel(recipientCount)}
-          </strong>
-        </div>
-        <ul className="comms-wiz-props">
-          <li>
-            <span>Название</span>
-            <span>{title.trim() || "—"}</span>
-          </li>
-          <li>
-            <span>Фото</span>
-            <span>{hasPhoto ? "Есть" : "Нет"}</span>
-          </li>
-          <li>
-            <span>Кнопок</span>
-            <span>{buttonCount}</span>
-          </li>
-        </ul>
-        <div className="comms-wiz-send-actions">
-          <button type="button" className="primary" disabled={busy || !canSend} onClick={onRequestSend}>
-            {busy ? "Отправка…" : "Отправить"}
-          </button>
+        <div className="comms-wiz-send-row">
+          <div className="comms-wiz-send-main">
+            <h2 className="comms-wiz-h2">Отправка</h2>
+            <div className="comms-wiz-send-hero">
+              <span className="comms-wiz-send-hero-label">Будет отправлено</span>
+              <strong className="comms-wiz-send-hero-count">
+                {recipientCount} {recipientsLabel(recipientCount)}
+              </strong>
+            </div>
+            <ul className="comms-wiz-props">
+              <li>
+                <span>Название</span>
+                <span>{title.trim() || "—"}</span>
+              </li>
+              <li>
+                <span>Фото</span>
+                <span>{hasPhoto ? "Есть" : "Нет"}</span>
+              </li>
+              <li>
+                <span>Кнопок</span>
+                <span>{buttonCount}</span>
+              </li>
+            </ul>
+          </div>
+          <div className="comms-wiz-send-actions">
+            <button type="button" className="primary" disabled={busy || !canSend} onClick={onRequestSend}>
+              {busy ? "Отправка…" : "Отправить"}
+            </button>
+          </div>
         </div>
       </section>
 
