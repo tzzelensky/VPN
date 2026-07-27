@@ -11,8 +11,9 @@ import AdminSettingsButton from "./AdminSettingsButton";
 import PanelSettingsModal from "./PanelSettingsModal";
 import UserModal from "./UserModal";
 import { useAutoLogout } from "../useAutoLogout";
-import { usePanelSettings } from "../panelSettingsContext";
+import AdminPageFooter from "./AdminPageFooter";
 import { normalizeSectionOrder } from "../panelNavUtils";
+import { usePanelSettings } from "../panelSettingsContext";
 import type { PanelSectionKey } from "../panelSettingsTypes";
 
 type NavItem = { to: string; label: string; Icon: (p: SVGProps<SVGSVGElement>) => ReactNode; sectionKey: PanelSectionKey };
@@ -103,15 +104,6 @@ function IconPromo(p: SVGProps<SVGSVGElement>) {
     <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden {...p}>
       <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z" />
       <circle cx="7" cy="7" r="1.5" fill="currentColor" stroke="none" />
-    </svg>
-  );
-}
-
-function IconExperiments(p: SVGProps<SVGSVGElement>) {
-  return (
-    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden {...p}>
-      <path d="M9 3h6l1 3h3a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h3l1-3Z" />
-      <path d="M12 11v6M9 14h6" />
     </svg>
   );
 }
@@ -212,7 +204,6 @@ const NAV_ITEMS: NavItem[] = [
   { to: "/servers", label: "Сервера", Icon: IconServers, sectionKey: "servers" },
   { to: "/users", label: "Пользователи", Icon: IconUsers, sectionKey: "users" },
   { to: "/logs", label: "Логи", Icon: IconLogs, sectionKey: "logs" },
-  { to: "/experiments", label: "Эксперименты", Icon: IconExperiments, sectionKey: "experiments" },
   { to: "/subscription-shop", label: "Подписки", Icon: IconShop, sectionKey: "subscription_shop" },
   { to: "/communications", label: "Коммуникации", Icon: IconComms, sectionKey: "communications" },
   { to: "/support-appeals", label: "Обращения", Icon: IconAppeals, sectionKey: "support_appeals" },
@@ -331,7 +322,7 @@ export default function DashboardLayout({
     void refreshStats();
     const id = window.setInterval(() => void refreshStats(), 60_000);
     return () => window.clearInterval(id);
-  }, [refreshStats, location.pathname]);
+  }, [refreshStats]);
 
   useEffect(() => {
     const onCache = (e: Event) => {
@@ -725,6 +716,7 @@ export default function DashboardLayout({
         {createFlash ? <div className={`flash ${createFlash.type === "ok" ? "ok" : "err"}`}>{createFlash.text}</div> : null}
 
         <main className="admin-main">{children}</main>
+        <AdminPageFooter brandName={brandShort} />
       </div>
 
       <UserModal
