@@ -1,9 +1,27 @@
-import { subscriptionVaultUrisForUser } from "./configVaultDb.js";
-import { applyUserRemarkToProxyUri, defaultNameFromUri, parseProxyUri } from "./configVaultUri.js";
-import { getWhitelistAccessState, subscriptionWhitelistUrisForUser } from "./whitelistVaultDb.js";
-import { getServerSubscriptionSettings, serversForUserSubscription, userHasActiveSubscription, type ServerRow, type UserRow } from "./db.js";
+import { buildHysteria2UriForUser } from "./hysteria2Link.js";
+import { configVaultLinksForUser } from "./configVaultDb.js";
+import {
+  applyUserRemarkToProxyUri,
+  defaultNameFromUri,
+  isClientJsonProfileUri,
+  parseProxyUri,
+} from "./configVaultUri.js";
+import {
+  getWhitelistAccessState,
+  subscriptionWhitelistEntriesForUser,
+} from "./whitelistVaultDb.js";
+import {
+  getServerSubscriptionSettings,
+  listDeployedServers,
+  serversForUserSubscription,
+  userHasActiveSubscription,
+  type ServerRow,
+  type UserRow,
+} from "./db.js";
 import { HAPP_WHITELIST_SUBSCRIPTION_LINE } from "./happWhitelistLine.js";
 import { buildVlessUriFromSubscriptionSettings } from "./vlessLink.js";
+import { resolveVpnDisplayEntryOrderForUser } from "./vpnDisplayCatalog.js";
+import { parseVpnEntryKey } from "./vpnDisplayOrder.js";
 
 function vlessUriForRow(user: UserRow, r: ServerRow): string {
   const settings = getServerSubscriptionSettings(r);
@@ -35,20 +53,44 @@ function appendUniqueSubscriptionUris(out: string[], seen: Set<string>, uris: st
 }
 
 /**
- * Одна строка VLESS на каждый выбранный развёрнутый узел (subscription_server_ids).
- * При whitelist_happ_enabled в конец добавляется строка happ://… (конфиг белых списков для Happ).
- * Дубликаты по одному endpoint (в т.ч. tail и ключи vault) отбрасываются.
+ * Строки подписки в порядке vpnDisplay / subscription_entry_order:
+ * vless, hy2, vault, whitelist + extras в конце + happ-хвост БС при необходимости.
  */
 export function subscriptionVlessLinksForUser(user: UserRow): string[] {
-  const rows = serversForUserSubscription(user);
   const seen = new Set<string>();
   const out: string[] = [];
+  const servers = new Map(listDeployedServers().map((s) => [s.id, s]));
+  const vaultById = new Map(configVaultLinksForUser(user).map((x) => [x.vault_key_id, x]));
+  const wlById = new Map(subscriptionWhitelistEntriesForUser(user).map((x) => [x.key_id, x]));
+  const entryOrder = resolveVpnDisplayEntryOrderForUser(user);
 
-  appendUniqueSubscriptionUris(
-    out,
-    seen,
-    rows.map((r) => vlessUriForRow(user, r)),
-  );
+  for (const key of entryOrder) {
+    const p = parseVpnEntryKey(key);
+    if (!p) continue;
+    if (p.kind === "vless") {
+      const row = servers.get(p.id);
+      if (!row) continue;
+      appendUniqueSubscriptionUris(out, seen, [vlessUriForRow(user, row)]);
+      continue;
+    }
+    if (p.kind === "hy2") {
+      const row = servers.get(p.id);
+      if (!row || row.hysteria2_deployed !== 1 || row.hysteria2_in_subscriptions !== 1) continue;
+      const uri = buildHysteria2UriForUser(row, user);
+      if (uri) appendUniqueSubscriptionUris(out, seen, [uri]);
+      continue;
+    }
+    if (p.kind === "vault") {
+      const link = vaultById.get(p.id);
+      if (link?.uri) appendUniqueSubscriptionUris(out, seen, [link.uri]);
+      continue;
+    }
+    if (p.kind === "whitelist") {
+      const e = wlById.get(p.id);
+      if (!e?.uri || isClientJsonProfileUri(e.uri)) continue;
+      appendUniqueSubscriptionUris(out, seen, [e.uri]);
+    }
+  }
 
   const extras = (user.extra_vless_links ?? [])
     .map((x) => {
@@ -58,13 +100,12 @@ export function subscriptionVlessLinksForUser(user: UserRow): string[] {
       return applyUserRemarkToProxyUri(uri, base, user.name);
     })
     .filter(Boolean);
-  const vault = subscriptionVaultUrisForUser(user);
-  const whitelist = subscriptionWhitelistUrisForUser(user);
-  appendUniqueSubscriptionUris(out, seen, [...extras, ...vault, ...whitelist]);
+  appendUniqueSubscriptionUris(out, seen, extras);
 
   if (user.whitelist_happ_enabled !== 1) return out;
   if (!userHasActiveSubscription(user) || getWhitelistAccessState(user).status !== "active") return out;
 
+  const rows = serversForUserSubscription(user);
   const tail = rows.length ? rows.slice(-4) : [];
   appendUniqueSubscriptionUris(
     out,

@@ -5,6 +5,7 @@ import SettingsToggleRow from "../components/SettingsToggleRow";
 import PageLoadingState from "../components/PageLoadingState";
 import PanelTabs from "../components/PanelTabs";
 import Spinner from "../components/Spinner";
+import { usePanelTabParam } from "../lib/panelTabRoute";
 import {
   addAdminDeviceSlots,
   diagnoseDeviceLimit,
@@ -24,7 +25,7 @@ import {
   type DeviceLimitSubscriptionsSnapshotDto,
 } from "../api";
 
-type Tab = "settings" | "subscriptions" | "purchases" | "events" | "diagnose";
+const DEVICE_LIMIT_TABS = ["settings", "subscriptions", "purchases", "events", "diagnose"] as const;
 
 function fmtDate(iso: string | number | null | undefined): string {
   if (!iso) return "—";
@@ -91,7 +92,7 @@ function purchaseStatusRu(s: string): string {
 }
 
 export default function DeviceLimitPage({ onLogout }: { onLogout: () => void }) {
-  const [tab, setTab] = useState<Tab>("settings");
+  const { tab, setTab } = usePanelTabParam("/device-limit", DEVICE_LIMIT_TABS);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [bulkToggleBusy, setBulkToggleBusy] = useState(false);
@@ -550,7 +551,7 @@ export default function DeviceLimitPage({ onLogout }: { onLogout: () => void }) 
                 Охват «все подписки» — лимит действует для каждой подписки. Отдельное включение не требуется.
               </p>
             )}
-            <div className="card device-limit-table-wrap">
+            <div className="card device-limit-table-wrap device-limit-table-wrap--subscriptions table-wrap">
               <table className="data-table">
                 <thead>
                   <tr>
@@ -689,7 +690,7 @@ export default function DeviceLimitPage({ onLogout }: { onLogout: () => void }) 
               <input type="date" value={purchaseFrom} onChange={(e) => setPurchaseFrom(e.target.value)} aria-label="С даты" />
               <input type="date" value={purchaseTo} onChange={(e) => setPurchaseTo(e.target.value)} aria-label="По дату" />
             </div>
-            <div className="card device-limit-table-wrap">
+            <div className="card device-limit-table-wrap table-wrap">
               <table className="data-table">
                 <thead>
                   <tr>
@@ -735,7 +736,7 @@ export default function DeviceLimitPage({ onLogout }: { onLogout: () => void }) 
                 </button>
               </div>
             ) : null}
-            <div className="card device-limit-table-wrap">
+            <div className="card device-limit-table-wrap table-wrap">
               <table className="data-table">
                 <thead>
                   <tr>
@@ -969,7 +970,7 @@ export default function DeviceLimitPage({ onLogout }: { onLogout: () => void }) 
               {usersAtLimit.length === 0 ? (
                 <p className="sub device-limit-empty">Сейчас никто не достиг лимита устройств.</p>
               ) : (
-                <div className="card device-limit-table-wrap">
+                <div className="card device-limit-table-wrap table-wrap">
                   <table className="data-table">
                     <thead>
                       <tr>

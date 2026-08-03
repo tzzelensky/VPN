@@ -1,12 +1,15 @@
 import {
   getUser,
   isTestSubscriptionSystemSegment,
+  isWhitelistConnectedSystemSegment,
   listCommunicationSegments,
   listTestSubscriptionSegmentUserIds,
+  listWhitelistConnectedSegmentUserIds,
   listUsers,
   type CommunicationSegmentRow,
 } from "./db.js";
 import { telegramHasDialog } from "./telegram/api.js";
+import { sweepExpiredManualWhitelistGrants } from "./whitelistVaultDb.js";
 
 export type TargetUserLite = { id: number; name: string; tg_id: string; enable: boolean };
 
@@ -61,6 +64,10 @@ export async function buildSegmentRows(segmentId: string): Promise<TargetUserLit
   let pre: typeof all;
   if (isTestSubscriptionSystemSegment(segment)) {
     const allowed = new Set(listTestSubscriptionSegmentUserIds());
+    pre = all.filter((u) => allowed.has(u.id));
+  } else if (isWhitelistConnectedSystemSegment(segment)) {
+    sweepExpiredManualWhitelistGrants();
+    const allowed = new Set(listWhitelistConnectedSegmentUserIds());
     pre = all.filter((u) => allowed.has(u.id));
   } else if (segment.user_ids.length > 0) {
     pre = all.filter((u) => segment.user_ids.includes(u.id));

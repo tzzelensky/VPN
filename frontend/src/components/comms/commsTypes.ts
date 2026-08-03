@@ -20,3 +20,11 @@ export function buttonLabel(id: MessageButtonId): string {
 export function isTestSubscriptionSystemSegment(s: { id: string; system_key?: string | null }): boolean {
   return s.system_key === "test_subscriptions" || s.id === "sys_test_subscriptions";
 }
+
+export function isWhitelistConnectedSystemSegment(s: { id: string; system_key?: string | null }): boolean {
+  return s.system_key === "whitelist_connected" || s.id === "sys_whitelist_connected";
+}
+
+export function isSystemCommunicationSegment(s: { id: string; system_key?: string | null }): boolean {
+  return isTestSubscriptionSystemSegment(s) || isWhitelistConnectedSystemSegment(s);
+}

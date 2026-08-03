@@ -11,8 +11,8 @@ export type FirewallOpenResult = {
   cloud_security_group_hint: string | null;
 };
 
-const CLOUD_HINT = (port: number) =>
-  `Порт может быть закрыт на уровне панели хостинга/security group. Откройте TCP ${port} вручную.`;
+const CLOUD_HINT = (port: number, proto: "tcp" | "udp") =>
+  `Порт может быть закрыт на уровне панели хостинга/security group. Откройте ${proto.toUpperCase()} ${port} вручную.`;
 
 export async function detectFirewallKind(cfg: SshConfig): Promise<FirewallKind> {
   const ufw = await sshExecCommand(cfg, "command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | head -1 || true");
@@ -33,38 +33,42 @@ export async function detectFirewallKind(cfg: SshConfig): Promise<FirewallKind> 
   return "none";
 }
 
-function manualCommand(kind: FirewallKind, port: number): string | null {
+function manualCommand(kind: FirewallKind, port: number, proto: "tcp" | "udp"): string | null {
   switch (kind) {
     case "ufw":
-      return `sudo ufw allow ${port}/tcp`;
+      return `sudo ufw allow ${port}/${proto}`;
     case "firewalld":
-      return `sudo firewall-cmd --permanent --add-port=${port}/tcp && sudo firewall-cmd --reload`;
+      return `sudo firewall-cmd --permanent --add-port=${port}/${proto} && sudo firewall-cmd --reload`;
     case "iptables":
-      return `sudo iptables -I INPUT -p tcp --dport ${port} -j ACCEPT`;
+      return `sudo iptables -I INPUT -p ${proto} --dport ${port} -j ACCEPT`;
     case "nftables":
-      return `sudo nft add rule inet filter input tcp dport ${port} accept`;
+      return `sudo nft add rule inet filter input ${proto} dport ${port} accept`;
     default:
       return null;
   }
 }
 
-async function isPortAllowedUfw(cfg: SshConfig, port: number): Promise<boolean> {
-  const r = await sshExecCommand(cfg, `ufw status 2>/dev/null | grep -E '${port}/tcp' || true`);
+async function isPortAllowedUfw(cfg: SshConfig, port: number, proto: "tcp" | "udp"): Promise<boolean> {
+  const r = await sshExecCommand(cfg, `ufw status 2>/dev/null | grep -E '${port}/${proto}' || true`);
   if (!r.stdout.trim()) return false;
   return /ALLOW/i.test(r.stdout);
 }
 
-async function isPortAllowedFirewalld(cfg: SshConfig, port: number): Promise<boolean> {
+async function isPortAllowedFirewalld(cfg: SshConfig, port: number, proto: "tcp" | "udp"): Promise<boolean> {
   const r = await sshExecCommand(
     cfg,
-    `firewall-cmd --list-ports 2>/dev/null | grep -w '${port}/tcp' && echo yes || true`,
+    `firewall-cmd --list-ports 2>/dev/null | grep -w '${port}/${proto}' && echo yes || true`,
   );
   return r.stdout.includes("yes");
 }
 
-export async function tryOpenFirewallPort(cfg: SshConfig, port: number): Promise<FirewallOpenResult> {
+async function tryOpenFirewallPortProto(
+  cfg: SshConfig,
+  port: number,
+  proto: "tcp" | "udp",
+): Promise<FirewallOpenResult> {
   const kind = await detectFirewallKind(cfg);
-  const cloud_security_group_hint = CLOUD_HINT(port);
+  const cloud_security_group_hint = CLOUD_HINT(port, proto);
 
   if (kind === "none" || kind === "unknown") {
     return {
@@ -72,12 +76,12 @@ export async function tryOpenFirewallPort(cfg: SshConfig, port: number): Promise
       opened: false,
       already_open: false,
       detail: "Активный firewall на сервере не обнаружен (или нет прав на чтение).",
-      manual_command: manualCommand("ufw", port),
+      manual_command: manualCommand("ufw", port, proto),
       cloud_security_group_hint,
     };
   }
 
-  const cmd = manualCommand(kind, port);
+  const cmd = manualCommand(kind, port, proto);
   if (!cmd) {
     return {
       kind,
@@ -90,15 +94,15 @@ export async function tryOpenFirewallPort(cfg: SshConfig, port: number): Promise
   }
 
   let alreadyOpen = false;
-  if (kind === "ufw") alreadyOpen = await isPortAllowedUfw(cfg, port);
-  if (kind === "firewalld") alreadyOpen = await isPortAllowedFirewalld(cfg, port);
+  if (kind === "ufw") alreadyOpen = await isPortAllowedUfw(cfg, port, proto);
+  if (kind === "firewalld") alreadyOpen = await isPortAllowedFirewalld(cfg, port, proto);
 
   if (alreadyOpen) {
     return {
       kind,
       opened: true,
       already_open: true,
-      detail: `Порт ${port}/tcp уже разрешён в ${kind}.`,
+      detail: `Порт ${port}/${proto} уже разрешён в ${kind}.`,
       manual_command: cmd,
       cloud_security_group_hint,
     };
@@ -108,8 +112,8 @@ export async function tryOpenFirewallPort(cfg: SshConfig, port: number): Promise
   const out = `${run.stdout}\n${run.stderr}`.trim();
   const ok = run.code === 0 || /skipping|already|exists|success/i.test(out);
 
-  if (kind === "ufw") alreadyOpen = await isPortAllowedUfw(cfg, port);
-  if (kind === "firewalld") alreadyOpen = await isPortAllowedFirewalld(cfg, port);
+  if (kind === "ufw") alreadyOpen = await isPortAllowedUfw(cfg, port, proto);
+  if (kind === "firewalld") alreadyOpen = await isPortAllowedFirewalld(cfg, port, proto);
 
   const opened = ok || alreadyOpen;
 
@@ -118,9 +122,17 @@ export async function tryOpenFirewallPort(cfg: SshConfig, port: number): Promise
     opened,
     already_open: alreadyOpen,
     detail: opened
-      ? `Правило firewall добавлено (${kind}).`
+      ? `Правило firewall добавлено (${kind}, ${proto}).`
       : `Не удалось открыть порт автоматически: ${out.slice(0, 200) || "нет вывода"}`,
-    manual_command: opened ? cmd : cmd,
+    manual_command: cmd,
     cloud_security_group_hint,
   };
+}
+
+export async function tryOpenFirewallPort(cfg: SshConfig, port: number): Promise<FirewallOpenResult> {
+  return tryOpenFirewallPortProto(cfg, port, "tcp");
+}
+
+export async function tryOpenFirewallUdpPort(cfg: SshConfig, port: number): Promise<FirewallOpenResult> {
+  return tryOpenFirewallPortProto(cfg, port, "udp");
 }

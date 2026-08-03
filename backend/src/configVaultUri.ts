@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
   isValidConfigVaultUri,
   isValidHysteriaUri,
@@ -43,6 +43,8 @@ export type ParsedVlessParams = {
   host: string;
   mode: string;
   allowInsecure: boolean;
+  /** SHA-256 fingerprint сертификата (pcs / pinnedPeerCertSha256). */
+  pinnedPeerCertSha256: string;
   /** Сырой JSON из query `extra` (для xhttp). */
   extra: string;
 };
@@ -75,6 +77,15 @@ export function parseVlessUri(raw: string): ParsedVlessParams | null {
       q.get("allowInsecure") === "true" ||
       q.get("insecure") === "1" ||
       q.get("insecure") === "true";
+    const pinnedPeerCertSha256 = (
+      q.get("pcs") ||
+      q.get("pinnedPeerCertSha256") ||
+      q.get("pinSHA256") ||
+      ""
+    )
+      .trim()
+      .replace(/:/g, "")
+      .toLowerCase();
     const extra = (q.get("extra") || "").trim();
     let remark = "";
     if (u.hash.length > 1) {
@@ -102,6 +113,7 @@ export function parseVlessUri(raw: string): ParsedVlessParams | null {
       host,
       mode,
       allowInsecure,
+      pinnedPeerCertSha256,
       extra,
     };
   } catch {
@@ -201,7 +213,7 @@ export function defaultNameFromUri(uri: string, fallback = "VLESS"): string {
 
 function emptyLinkTransportFields(): Pick<
   ParsedVlessParams,
-  "encryption" | "alpn" | "path" | "host" | "mode" | "allowInsecure" | "extra"
+  "encryption" | "alpn" | "path" | "host" | "mode" | "allowInsecure" | "pinnedPeerCertSha256" | "extra"
 > {
   return {
     encryption: "none",
@@ -210,6 +222,7 @@ function emptyLinkTransportFields(): Pick<
     host: "",
     mode: "",
     allowInsecure: false,
+    pinnedPeerCertSha256: "",
     extra: "",
   };
 }
@@ -267,13 +280,30 @@ export function parseProxyUri(raw: string): ParsedVlessParams | null {
   if (!isValidHysteriaUri(uri)) return null;
   try {
     const u = new URL(uri);
-    const auth = decodeURIComponent(u.username || "").trim();
+    const user = decodeURIComponent(u.username || "").trim();
+    const pass = decodeURIComponent(u.password || "").trim();
+    // userpass: username:password; одиночный auth — только username
+    const auth = pass ? `${user}:${pass}` : user;
     const address = u.hostname.trim();
     const port = u.port ? Number(u.port) : 443;
     if (!address || !auth || !Number.isFinite(port) || port < 1 || port > 65535) return null;
     const q = u.searchParams;
     const sni = (q.get("sni") || q.get("serverName") || "").trim();
     const fingerprint = (q.get("fp") || "").trim();
+    const allowInsecure =
+      q.get("allowInsecure") === "1" ||
+      q.get("allowInsecure") === "true" ||
+      q.get("insecure") === "1" ||
+      q.get("insecure") === "true";
+    const pinnedPeerCertSha256 = (
+      q.get("pcs") ||
+      q.get("pinnedPeerCertSha256") ||
+      q.get("pinSHA256") ||
+      ""
+    )
+      .trim()
+      .replace(/:/g, "")
+      .toLowerCase();
     let remark = "";
     if (u.hash.length > 1) {
       try {
@@ -295,6 +325,8 @@ export function parseProxyUri(raw: string): ParsedVlessParams | null {
       shortId: "",
       remark,
       ...emptyLinkTransportFields(),
+      allowInsecure,
+      pinnedPeerCertSha256,
     };
   } catch {
     return null;
@@ -440,12 +472,20 @@ function buildHysteria2UriFromOutbound(
   const tls = asRecord(stream?.tlsSettings);
   const sni = String(tls?.serverName ?? tls?.servername ?? "").trim();
   const fp = String(tls?.fingerprint ?? "").trim();
-  const insecure = tls?.allowInsecure === true ? "1" : "0";
+  const pin = String(tls?.pinnedPeerCertSha256 ?? "")
+    .trim()
+    .replace(/:/g, "")
+    .toLowerCase();
+  const insecure = tls?.allowInsecure === true || Boolean(pin) ? "1" : "0";
 
   const q = new URLSearchParams();
   q.set("insecure", insecure);
   if (sni) q.set("sni", sni);
   if (fp) q.set("fp", fp);
+  if (pin) {
+    q.set("pinSHA256", pin);
+    q.set("pcs", pin);
+  }
 
   const tag = String(outbound.tag ?? "").trim();
   const hashName = (tag && remarks ? `${remarks} · ${tag}` : remarks || tag || `${address}:${port}`).slice(0, 120);
@@ -552,9 +592,163 @@ export function buildProxyUrisFromClientJson(
   return { uris };
 }
 
+/** Хост-маркер для JSON-профилей Happ без извлекаемого proxy-URI (balancer / routing). */
+export const CLIENT_JSON_PROFILE_HOST = "json-profile.local";
+
+export function isClientJsonProfileUri(uri: string): boolean {
+  const p = parseProxyUri(uri);
+  return p?.address === CLIENT_JSON_PROFILE_HOST;
+}
+
+function hasRoutingBalancers(obj: Record<string, unknown>): boolean {
+  const routing = asRecord(obj.routing);
+  return Array.isArray(routing?.balancers) && routing!.balancers.length > 0;
+}
+
+function isHappClientJsonProfile(obj: Record<string, unknown>): boolean {
+  if (!Array.isArray(obj.outbounds) || obj.outbounds.length === 0) return false;
+  return (
+    obj.remarks != null ||
+    obj.routing != null ||
+    obj.dns != null ||
+    obj.inbounds != null ||
+    obj.burstObservatory != null ||
+    obj.observatory != null
+  );
+}
+
+/** Детерминированный vless:// для хранения полного client_json без реальных узлов. */
+export function syntheticUriForClientJson(jsonText: string, remark: string): string {
+  const hash = createHash("sha256").update(jsonText).digest("hex");
+  const uuid = `${hash.slice(0, 8)}-${hash.slice(8, 12)}-4${hash.slice(13, 16)}-a${hash.slice(17, 20)}-${hash.slice(20, 32)}`;
+  const name = (remark.trim() || "JSON-профиль").slice(0, 120);
+  return `vless://${uuid}@${CLIENT_JSON_PROFILE_HOST}:443?encryption=none&type=tcp&security=none#${encodeURIComponent(name)}`;
+}
+
+export type WhitelistJsonImportItem = {
+  uri: string;
+  name: string;
+  /** Полный JSON-профиль для Happ (passthrough). */
+  client_json: string | null;
+};
+
+function itemsFromClientProfile(profile: Record<string, unknown>): WhitelistJsonImportItem[] | { error: string } {
+  const jsonText = JSON.stringify(profile);
+  const remarks = String(profile.remarks ?? "").trim();
+  const built = buildProxyUrisFromClientJson(jsonText);
+  const balancers = hasRoutingBalancers(profile);
+
+  if (!("error" in built) && built.uris.length > 0) {
+    // Профиль с balancer / сложным routing — один ключ с полным JSON для Happ.
+    if (balancers) {
+      const first = built.uris[0]!;
+      return [
+        {
+          uri: first.uri,
+          name: (remarks || first.name).slice(0, 120),
+          client_json: jsonText,
+        },
+      ];
+    }
+    return built.uris.map((u) => ({
+      uri: u.uri,
+      name: u.name,
+      client_json: jsonText,
+    }));
+  }
+
+  // Авто-выбор / routing-only: нет vless/trojan/hysteria, но это валидный Happ client JSON.
+  if (isHappClientJsonProfile(profile)) {
+    const name = (remarks || "JSON-профиль").slice(0, 120);
+    return [
+      {
+        uri: syntheticUriForClientJson(jsonText, name),
+        name,
+        client_json: jsonText,
+      },
+    ];
+  }
+
+  return {
+    error:
+      "error" in built
+        ? built.error
+        : "В JSON не найден outbound с protocol: vless, trojan или hysteria",
+  };
+}
+
+/**
+ * Импорт в БС: один/несколько Happ/Xray профилей (объект или массив),
+ * либо экспорт `{ keys: [...] }`. Полные профили с balancer сохраняются как client_json.
+ */
+export function parseWhitelistJsonImport(
+  jsonText: string,
+): { items: WhitelistJsonImportItem[] } | { error: string } {
+  let root: unknown;
+  try {
+    root = JSON.parse(jsonText);
+  } catch {
+    return { error: "Некорректный JSON" };
+  }
+
+  if (Array.isArray(root)) {
+    const items: WhitelistJsonImportItem[] = [];
+    const errors: string[] = [];
+    for (let i = 0; i < root.length; i++) {
+      const profile = asRecord(root[i]);
+      if (!profile) {
+        errors.push(`Элемент ${i + 1}: ожидается JSON-объект`);
+        continue;
+      }
+      const part = itemsFromClientProfile(profile);
+      if ("error" in part) {
+        errors.push(`Элемент ${i + 1}: ${part.error}`);
+        continue;
+      }
+      items.push(...part);
+    }
+    if (items.length > 0) return { items };
+    return { error: errors[0] ?? "В JSON-массиве нет импортируемых профилей" };
+  }
+
+  const obj = asRecord(root);
+  if (!obj) return { error: "Ожидается JSON-объект или массив профилей" };
+
+  if (Array.isArray(obj.keys)) {
+    const items: WhitelistJsonImportItem[] = [];
+    for (const row of obj.keys) {
+      const k = asRecord(row);
+      if (!k) continue;
+      const uri = String(k.uri ?? k.raw_uri ?? "").trim();
+      if (!uri || !isValidWhitelistVaultUri(uri)) continue;
+      const name = String(k.name ?? "").trim() || defaultNameFromUri(uri, "Ключ");
+      let client_json: string | null = null;
+      if (typeof k.client_json === "string" && k.client_json.trim()) {
+        client_json = k.client_json.trim();
+      } else if (k.client_json && typeof k.client_json === "object") {
+        client_json = JSON.stringify(k.client_json);
+      }
+      items.push({
+        uri,
+        name: name.slice(0, 120),
+        client_json,
+      });
+    }
+    if (items.length > 0) return { items };
+    return { error: "В keys нет корректных ссылок (vless://, trojan://, hysteria2://)" };
+  }
+
+  const fromProfile = itemsFromClientProfile(obj);
+  if ("error" in fromProfile) return fromProfile;
+  return { items: fromProfile };
+}
+
 export type ConfigVaultJsonImportItem = { uri: string; name: string; active?: boolean };
 
-/** Импорт: JSON-конфиг Xray/Happ или экспорт хранилища `{ keys: [{ name, uri }] }`. */
+/**
+ * Импорт: JSON-конфиг Xray/Happ или экспорт хранилища `{ keys: [{ name, uri }] }`.
+ * Массив профилей — собирает URI из всех элементов с proxy-outbound.
+ */
 export function parseConfigVaultJsonImport(
   jsonText: string,
 ): { items: ConfigVaultJsonImportItem[] } | { error: string } {
@@ -564,8 +758,25 @@ export function parseConfigVaultJsonImport(
   } catch {
     return { error: "Некорректный JSON" };
   }
+
+  if (Array.isArray(root)) {
+    const items: ConfigVaultJsonImportItem[] = [];
+    for (const el of root) {
+      const profile = asRecord(el);
+      if (!profile) continue;
+      const built = buildProxyUrisFromClientJson(JSON.stringify(profile));
+      if ("error" in built) continue;
+      items.push(...built.uris.map((u) => ({ uri: u.uri, name: u.name })));
+    }
+    if (items.length > 0) return { items };
+    return {
+      error:
+        "В массиве нет outbound vless/trojan/hysteria. Профили только с balancer импортируйте в Белые списки (полный JSON).",
+    };
+  }
+
   const obj = asRecord(root);
-  if (!obj) return { error: "Ожидается JSON-объект" };
+  if (!obj) return { error: "Ожидается JSON-объект или массив профилей" };
 
   if (Array.isArray(obj.keys)) {
     const items: ConfigVaultJsonImportItem[] = [];
@@ -584,6 +795,16 @@ export function parseConfigVaultJsonImport(
     }
     if (items.length > 0) return { items };
     return { error: "В keys нет корректных ссылок (vless://, trojan://, hysteria2://)" };
+  }
+
+  if (isHappClientJsonProfile(obj) && hasRoutingBalancers(obj)) {
+    const built = buildProxyUrisFromClientJson(jsonText);
+    if ("error" in built) {
+      return {
+        error:
+          "Это профиль авто-выбора (balancer) без узлов. Импортируйте его в Белые списки — там сохранится полный JSON для Happ.",
+      };
+    }
   }
 
   const built = buildProxyUrisFromClientJson(jsonText);

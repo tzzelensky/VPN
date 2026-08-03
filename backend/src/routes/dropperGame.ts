@@ -66,7 +66,7 @@ router.post("/reset-all-tickets", (_req, res) => {
   res.json({ ok: true });
 });
 
-/** Установить пул билетов для строки клиента (общий для всех подписок с тем же tg_id). */
+/** Установить число билетов для конкретной подписки (строки клиента). */
 router.post("/set-user-tickets", (req, res) => {
   const body = (req.body ?? {}) as { user_id?: unknown; tickets?: unknown };
   const userId = Math.floor(Number(body.user_id));
@@ -80,7 +80,7 @@ router.post("/set-user-tickets", (req, res) => {
     res.status(result.error === "user_not_found" ? 404 : 400).json({ error: result.error });
     return;
   }
-  res.json({ ok: true });
+  res.json({ ok: true, tickets: result.tickets });
 });
 
 router.get("/report", (_req, res) => {

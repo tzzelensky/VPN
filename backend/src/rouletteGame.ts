@@ -387,6 +387,7 @@ export function getRoulettePublicConfig() {
   return {
     enabled: getWebAppActiveGame() === "roulette",
     tickets_per_purchase: getGameTicketsPerPurchase(),
+    ui_mode: cfg.ui_mode,
     prizes: prizes.map((p) => ({
       id: p.id,
       title: p.title,

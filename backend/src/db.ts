@@ -1,4 +1,10 @@
 import {
+  normalizeVpnServerOrder,
+  reorderIdsByTemplate,
+} from "./panelSettingsTypes.js";
+import { vlessIdsFromEntryOrder, parseVpnEntryKey } from "./vpnDisplayOrder.js";
+import { getPanelSettings } from "./panelSettings.js";
+import {
   normalizeSubscriptionSettings,
   subscriptionSettingsFromLegacyServer,
   type ServerSubscriptionSettings,
@@ -50,6 +56,9 @@ export type { UserDeviceSlot };
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const dataPath = process.env.DATA_PATH ?? path.join(__dirname, "..", "data.json");
 
+/** Кэш data.json: иначе каждый listUsers/listServers парсит весь файл заново. */
+let storeCache: { mtimeMs: number; store: FileStore } | null = null;
+
 function communicationLogPath(): string {
   return path.join(path.dirname(dataPath), "communication_message_log.json");
 }
@@ -77,6 +86,8 @@ export type CreateUserInput = {
   subscription_server_count?: number;
   /** Явный список id развёрнутых серверов в подписке (порядок сохраняется). */
   subscription_server_ids?: number[];
+  /** Порядок элементов подписки: vless:1, hy2:1, vault:5, whitelist:3 (пусто = глобальный). */
+  subscription_entry_order?: string[];
   /** Ограничение по количеству одновременно подключённых устройств. */
   device_limit_enabled?: number;
   /** Максимум устройств при включённом device_limit_enabled. */
@@ -99,6 +110,9 @@ export type CreateUserInput = {
   /** Последний «сырой» снимок счётчиков Xray (для корректного инкремента после рестартов). */
   stats_raw_up?: number;
   stats_raw_down?: number;
+  /** Сырой снимок Hysteria2 Traffic Stats API. */
+  hy2_stats_raw_up?: number;
+  hy2_stats_raw_down?: number;
   /** Антиспам-состояние авто-уведомлений о трафике в Telegram. */
   traffic_notify_state?: "" | "low30" | "empty";
   /** Антиспам авто-уведомлений о сроке подписки: warn = устар., expired = истекла. */
@@ -139,6 +153,8 @@ export type UserRow = {
   reality_spx: string;
   subscription_server_count: number;
   subscription_server_ids: number[];
+  /** Порядок vless/hy2/vault/whitelist в подписке; [] = брать из panelSettings.vpnDisplay.entryOrder. */
+  subscription_entry_order: string[];
   /** 1 = при последнем опросе Xray сообщал online>0 для этого UUID. */
   online_snapshot: number;
   /** Число одновременных активных подключений по последнему опросу Xray. */
@@ -164,6 +180,9 @@ export type UserRow = {
   /** Последний «сырой» снимок uplink/downlink из Xray; -1 = ещё не инициализировано. */
   stats_raw_up: number;
   stats_raw_down: number;
+  /** Сырой снимок Hysteria2; -1 = ещё не инициализировано. */
+  hy2_stats_raw_up: number;
+  hy2_stats_raw_down: number;
   /** Антиспам-состояние авто-уведомлений о трафике в Telegram. */
   traffic_notify_state: "" | "low30" | "empty";
   expiry_notify_state: "" | "warn" | "expired";
@@ -374,6 +393,11 @@ export type DropperPlayLogRow = {
 };
 
 export type WebAppActiveGame = "none" | "dropper" | "roulette";
+export type RouletteUiMode = "wheel" | "case";
+
+export function normalizeRouletteUiMode(raw: unknown): RouletteUiMode {
+  return raw === "case" ? "case" : "wheel";
+}
 
 export type RoulettePrizeRow = {
   id: string;
@@ -547,8 +571,19 @@ export type CommunicationMessageLogRow = {
   mode?: "global" | "single" | "selected" | "segment";
   segment_id?: string;
   segment_name?: string;
+  /** Превью текста для списков (может быть обрезано). */
   text: string;
+  /** Полный шаблон сообщения без админской шапки (для копирования). */
+  body_text?: string;
+  title?: string;
+  mark_enabled?: boolean;
+  mark_text?: string;
+  buttons?: string[];
+  user_ids?: number[];
   has_photo: boolean;
+  photo_path?: string;
+  photo_mime?: string;
+  photo_name?: string;
   recipients: CommunicationMessageRecipient[];
   sent: number;
   attempted: number;
@@ -606,6 +641,16 @@ export type ServerRow = {
   /** 1 = админ сохранил настройки вручную; deploy/hints не перезаписывают subscription_settings. */
   subscription_settings_custom: number;
   vless_deployed: number;
+  /** 1 = Hysteria2 установлен и запущен на узле. */
+  hysteria2_deployed: number;
+  /** 1 = ссылка Hysteria2 попадает в клиентские подписки (если сервер выбран у пользователя). */
+  hysteria2_in_subscriptions: number;
+  hysteria2_port: number;
+  hysteria2_sni: string;
+  hysteria2_stats_secret: string;
+  hysteria2_config_path: string | null;
+  /** SHA-256 leaf-сертификата HY2 (hex без `:`) для pinnedPeerCertSha256 / pcs. */
+  hysteria2_cert_sha256: string;
   /** 1 = только эксперименты, можно свободно использовать 443 без прод-подписок. */
   experimental_only: number;
   last_ssh_ok: number;
@@ -635,6 +680,8 @@ type FileStore = {
   dropper_play_log: DropperPlayLogRow[];
   webapp_active_game?: WebAppActiveGame;
   game_tickets_per_purchase?: number;
+  /** UI рулетки в Mini App: классическое колесо или лента как CS-кейс. */
+  roulette_ui_mode?: RouletteUiMode;
   roulette_prizes?: RoulettePrizeRow[];
   roulette_spins?: RouletteSpinRow[];
   game_ticket_transactions?: GameTicketTransactionRow[];
@@ -724,8 +771,8 @@ function defaultReferralProgram(): ReferralProgramConfig {
     enabled: false,
     inviter_reward_gb: 10,
     inviter_reward_days: 7,
-    invited_discount_percent: 10,
-    invite_copy_text: "Я пользуюсь этим VPN, вот тебе скидка на первую покупку.",
+    invited_discount_percent: 20,
+    invite_copy_text: "Я пользуюсь {brand}, вот тебе скидка {discount} на первую покупку!",
   };
 }
 
@@ -850,6 +897,7 @@ function emptyStore(): FileStore {
     dropper_play_log: [],
     webapp_active_game: "none",
     game_tickets_per_purchase: defaultDropperGame().tickets_per_purchase,
+    roulette_ui_mode: "wheel",
     roulette_prizes: [],
     roulette_spins: [],
     game_ticket_transactions: [],
@@ -959,6 +1007,24 @@ function normalizeCommunicationMessageLog(raw: unknown): CommunicationMessageLog
     modeRaw === "global" || modeRaw === "single" || modeRaw === "selected" || modeRaw === "segment"
       ? modeRaw
       : undefined;
+  const body_text = String(o.body_text ?? "").trim();
+  const title = String(o.title ?? "").trim();
+  const mark_text = String(o.mark_text ?? "").trim();
+  const buttonsRaw = Array.isArray(o.buttons) ? o.buttons : [];
+  const buttons = [
+    ...new Set(
+      buttonsRaw
+        .map((x) => String(x ?? "").trim())
+        .filter((x) => x === "pay" || x === "ref" || x === "sub" || x === "buygb" || x === "webapp" || x === "whitelist"),
+    ),
+  ];
+  const userIdsRaw = Array.isArray(o.user_ids) ? o.user_ids : [];
+  const user_ids = [
+    ...new Set(userIdsRaw.map((x) => Math.floor(Number(x))).filter((n) => Number.isFinite(n) && n > 0)),
+  ];
+  const photo_path = String(o.photo_path ?? "").replace(/\\/g, "/").trim();
+  const photo_mime = String(o.photo_mime ?? "").trim();
+  const photo_name = String(o.photo_name ?? "").trim();
   return {
     id,
     sent_at: String(o.sent_at ?? new Date().toISOString()),
@@ -972,7 +1038,18 @@ function normalizeCommunicationMessageLog(raw: unknown): CommunicationMessageLog
       ? { segment_name: String(o.segment_name).trim().slice(0, 120) }
       : {}),
     text: text.slice(0, 8000),
-    has_photo: o.has_photo === true || o.has_photo === 1 || o.has_photo === "1",
+    ...(body_text ? { body_text: body_text.slice(0, 16000) } : {}),
+    ...(title ? { title: title.slice(0, 200) } : {}),
+    ...(o.mark_enabled !== undefined
+      ? { mark_enabled: o.mark_enabled === true || o.mark_enabled === 1 || o.mark_enabled === "1" }
+      : {}),
+    ...(mark_text ? { mark_text: mark_text.slice(0, 200) } : {}),
+    ...(buttons.length ? { buttons } : {}),
+    ...(user_ids.length ? { user_ids } : {}),
+    has_photo: o.has_photo === true || o.has_photo === 1 || o.has_photo === "1" || Boolean(photo_path),
+    ...(photo_path && !photo_path.includes("..") ? { photo_path: photo_path.slice(0, 260) } : {}),
+    ...(photo_mime ? { photo_mime: photo_mime.slice(0, 80) } : {}),
+    ...(photo_name ? { photo_name: photo_name.slice(0, 160) } : {}),
     recipients,
     sent: Math.max(0, Math.floor(Number(o.sent) || 0)),
     attempted: Math.max(0, Math.floor(Number(o.attempted) || 0)),
@@ -1342,6 +1419,21 @@ export function normalizeServer(s: ServerRow): ServerRow {
       s as ServerRow,
     ),
     subscription_settings_custom: s.subscription_settings_custom === 1 ? 1 : 0,
+    vless_deployed: s.vless_deployed === 1 ? 1 : 0,
+    hysteria2_deployed: s.hysteria2_deployed === 1 ? 1 : 0,
+    hysteria2_in_subscriptions: s.hysteria2_in_subscriptions === 1 ? 1 : 0,
+    hysteria2_port: (() => {
+      const n = Math.floor(Number(s.hysteria2_port) || 0);
+      // <1024 почти наверняка баг нормализации (Math.max(1,0)→1); дефолт 36712
+      return n >= 1024 && n <= 65535 ? n : 36712;
+    })(),
+    hysteria2_sni: String(s.hysteria2_sni ?? "").trim() || "www.cloudflare.com",
+    hysteria2_stats_secret: String(s.hysteria2_stats_secret ?? "").trim(),
+    hysteria2_config_path: s.hysteria2_config_path ?? null,
+    hysteria2_cert_sha256: String(s.hysteria2_cert_sha256 ?? "")
+      .trim()
+      .replace(/:/g, "")
+      .toLowerCase(),
     experimental_only: s.experimental_only === 1 ? 1 : 0,
   };
 }
@@ -1392,11 +1484,64 @@ function coerceTotalGbField(raw: unknown): number {
   return gb;
 }
 
-function deployedIdsFromServerRows(servers: ServerRow[]): number[] {
+function deployedIdsRawById(servers: ServerRow[]): number[] {
   return [...servers]
     .filter((r) => r.vless_deployed === 1 && r.vless_uuid != null)
     .sort((a, b) => a.id - b.id)
     .map((s) => s.id);
+}
+
+function deployedIdsFromServerRows(servers: ServerRow[]): number[] {
+  const byId = deployedIdsRawById(servers);
+  try {
+    const vd = getPanelSettings().vpnDisplay;
+    const fromEntries = vlessIdsFromEntryOrder(vd?.entryOrder ?? []);
+    const order = fromEntries.length > 0 ? fromEntries : (vd?.serverOrder ?? []);
+    return normalizeVpnServerOrder(order, byId);
+  } catch {
+    return byId;
+  }
+}
+
+function coerceSubscriptionEntryOrder(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const item of raw) {
+    const p = parseVpnEntryKey(item);
+    if (!p || seen.has(p.key)) continue;
+    seen.add(p.key);
+    out.push(p.key);
+  }
+  return out;
+}
+
+/** Применить эталонный порядок серверов ко всем не-тестовым пользователям (состав сохраняется). */
+export function applyVpnDisplayServerOrderToAllUsers(templateOrder: number[]): { updated_users: number } {
+  let updated = 0;
+  mutate((store) => {
+    const allDeployed = deployedIdsFromServerRows(store.servers);
+    const template = normalizeVpnServerOrder(templateOrder, allDeployed);
+    for (let i = 0; i < store.users.length; i++) {
+      const u = store.users[i]!;
+      if (u.is_test_subscription === 1) continue;
+      const cur = u.subscription_server_ids ?? [];
+      if (cur.length === 0) continue;
+      const nextIds = reorderIdsByTemplate(cur, template);
+      if (nextIds.length === cur.length && nextIds.every((id, idx) => id === cur[idx])) continue;
+      store.users[i] = normalizeUser(
+        {
+          ...u,
+          subscription_server_ids: nextIds,
+          subscription_server_count: subscriptionCountFromIds(nextIds, allDeployed),
+          updated_at: new Date().toISOString(),
+        },
+        allDeployed,
+      );
+      updated += 1;
+    }
+  });
+  return { updated_users: updated };
 }
 
 function coerceSubscriptionServerIds(rawIds: unknown, legacyCount: number, allIds: number[]): number[] {
@@ -1476,6 +1621,9 @@ function normalizeUser(u: UserRow, deployedIdsForNormalize?: number[]): UserRow 
     reality_spx: u.reality_spx ?? "/",
     subscription_server_ids,
     subscription_server_count: subscriptionCountFromIds(subscription_server_ids, allDeployedIds),
+    subscription_entry_order: coerceSubscriptionEntryOrder(
+      (u as { subscription_entry_order?: unknown }).subscription_entry_order,
+    ),
     online_snapshot: u.online_snapshot === 1 ? 1 : 0,
     online_devices: Math.max(0, Math.floor(Number((u as { online_devices?: unknown }).online_devices) || 0)),
     device_limit_enabled: Number((u as { device_limit_enabled?: unknown }).device_limit_enabled) === 1 ? 1 : 0,
@@ -1492,6 +1640,12 @@ function normalizeUser(u: UserRow, deployedIdsForNormalize?: number[]): UserRow 
     stats_raw_up: Number.isFinite(Number(u.stats_raw_up)) ? Math.max(-1, Math.floor(Number(u.stats_raw_up))) : -1,
     stats_raw_down: Number.isFinite(Number(u.stats_raw_down))
       ? Math.max(-1, Math.floor(Number(u.stats_raw_down)))
+      : -1,
+    hy2_stats_raw_up: Number.isFinite(Number((u as { hy2_stats_raw_up?: unknown }).hy2_stats_raw_up))
+      ? Math.max(-1, Math.floor(Number((u as { hy2_stats_raw_up?: unknown }).hy2_stats_raw_up)))
+      : -1,
+    hy2_stats_raw_down: Number.isFinite(Number((u as { hy2_stats_raw_down?: unknown }).hy2_stats_raw_down))
+      ? Math.max(-1, Math.floor(Number((u as { hy2_stats_raw_down?: unknown }).hy2_stats_raw_down)))
       : -1,
     traffic_notify_state:
       u.traffic_notify_state === "low30" || u.traffic_notify_state === "empty" ? u.traffic_notify_state : "",
@@ -1518,6 +1672,12 @@ function normalizeUser(u: UserRow, deployedIdsForNormalize?: number[]): UserRow 
 
 function readStore(): FileStore {
   try {
+    if (!fs.existsSync(dataPath)) {
+      storeCache = null;
+      return emptyStore();
+    }
+    const mtimeMs = fs.statSync(dataPath).mtimeMs;
+    if (storeCache && storeCache.mtimeMs === mtimeMs) return storeCache.store;
     const raw = fs.readFileSync(dataPath, "utf8");
     const parsed = JSON.parse(raw) as FileStore;
     if (!Array.isArray(parsed.servers)) return emptyStore();
@@ -1668,7 +1828,7 @@ function readStore(): FileStore {
     const dropper_play_log = dropperLogRaw
       .map((x) => normalizeDropperPlayLog(x))
       .filter((x): x is DropperPlayLogRow => x != null);
-    return {
+    const store: FileStore = {
       subscription_token: parsed.subscription_token ?? null,
       next_server_id: Number(parsed.next_server_id) > 0 ? Number(parsed.next_server_id) : 1,
       next_user_id: Number(parsed.next_user_id) > 0 ? Number(parsed.next_user_id) : 1,
@@ -1698,6 +1858,7 @@ function readStore(): FileStore {
         (parsed as { game_tickets_per_purchase?: unknown }).game_tickets_per_purchase,
         (parsed as { dropper_game?: DropperGameConfig }).dropper_game,
       ),
+      roulette_ui_mode: normalizeRouletteUiMode((parsed as { roulette_ui_mode?: unknown }).roulette_ui_mode),
       roulette_prizes: normalizeRoulettePrizes((parsed as { roulette_prizes?: unknown }).roulette_prizes),
       roulette_spins: normalizeRouletteSpins((parsed as { roulette_spins?: unknown }).roulette_spins),
       game_ticket_transactions: normalizeGameTicketTransactions(
@@ -1753,7 +1914,10 @@ function readStore(): FileStore {
           ? Number((parsed as { next_experiment_id?: unknown }).next_experiment_id)
           : 1,
     };
+    storeCache = { mtimeMs, store };
+    return store;
   } catch {
+    storeCache = null;
     return emptyStore();
   }
 }
@@ -1821,6 +1985,11 @@ function writeStore(store: FileStore): void {
   const dir = path.dirname(dataPath);
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(dataPath, JSON.stringify(store, null, 2), "utf8");
+  try {
+    storeCache = { mtimeMs: fs.statSync(dataPath).mtimeMs, store };
+  } catch {
+    storeCache = null;
+  }
 }
 
 function mutate(fn: (store: FileStore) => void): void {
@@ -2225,6 +2394,7 @@ export function createUser(input: CreateUserInput = {}): UserRow {
       reality_spx,
       subscription_server_ids: subIds,
       subscription_server_count: subscriptionCountFromIds(subIds, deployedIds),
+      subscription_entry_order: coerceSubscriptionEntryOrder(input.subscription_entry_order),
       online_snapshot: 0,
       online_devices: 0,
       device_limit_enabled: input.device_limit_enabled === 1 ? 1 : 0,
@@ -2243,6 +2413,8 @@ export function createUser(input: CreateUserInput = {}): UserRow {
       stats_synced_at: 0,
       stats_raw_up: -1,
       stats_raw_down: -1,
+      hy2_stats_raw_up: -1,
+      hy2_stats_raw_down: -1,
       traffic_notify_state: "",
       expiry_notify_state: "",
       expiry_warn_sent_day: "",
@@ -2304,6 +2476,10 @@ export function updateUserRow(id: number, patch: Partial<CreateUserInput>): User
       reality_spx: patch.reality_spx !== undefined ? String(patch.reality_spx).trim() || "/" : cur.reality_spx,
       subscription_server_ids: subIds,
       subscription_server_count: subscriptionCountFromIds(subIds, deployedIds),
+      subscription_entry_order:
+        patch.subscription_entry_order !== undefined
+          ? coerceSubscriptionEntryOrder(patch.subscription_entry_order)
+          : cur.subscription_entry_order,
       device_limit_enabled:
         patch.device_limit_enabled !== undefined
           ? patch.device_limit_enabled === 1
@@ -2372,6 +2548,18 @@ export function updateUserRow(id: number, patch: Partial<CreateUserInput>): User
             ? Math.max(-1, Math.floor(Number(patch.stats_raw_down)))
             : cur.stats_raw_down
           : cur.stats_raw_down,
+      hy2_stats_raw_up:
+        patch.hy2_stats_raw_up !== undefined
+          ? Number.isFinite(Number(patch.hy2_stats_raw_up))
+            ? Math.max(-1, Math.floor(Number(patch.hy2_stats_raw_up)))
+            : cur.hy2_stats_raw_up
+          : cur.hy2_stats_raw_up,
+      hy2_stats_raw_down:
+        patch.hy2_stats_raw_down !== undefined
+          ? Number.isFinite(Number(patch.hy2_stats_raw_down))
+            ? Math.max(-1, Math.floor(Number(patch.hy2_stats_raw_down)))
+            : cur.hy2_stats_raw_down
+          : cur.hy2_stats_raw_down,
       traffic_notify_state:
         patch.traffic_notify_state !== undefined
           ? patch.traffic_notify_state === "low30" || patch.traffic_notify_state === "empty"
@@ -2788,30 +2976,44 @@ export function applyUsersTrafficSnapshot(
     online_count?: number;
   }>,
   syncedAtMs: number,
+  opts?: { source?: "xray" | "hysteria2" },
 ): number {
+  const source = opts?.source === "hysteria2" ? "hysteria2" : "xray";
   let n = 0;
   mutate((store) => {
     for (let i = 0; i < store.users.length; i++) {
-      const u = store.users[i];
+      const u = store.users[i]!;
       const hit = rows.find((r) => r.vless_uuid === u.vless_uuid);
       if (!hit) continue;
-      const candUp = Number.isFinite(Number(hit.traffic_up)) ? Math.max(0, Math.floor(Number(hit.traffic_up))) : u.traffic_up;
+      const candUp = Number.isFinite(Number(hit.traffic_up)) ? Math.max(0, Math.floor(Number(hit.traffic_up))) : 0;
       const candDown = Number.isFinite(Number(hit.traffic_down))
         ? Math.max(0, Math.floor(Number(hit.traffic_down)))
-        : u.traffic_down;
+        : 0;
       const onlineCount = Number.isFinite(Number(hit.online_count))
         ? Math.max(0, Math.floor(Number(hit.online_count)))
         : hit.online
           ? 1
           : 0;
-      const prevRawUp = Number.isFinite(Number(u.stats_raw_up)) ? Number(u.stats_raw_up) : -1;
-      const prevRawDown = Number.isFinite(Number(u.stats_raw_down)) ? Number(u.stats_raw_down) : -1;
+      const prevRawUp =
+        source === "hysteria2"
+          ? Number.isFinite(Number(u.hy2_stats_raw_up))
+            ? Number(u.hy2_stats_raw_up)
+            : -1
+          : Number.isFinite(Number(u.stats_raw_up))
+            ? Number(u.stats_raw_up)
+            : -1;
+      const prevRawDown =
+        source === "hysteria2"
+          ? Number.isFinite(Number(u.hy2_stats_raw_down))
+            ? Number(u.hy2_stats_raw_down)
+            : -1
+          : Number.isFinite(Number(u.stats_raw_down))
+            ? Number(u.stats_raw_down)
+            : -1;
       const hasRawBaseline = prevRawUp >= 0 && prevRawDown >= 0;
       let up = u.traffic_up;
       let down = u.traffic_down;
       if (!hasRawBaseline) {
-        // Первая инициализация baseline: прибавляем текущий raw-снимок как новый сессионный прирост.
-        // Иначе первый заметный трафик после деплоя "теряется" до следующего цикла sync.
         up = Math.max(0, Math.floor(Number(u.traffic_up) || 0) + candUp);
         down = Math.max(0, Math.floor(Number(u.traffic_down) || 0) + candDown);
       } else {
@@ -2824,11 +3026,18 @@ export function applyUsersTrafficSnapshot(
         ...u,
         traffic_up: up,
         traffic_down: down,
-        online_snapshot: onlineCount > 0 ? 1 : 0,
-        online_devices: onlineCount,
+        ...(source === "xray"
+          ? {
+              online_snapshot: onlineCount > 0 ? 1 : 0,
+              online_devices: Math.max(u.online_devices, onlineCount),
+              stats_raw_up: candUp,
+              stats_raw_down: candDown,
+            }
+          : {
+              hy2_stats_raw_up: candUp,
+              hy2_stats_raw_down: candDown,
+            }),
         stats_synced_at: syncedAtMs,
-        stats_raw_up: candUp,
-        stats_raw_down: candDown,
         updated_at: new Date().toISOString(),
       });
       n++;
@@ -3463,12 +3672,7 @@ export function sumDropperTicketsForTgUser(tgUserId: number): number {
     .reduce((s, u) => s + u.dropper_tickets, 0);
 }
 
-function dropperPoolKey(u: { id: number; tg_id?: string }): string {
-  const t = String(u.tg_id ?? "").trim();
-  return t || `__solo:${u.id}`;
-}
-
-/** Начислить билеты выбранным строкам: +n на каждую выбранную подписку. */
+/** Начислить билеты выбранным подпискам: +n на каждую выбранную строку. */
 export function grantDropperTicketsToUserIds(
   userIds: number[],
   tickets: number,
@@ -3477,18 +3681,20 @@ export function grantDropperTicketsToUserIds(
   if (n <= 0 || userIds.length === 0) return { uniquePools: 0, tgChatIds: [] };
   const idSet = new Set(userIds.map((x) => Math.floor(Number(x))).filter((x) => Number.isFinite(x) && x > 0));
   const tgChatIds = new Set<number>();
+  let granted = 0;
   mutate((store) => {
     for (const uid of idSet) {
       const idx = store.users.findIndex((u) => u.id === uid);
       if (idx === -1) continue;
       const row = store.users[idx]!;
       store.users[idx] = normalizeUser({ ...row, dropper_tickets: row.dropper_tickets + n });
+      granted++;
       const tgKey = String(row.tg_id ?? "").trim();
       const chatId = Math.floor(Number(tgKey));
       if (tgKey && Number.isFinite(chatId) && chatId > 0) tgChatIds.add(chatId);
     }
   });
-  return { uniquePools: idSet.size, tgChatIds: [...tgChatIds] };
+  return { uniquePools: granted, tgChatIds: [...tgChatIds] };
 }
 
 /** Обнулить билеты «Дроппер» у всех клиентов. */
@@ -3501,13 +3707,11 @@ export function resetAllDropperTickets(): void {
   });
 }
 
-/**
- * Задать число билетов для конкретной подписки (строки клиента).
- */
+/** Задать число билетов для конкретной подписки (строки клиента). */
 export function setDropperTicketsPoolForClientRow(
   anchorUserId: number,
   totalTickets: number,
-): { ok: true } | { ok: false; error: string } {
+): { ok: true; tickets: number } | { ok: false; error: string } {
   const t = Math.max(0, Math.floor(Number(totalTickets) || 0));
   let err: string | null = null;
   mutate((store) => {
@@ -3519,7 +3723,7 @@ export function setDropperTicketsPoolForClientRow(
     store.users[idx] = normalizeUser({ ...store.users[idx]!, dropper_tickets: t });
   });
   if (err) return { ok: false, error: err };
-  return { ok: true };
+  return { ok: true, tickets: t };
 }
 
 /**
@@ -4316,7 +4520,9 @@ export function deleteCommunicationSegment(id: string): boolean {
     const target = (store.communication_segments ?? []).find((r) => r.id === key);
     if (
       target?.system_key === "test_subscriptions" ||
-      target?.id === "sys_test_subscriptions"
+      target?.id === "sys_test_subscriptions" ||
+      target?.system_key === "whitelist_connected" ||
+      target?.id === "sys_whitelist_connected"
     ) {
       return;
     }
@@ -4336,11 +4542,26 @@ export const TEST_SUBSCRIPTION_SEGMENT_NAME = "Оформившие тестов
 export const TEST_SUBSCRIPTION_SEGMENT_PRESET =
   "Вам понравился наш VPN? Оформите полную подписку — вот промокод: ";
 
+export const WHITELIST_CONNECTED_SEGMENT_ID = "sys_whitelist_connected";
+export const WHITELIST_CONNECTED_SEGMENT_SYSTEM_KEY = "whitelist_connected";
+export const WHITELIST_CONNECTED_SEGMENT_NAME = "Пользователи с подключенными БС";
+
 export function isTestSubscriptionSystemSegment(segment: Pick<CommunicationSegmentRow, "system_key" | "id">): boolean {
   return (
     segment.system_key === TEST_SUBSCRIPTION_SEGMENT_SYSTEM_KEY ||
     segment.id === TEST_SUBSCRIPTION_SEGMENT_ID
   );
+}
+
+export function isWhitelistConnectedSystemSegment(segment: Pick<CommunicationSegmentRow, "system_key" | "id">): boolean {
+  return (
+    segment.system_key === WHITELIST_CONNECTED_SEGMENT_SYSTEM_KEY ||
+    segment.id === WHITELIST_CONNECTED_SEGMENT_ID
+  );
+}
+
+export function isSystemCommunicationSegment(segment: Pick<CommunicationSegmentRow, "system_key" | "id">): boolean {
+  return isTestSubscriptionSystemSegment(segment) || isWhitelistConnectedSystemSegment(segment);
 }
 
 export function ensureTestSubscriptionSegment(): CommunicationSegmentRow {
@@ -4369,11 +4590,56 @@ export function ensureTestSubscriptionSegment(): CommunicationSegmentRow {
   return created;
 }
 
+export function ensureWhitelistConnectedSegment(): CommunicationSegmentRow {
+  const rows = readStore().communication_segments ?? [];
+  const existing = rows.find((s) => isWhitelistConnectedSystemSegment(s));
+  if (existing) return existing;
+
+  const now = new Date().toISOString();
+  const created = normalizeCommunicationSegment({
+    id: WHITELIST_CONNECTED_SEGMENT_ID,
+    name: WHITELIST_CONNECTED_SEGMENT_NAME,
+    user_ids: [],
+    days_mode: "any",
+    gb_mode: "any",
+    preset_enabled: false,
+    preset_text: "",
+    system_key: WHITELIST_CONNECTED_SEGMENT_SYSTEM_KEY,
+    created_at: now,
+    updated_at: now,
+  });
+  if (!created) throw new Error("segment_invalid");
+  mutate((store) => {
+    const prev = store.communication_segments ?? [];
+    store.communication_segments = [created, ...prev.filter((s) => !isWhitelistConnectedSystemSegment(s))];
+  });
+  return created;
+}
+
 export function refreshTestSubscriptionSegment(): CommunicationSegmentRow {
   ensureTestSubscriptionSegment();
   const ids = listTestSubscriptionSegmentUserIds();
   const updated = updateCommunicationSegment(TEST_SUBSCRIPTION_SEGMENT_ID, { user_ids: ids });
   return updated ?? ensureTestSubscriptionSegment();
+}
+
+/** Пользователи с флагом БС и активной основной подпиской. */
+export function listWhitelistConnectedSegmentUserIds(): number[] {
+  return listUsers()
+    .filter((u) => u.whitelist_happ_enabled === 1 && userHasActiveSubscription(u))
+    .map((u) => u.id);
+}
+
+export function refreshWhitelistConnectedSegment(): CommunicationSegmentRow {
+  ensureWhitelistConnectedSegment();
+  const ids = listWhitelistConnectedSegmentUserIds();
+  const updated = updateCommunicationSegment(WHITELIST_CONNECTED_SEGMENT_ID, {
+    name: WHITELIST_CONNECTED_SEGMENT_NAME,
+    user_ids: ids,
+    days_mode: "any",
+    gb_mode: "any",
+  });
+  return updated ?? ensureWhitelistConnectedSegment();
 }
 
 /** Активные тестовые подписчики: тест оформлен и полный тариф после не покупали. */
@@ -4437,15 +4703,24 @@ export function clearTestSubscriptionFlags(userIds: number[]): void {
 
 const COMMUNICATION_LOG_MAX = 2000;
 
+function isPanelBroadcastLogRow(r: CommunicationMessageLogRow): boolean {
+  if (r.mode === "global" || r.mode === "single" || r.mode === "selected" || r.mode === "segment") return true;
+  return r.source_label.startsWith("Рассылка:");
+}
+
 export function listCommunicationMessageLog(
   limit = 200,
-  opts?: { fromYmd?: string; toYmd?: string },
+  opts?: { fromYmd?: string; toYmd?: string; manualOnly?: boolean },
 ): CommunicationMessageLogRow[] {
   const cap = Math.max(1, Math.min(500, Math.floor(limit) || 200));
   const tz = projectTimezone();
   const fromYmd = String(opts?.fromYmd ?? "").trim();
   const toYmd = String(opts?.toYmd ?? "").trim();
   let rows = readCommunicationLogFile();
+  if (opts?.manualOnly) {
+    // Только рассылки из панели (всем / выбранным / сегменту), не карточка клиента и не авто.
+    rows = rows.filter((r) => !r.automatic && isPanelBroadcastLogRow(r));
+  }
   if (fromYmd || toYmd) {
     rows = rows.filter((r) => {
       const ts = Date.parse(r.sent_at);
@@ -4465,13 +4740,31 @@ export function listCommunicationMessageLog(
     .slice(0, cap);
 }
 
+export function getCommunicationMessageLogById(id: string): CommunicationMessageLogRow | undefined {
+  const key = String(id ?? "").trim();
+  if (!key) return undefined;
+  return readCommunicationLogFile().find((r) => r.id === key);
+}
+
+export function deleteCommunicationMessageLog(id: string): CommunicationMessageLogRow | null {
+  const key = String(id ?? "").trim();
+  if (!key) return null;
+  const prev = readCommunicationLogFile();
+  const idx = prev.findIndex((r) => r.id === key);
+  if (idx === -1) return null;
+  const removed = prev[idx]!;
+  writeCommunicationLogFile(prev.filter((r) => r.id !== key));
+  return removed;
+}
+
 export function appendCommunicationMessageLog(
-  input: Omit<CommunicationMessageLogRow, "id" | "sent_at">,
+  input: Omit<CommunicationMessageLogRow, "id" | "sent_at"> & { id?: string },
 ): CommunicationMessageLogRow {
   const now = new Date().toISOString();
+  const presetId = String(input.id ?? "").trim();
   const row = normalizeCommunicationMessageLog({
     ...input,
-    id: randomBytes(8).toString("hex"),
+    id: presetId || randomBytes(8).toString("hex"),
     sent_at: now,
   });
   if (!row) throw new Error("communication_log_invalid");
@@ -4799,12 +5092,25 @@ export function setRouletteTicketShop(cfg: RouletteTicketShopConfig): RouletteTi
   return normalized;
 }
 
+export function getRouletteUiMode(): RouletteUiMode {
+  return normalizeRouletteUiMode(readStore().roulette_ui_mode);
+}
+
+export function setRouletteUiMode(mode: RouletteUiMode): RouletteUiMode {
+  const next = normalizeRouletteUiMode(mode);
+  mutate((store) => {
+    store.roulette_ui_mode = next;
+  });
+  return next;
+}
+
 export function readRouletteConfig() {
   return {
     active_game: getWebAppActiveGame(),
     tickets_per_purchase: getGameTicketsPerPurchase(),
     roulette_enabled: getWebAppActiveGame() === "roulette",
     dropper_enabled: getWebAppActiveGame() === "dropper",
+    ui_mode: getRouletteUiMode(),
     ticket_shop: getRouletteTicketShop(),
   };
 }

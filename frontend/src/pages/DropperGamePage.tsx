@@ -36,18 +36,13 @@ import {
   type UserDto,
   type WebAppActiveGame,
 } from "../api";
-
-function dropperPoolForRow(u: UserDto, all: UserDto[]): number {
-  const tg = (u.tg_id || "").trim();
-  if (!tg) return u.dropper_tickets ?? 0;
-  return all.filter((x) => (x.tg_id || "").trim() === tg).reduce((s, x) => s + (x.dropper_tickets ?? 0), 0);
-}
+import { usePanelTabParam } from "../lib/panelTabRoute";
 
 const TICKETS_PAGE_SIZE = 12;
-type AdminTab = "general" | "dropper" | "roulette" | "tickets" | "reports";
+const ADMIN_TABS = ["general", "dropper", "roulette", "tickets", "reports"] as const;
 
 export default function DropperGamePage({ onLogout }: { onLogout: () => void }) {
-  const [adminTab, setAdminTab] = useState<AdminTab>("general");
+  const { tab: adminTab, setTab: setAdminTab } = usePanelTabParam("/dropper-game", ADMIN_TABS);
   const [gameSettings, setGameSettings] = useState<GameSettingsDto | null>(null);
   const [roulettePrizes, setRoulettePrizes] = useState<RoulettePrizeAdminDto[]>([]);
   const [rouletteStats, setRouletteStats] = useState<RouletteStatsDto | null>(null);
@@ -339,7 +334,7 @@ export default function DropperGamePage({ onLogout }: { onLogout: () => void }) 
       setReport(r);
       setMsg({
         type: "ok",
-        text: `Начислено по ${gr.tickets_each} билет(ов) каждому из ${gr.unique_pools} получателей (отмечено строк: ${gr.selected_rows}). Один Telegram — одно начисление на общий пул.`,
+        text: `Начислено по ${gr.tickets_each} билет(ов) каждой из ${gr.unique_pools} подписок (отмечено строк: ${gr.selected_rows}).`,
       });
     } catch (e) {
       setMsg({ type: "err", text: String(e) });
@@ -353,7 +348,11 @@ export default function DropperGamePage({ onLogout }: { onLogout: () => void }) 
   const filteredTicketRows = useMemo(() => {
     const q = ticketsListSearch.trim().toLowerCase();
     if (!q) return userOptions;
-    return userOptions.filter((u) => (u.name || "").toLowerCase().includes(q));
+    return userOptions.filter(
+      (u) =>
+        (u.name || "").toLowerCase().includes(q) ||
+        (u.tg_id || "").toLowerCase().includes(q),
+    );
   }, [userOptions, ticketsListSearch]);
 
   const ticketPagesCount = Math.max(1, Math.ceil(filteredTicketRows.length / TICKETS_PAGE_SIZE));
@@ -376,12 +375,13 @@ export default function DropperGamePage({ onLogout }: { onLogout: () => void }) 
     setTicketsPage((prev) => Math.min(prev, ticketPagesCount));
   }, [ticketPagesCount]);
 
-  async function saveEditedTickets(anchorUserId: number) {
+  async function saveEditedTickets(userId: number) {
     const n = Math.max(0, Math.floor(Number(ticketsEditDraft) || 0));
     setTicketsSaving(true);
     setMsg(null);
     try {
-      await setDropperUserTicketsPool({ user_id: anchorUserId, tickets: n });
+      await setDropperUserTicketsPool({ user_id: userId, tickets: n });
+      setUsers((prev) => prev.map((u) => (u.id === userId ? { ...u, dropper_tickets: n } : u)));
       const u = await listUsers();
       setUsers(u);
       setTicketsEditUserId(null);
@@ -646,6 +646,69 @@ export default function DropperGamePage({ onLogout }: { onLogout: () => void }) 
             ? "Рулетка активна в WebApp."
             : "Рулетка выключена. В Mini App пользователи её не видят."}
         </p>
+        <div className="roulette-ui-mode" style={{ marginTop: "0.85rem" }}>
+          <label className="roulette-ui-mode__title">Отображение открытия кейса</label>
+          <div className="roulette-ui-mode__switch" role="radiogroup" aria-label="Отображение открытия кейса">
+            {(
+              [
+                {
+                  id: "wheel" as const,
+                  title: "Колесо",
+                  desc: "Классическая круговая рулетка",
+                  icon: "🎡",
+                },
+                {
+                  id: "case" as const,
+                  title: "Кейс",
+                  desc: "Горизонтальная лента, как в CS",
+                  icon: "📦",
+                },
+              ] as const
+            ).map((opt) => {
+              const active = (gameSettings.ui_mode ?? "wheel") === opt.id;
+              return (
+                <button
+                  key={opt.id}
+                  type="button"
+                  role="radio"
+                  aria-checked={active}
+                  className={`roulette-ui-mode__option ${active ? "is-active" : ""}`}
+                  disabled={saving}
+                  onClick={() => {
+                    if (active) return;
+                    setGameSettings({ ...gameSettings, ui_mode: opt.id });
+                    void (async () => {
+                      setSaving(true);
+                      setMsg(null);
+                      try {
+                        const next = await saveGameSettings({ ui_mode: opt.id });
+                        setGameSettings(next);
+                        setRoulettePrizes(next.prizes ?? []);
+                        setMsg({
+                          type: "ok",
+                          text: opt.id === "case" ? "Отображение: кейс." : "Отображение: колесо.",
+                        });
+                      } catch (e) {
+                        setMsg({ type: "err", text: String(e) });
+                      } finally {
+                        setSaving(false);
+                      }
+                    })();
+                  }}
+                >
+                  <span className="roulette-ui-mode__icon" aria-hidden>
+                    {opt.icon}
+                  </span>
+                  <span className="roulette-ui-mode__text">
+                    <span className="roulette-ui-mode__name">{opt.title}</span>
+                    <span className="roulette-ui-mode__desc">{opt.desc}</span>
+                  </span>
+                  <span className={`roulette-ui-mode__check ${active ? "is-on" : ""}`} aria-hidden />
+                </button>
+              );
+            })}
+          </div>
+        </div>
         {Math.abs(chanceSum - 100) > 0.01 ? (
           <div className="flash err">
             Сумма шансов активных призов: {chanceSum.toFixed(1)}%. Для корректной работы должно быть 100%.
@@ -944,8 +1007,7 @@ export default function DropperGamePage({ onLogout }: { onLogout: () => void }) 
       <section className="panel">
         <h2 className="user-modal-section-title">Билеты по клиентам</h2>
         <p className="field-hint" style={{ marginTop: 0, marginBottom: "0.75rem" }}>
-          Для одного Telegram несколько подписок — один общий счётчик билетов (сумма по записям) и одно число побед по
-          этому Telegram. Редактирование задаёт общий пул билетов для всех таких подписок.
+          У каждой подписки свой счётчик билетов. Победы по одному Telegram считаются общими.
         </p>
         <div className="form-field" style={{ marginBottom: "0.65rem" }}>
           <label htmlFor="dropper-tickets-search">Поиск по имени клиента</label>
@@ -985,7 +1047,7 @@ export default function DropperGamePage({ onLogout }: { onLogout: () => void }) 
                 </tr>
               ) : null}
               {pagedTicketRows.map((u) => {
-                const pool = dropperPoolForRow(u, users);
+                const tickets = u.dropper_tickets ?? 0;
                 const editing = ticketsEditUserId === u.id;
                 return (
                   <tr key={u.id}>
@@ -1031,7 +1093,7 @@ export default function DropperGamePage({ onLogout }: { onLogout: () => void }) 
                           </button>
                         </div>
                       ) : (
-                        <span className="mono">{pool}</span>
+                        <span className="mono">{tickets}</span>
                       )}
                     </td>
                     <td className="mono">{u.dropper_wins ?? 0}</td>
@@ -1044,7 +1106,7 @@ export default function DropperGamePage({ onLogout }: { onLogout: () => void }) 
                           aria-label="Редактировать билеты"
                           onClick={() => {
                             setTicketsEditUserId(u.id);
-                            setTicketsEditDraft(String(pool));
+                            setTicketsEditDraft(String(tickets));
                           }}
                         >
                           ✏️
@@ -1089,8 +1151,7 @@ export default function DropperGamePage({ onLogout }: { onLogout: () => void }) 
       <section className="panel">
         <h2 className="user-modal-section-title">Выдача билетов</h2>
         <p className="field-hint" style={{ marginTop: 0, marginBottom: "0.65rem" }}>
-          Если в списке отмечены несколько подписок с одним и тем же Telegram, билеты начисляются один раз на общий пул,
-          а не по разу на каждую строку.
+          Билеты начисляются отдельно на каждую отмеченную подписку.
         </p>
         <div className="form-field">
           <label>Пользователи (удерживайте Ctrl/Cmd для нескольких)</label>

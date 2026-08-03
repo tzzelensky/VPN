@@ -4,7 +4,6 @@ export const PANEL_NAV_SECTIONS: PanelSectionMeta[] = [
   { key: "servers", path: "/servers", label: "Сервера", description: "Управление VPN-узлами" },
   { key: "users", path: "/users", label: "Пользователи", description: "Клиенты и подписки" },
   { key: "logs", path: "/logs", label: "Логи", description: "Логи Xray и диагностика" },
-  { key: "experiments", path: "/experiments", label: "Эксперименты", description: "Тестовые конфигурации" },
   { key: "subscription_shop", path: "/subscription-shop", label: "Подписки", description: "Тарифы и магазин" },
   { key: "communications", path: "/communications", label: "Коммуникации", description: "Рассылки и опросы" },
   { key: "support_appeals", path: "/support-appeals", label: "Обращения", description: "Обращения в поддержку" },
@@ -42,7 +41,6 @@ const PATH_TO_KEY: Record<string, PanelSectionKey> = {
   "/servers": "servers",
   "/users": "users",
   "/logs": "logs",
-  "/experiments": "experiments",
   "/subscription-shop": "subscription_shop",
   "/communications": "communications",
   "/support-appeals": "support_appeals",
@@ -58,6 +56,20 @@ const PATH_TO_KEY: Record<string, PanelSectionKey> = {
 
 function normPath(path: string): string {
   return path.replace(/\/$/, "") || path;
+}
+
+/** Раздел по пути, включая `/communications/mailings` → communications. */
+export function sectionKeyForPath(path: string): PanelSectionKey | undefined {
+  const p = normPath(path);
+  const exact = PATH_TO_KEY[p];
+  if (exact) return exact;
+  let best: { key: PanelSectionKey; len: number } | null = null;
+  for (const [base, key] of Object.entries(PATH_TO_KEY) as Array<[string, PanelSectionKey]>) {
+    if (p === base || p.startsWith(`${base}/`)) {
+      if (!best || base.length > best.len) best = { key, len: base.length };
+    }
+  }
+  return best?.key;
 }
 
 export function normalizeSectionOrder(raw: unknown): PanelSectionKey[] {
@@ -102,7 +114,7 @@ export function isSectionPathVisible(
 ): boolean {
   if (!settings) return true;
   const list = meta.length > 0 ? meta : PANEL_NAV_SECTIONS;
-  const key = PATH_TO_KEY[normPath(path)];
+  const key = sectionKeyForPath(path);
   if (!key) return true;
   if (settings.sections[key] !== false) return true;
   const anyVisible = list.some((s) => settings.sections[s.key] !== false);

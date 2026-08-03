@@ -5,7 +5,7 @@ export const USERS_CACHE_UPDATED_EVENT = "vpn-admin-users-cache-updated";
 
 let inflight: Promise<UsersListCache> | null = null;
 let lastFetchedAt = 0;
-const MIN_INTERVAL_MS = 8_000;
+const MIN_INTERVAL_MS = 45_000;
 
 function notifyCacheUpdated(data: UsersListCache): void {
   window.dispatchEvent(new CustomEvent(USERS_CACHE_UPDATED_EVENT, { detail: data }));

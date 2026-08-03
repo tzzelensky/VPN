@@ -17,8 +17,9 @@ import PageLoadingState from "../components/PageLoadingState";
 import PaymentSessionsPanel from "../components/PaymentSessionsPanel";
 import ComboSubscriptionsPanel from "../components/ComboSubscriptionsPanel";
 import Spinner from "../components/Spinner";
+import { usePanelTabParam } from "../lib/panelTabRoute";
 
-type ShopTab = "settings" | "combo" | "payment_sessions";
+const SHOP_TABS = ["settings", "combo", "payment-sessions"] as const;
 
 function cloneShop(s: SubscriptionShopDto): SubscriptionShopDto {
   return {
@@ -48,7 +49,7 @@ export default function SubscriptionShopPage({ onLogout }: { onLogout: () => voi
   });
   const [testSubs, setTestSubs] = useState<TestSubscriptionEntryDto[]>([]);
   const [testDeleteBusyId, setTestDeleteBusyId] = useState<number>(0);
-  const [mainTab, setMainTab] = useState<ShopTab>("settings");
+  const { tab: mainTab, setTab: setMainTab } = usePanelTabParam("/subscription-shop", SHOP_TABS);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -159,7 +160,7 @@ export default function SubscriptionShopPage({ onLogout }: { onLogout: () => voi
         tabs={[
           { id: "settings", label: "Тарифы" },
           { id: "combo", label: "Комбо-подписки" },
-          { id: "payment_sessions", label: "Сессии оплаты" },
+          { id: "payment-sessions", label: "Сессии оплаты" },
         ]}
         value={mainTab}
         onChange={setMainTab}
@@ -167,7 +168,7 @@ export default function SubscriptionShopPage({ onLogout }: { onLogout: () => voi
 
       {mainTab === "combo" ? (
         <ComboSubscriptionsPanel />
-      ) : mainTab === "payment_sessions" ? (
+      ) : mainTab === "payment-sessions" ? (
         <PaymentSessionsPanel />
       ) : loading || !shop ? (
         <section className="panel">

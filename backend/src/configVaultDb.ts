@@ -24,6 +24,13 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const dataFile = process.env.DATA_PATH ?? path.join(__dirname, "..", "data.json");
 const vaultPath = process.env.CONFIG_VAULT_PATH ?? path.join(path.dirname(dataFile), "config_vault.json");
 
+/** In-memory cache: config_vault.json ~1–2MB, re-parse on every helper was killing list APIs. */
+let vaultCache: { mtimeMs: number; vault: VaultFile } | null = null;
+
+function invalidateVaultCache(): void {
+  vaultCache = null;
+}
+
 function normalizeSubscriptionMode(raw: unknown): ConfigVaultSubscriptionMode {
   const v = String(raw ?? "all").trim().toLowerCase();
   return v === "selected" ? "selected" : "all";
@@ -174,7 +181,12 @@ function normalizeCheck(raw: unknown): VlessKeyCheckRow | null {
 
 function readVault(): VaultFile {
   try {
-    if (!fs.existsSync(vaultPath)) return emptyVault();
+    if (!fs.existsSync(vaultPath)) {
+      invalidateVaultCache();
+      return emptyVault();
+    }
+    const mtimeMs = fs.statSync(vaultPath).mtimeMs;
+    if (vaultCache && vaultCache.mtimeMs === mtimeMs) return vaultCache.vault;
     const parsed = JSON.parse(fs.readFileSync(vaultPath, "utf8")) as Partial<VaultFile>;
     const keys = (Array.isArray(parsed.keys) ? parsed.keys : [])
       .map((x) => normalizeKey(x))
@@ -182,15 +194,18 @@ function readVault(): VaultFile {
     const checks = (Array.isArray(parsed.checks) ? parsed.checks : [])
       .map((x) => normalizeCheck(x))
       .filter((x): x is VlessKeyCheckRow => x != null);
-    return {
+    const vault: VaultFile = {
       next_key_id: Number(parsed.next_key_id) > 0 ? Number(parsed.next_key_id) : 1,
       next_check_id: Number(parsed.next_check_id) > 0 ? Number(parsed.next_check_id) : 1,
       keys,
       checks,
       settings: normalizeSettings(parsed.settings),
     };
+    vaultCache = { mtimeMs, vault };
+    return vault;
   } catch (e) {
     console.error("[config-vault] read failed:", e instanceof Error ? e.message : e);
+    invalidateVaultCache();
     return emptyVault();
   }
 }
@@ -200,6 +215,11 @@ function writeVault(vault: VaultFile): void {
   const tmp = `${vaultPath}.tmp`;
   fs.writeFileSync(tmp, JSON.stringify(vault, null, 2), "utf8");
   fs.renameSync(tmp, vaultPath);
+  try {
+    vaultCache = { mtimeMs: fs.statSync(vaultPath).mtimeMs, vault };
+  } catch {
+    invalidateVaultCache();
+  }
 }
 
 function mutateVault(fn: (v: VaultFile) => void): void {
@@ -238,8 +258,8 @@ export function configVaultStats(): {
   never: number;
   last_auto_run_at: string | null;
 } {
-  const keys = listConfigVaultKeys();
-  const settings = getConfigVaultSettings();
+  const vault = readVault();
+  const keys = vault.keys;
   return {
     total: keys.length,
     in_subscriptions: keys.filter((k) => k.added_to_subscriptions).length,
@@ -247,7 +267,7 @@ export function configVaultStats(): {
     unavailable: keys.filter((k) => k.last_check_status === "unavailable").length,
     unstable: keys.filter((k) => k.last_check_status === "unstable").length,
     never: keys.filter((k) => k.last_check_status === "never").length,
-    last_auto_run_at: settings.last_auto_run_at,
+    last_auto_run_at: vault.settings.last_auto_run_at,
   };
 }
 
@@ -302,6 +322,16 @@ export function configVaultLinksForUser(user: UserRow): ConfigVaultSubscriptionL
     });
   }
   return out;
+}
+
+/** Счётчик без сборки URI — для списка пользователей. */
+export function configVaultLinksCountForUser(user: UserRow): number {
+  let n = 0;
+  for (const k of listConfigVaultKeys()) {
+    if (!userReceivesConfigVaultKey(user.id, k)) continue;
+    if (k.raw_uri.trim()) n += 1;
+  }
+  return n;
 }
 
 export function subscriptionUsersCount(key: VlessKeyRow): number {

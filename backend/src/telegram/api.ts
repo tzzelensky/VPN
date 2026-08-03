@@ -335,7 +335,7 @@ export async function sendTelegramPhotoBinary(
     reply_markup?: unknown;
     reply_to_message_id?: number;
   },
-): Promise<void> {
+): Promise<number | undefined> {
   const form = new FormData();
   form.set("chat_id", String(chatId));
   if (opts?.caption) form.set("caption", opts.caption);
@@ -345,8 +345,11 @@ export async function sendTelegramPhotoBinary(
   const mime = (opts?.mimeType ?? "image/jpeg").trim() || "image/jpeg";
   const filename = (opts?.filename ?? "photo.jpg").trim() || "photo.jpg";
   form.set("photo", new Blob([Buffer.from(bytes)], { type: mime }), filename);
-  const r = await tgMultipartCall<unknown>("sendPhoto", form);
+  const r = await tgMultipartCall<{ message_id: number }>("sendPhoto", form);
   if (!r.ok) throw new Error(r.description ?? "sendPhoto failed");
+  const mid = r.result?.message_id;
+  if (typeof mid === "number") pushBotScreenMessage(chatId, mid);
+  return mid;
 }
 
 export async function telegramGetUpdates(offset: number): Promise<unknown[]> {

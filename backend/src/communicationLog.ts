@@ -33,7 +33,7 @@ export function recipientFromChatId(chatId: number): LogRecipient | null {
 }
 
 export function logCommunicationMessage(
-  input: Omit<CommunicationMessageLogRow, "id" | "sent_at">,
+  input: Omit<CommunicationMessageLogRow, "id" | "sent_at"> & { id?: string },
 ): CommunicationMessageLogRow | null {
   try {
     return appendCommunicationMessageLog(input);

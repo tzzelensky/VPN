@@ -1,4 +1,4 @@
-import { Navigate, Route, Routes } from "react-router-dom";
+import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { useEffect, useState, type ReactNode } from "react";
 import { authMe } from "./api";
 import GlobalAmbientBackdrop from "./components/GlobalAmbientBackdrop";
@@ -20,7 +20,6 @@ import DropperGamePage from "./pages/DropperGamePage";
 import ProxiesPage from "./pages/ProxiesPage";
 import SupportAppealsPage from "./pages/SupportAppealsPage";
 import LogsPage from "./pages/LogsPage";
-import ExperimentsPage from "./pages/ExperimentsPage";
 import DeviceLimitPage from "./pages/DeviceLimitPage";
 import DailyGiftPage from "./pages/DailyGiftPage";
 import MySubPage from "./pages/MySubPage";
@@ -72,6 +71,34 @@ function AuthRoute({
   return <SectionGuard path={path}>{children}</SectionGuard>;
 }
 
+function TabIndexRedirect({ base, defaultTab }: { base: string; defaultTab: string }) {
+  const location = useLocation();
+  return (
+    <Navigate to={{ pathname: `${base}/${defaultTab}`, search: location.search }} replace />
+  );
+}
+
+function tabbedRoutes(
+  base: string,
+  defaultTab: string,
+  loggedIn: boolean,
+  page: ReactNode,
+) {
+  return (
+    <>
+      <Route path={base} element={<TabIndexRedirect base={base} defaultTab={defaultTab} />} />
+      <Route
+        path={`${base}/:tab`}
+        element={
+          <AuthRoute loggedIn={loggedIn} path={base}>
+            {page}
+          </AuthRoute>
+        }
+      />
+    </>
+  );
+}
+
 export default function App() {
   const path = typeof window !== "undefined" ? window.location.pathname : "";
   if (path.startsWith("/mysub")) {
@@ -109,30 +136,9 @@ export default function App() {
             </AuthRoute>
           }
         />
-        <Route
-          path="/users"
-          element={
-            <AuthRoute loggedIn={loggedIn} path="/users">
-              <UsersPage onLogout={logout} />
-            </AuthRoute>
-          }
-        />
-        <Route
-          path="/subscription-shop"
-          element={
-            <AuthRoute loggedIn={loggedIn} path="/subscription-shop">
-              <SubscriptionShopPage onLogout={logout} />
-            </AuthRoute>
-          }
-        />
-        <Route
-          path="/communications"
-          element={
-            <AuthRoute loggedIn={loggedIn} path="/communications">
-              <CommunicationsPage onLogout={logout} />
-            </AuthRoute>
-          }
-        />
+        {tabbedRoutes("/users", "active", loggedIn, <UsersPage onLogout={logout} />)}
+        {tabbedRoutes("/subscription-shop", "settings", loggedIn, <SubscriptionShopPage onLogout={logout} />)}
+        {tabbedRoutes("/communications", "mailings", loggedIn, <CommunicationsPage onLogout={logout} />)}
         <Route
           path="/support-appeals"
           element={
@@ -141,22 +147,8 @@ export default function App() {
             </AuthRoute>
           }
         />
-        <Route
-          path="/referral-program"
-          element={
-            <AuthRoute loggedIn={loggedIn} path="/referral-program">
-              <ReferralProgramPage onLogout={logout} />
-            </AuthRoute>
-          }
-        />
-        <Route
-          path="/promo-codes"
-          element={
-            <AuthRoute loggedIn={loggedIn} path="/promo-codes">
-              <PromoCodesPage onLogout={logout} />
-            </AuthRoute>
-          }
-        />
+        {tabbedRoutes("/referral-program", "settings", loggedIn, <ReferralProgramPage onLogout={logout} />)}
+        {tabbedRoutes("/promo-codes", "promos", loggedIn, <PromoCodesPage onLogout={logout} />)}
         <Route
           path="/config-vault"
           element={
@@ -165,30 +157,8 @@ export default function App() {
             </AuthRoute>
           }
         />
-        <Route
-          path="/whitelist-vault"
-          element={
-            <AuthRoute loggedIn={loggedIn} path="/whitelist-vault">
-              <WhitelistVaultPage onLogout={logout} />
-            </AuthRoute>
-          }
-        />
-        <Route
-          path="/logs"
-          element={
-            <AuthRoute loggedIn={loggedIn} path="/logs">
-              <LogsPage onLogout={logout} />
-            </AuthRoute>
-          }
-        />
-        <Route
-          path="/experiments"
-          element={
-            <AuthRoute loggedIn={loggedIn} path="/experiments">
-              <ExperimentsPage onLogout={logout} />
-            </AuthRoute>
-          }
-        />
+        {tabbedRoutes("/whitelist-vault", "keys", loggedIn, <WhitelistVaultPage onLogout={logout} />)}
+        {tabbedRoutes("/logs", "error", loggedIn, <LogsPage onLogout={logout} />)}
         <Route
           path="/telegram-proxies"
           element={
@@ -197,22 +167,8 @@ export default function App() {
             </AuthRoute>
           }
         />
-        <Route
-          path="/dropper-game"
-          element={
-            <AuthRoute loggedIn={loggedIn} path="/dropper-game">
-              <DropperGamePage onLogout={logout} />
-            </AuthRoute>
-          }
-        />
-        <Route
-          path="/device-limit"
-          element={
-            <AuthRoute loggedIn={loggedIn} path="/device-limit">
-              <DeviceLimitPage onLogout={logout} />
-            </AuthRoute>
-          }
-        />
+        {tabbedRoutes("/dropper-game", "general", loggedIn, <DropperGamePage onLogout={logout} />)}
+        {tabbedRoutes("/device-limit", "settings", loggedIn, <DeviceLimitPage onLogout={logout} />)}
         <Route
           path="/daily-gift"
           element={

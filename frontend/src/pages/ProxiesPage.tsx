@@ -633,7 +633,7 @@ export default function ProxiesPage({ onLogout }: { onLogout: () => void }) {
                 </button>
               </div>
             ) : (
-              <div className="proxy-table-wrap">
+              <div className="proxy-table-wrap table-wrap">
                 <table className="proxy-table">
                   <thead>
                     <tr>

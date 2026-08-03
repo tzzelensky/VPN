@@ -21,6 +21,7 @@ const CALLBACK_PRESETS: Array<{ id: string; label: string }> = [
   { id: "sub", label: "Моя подписка" },
   { id: "home", label: "Главное меню" },
   { id: "buygb", label: "Докупить ГБ" },
+  { id: "wlmenu", label: "Белые списки" },
   { id: "ref", label: "Реферальная программа" },
 ];
 

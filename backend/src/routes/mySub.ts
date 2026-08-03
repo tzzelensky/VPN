@@ -78,7 +78,7 @@ import { createDeviceSlotPurchaseRecord, getDeviceLimitSettings } from "../devic
 import { isDeviceLimitActiveForUser } from "../deviceLimitEffective.js";
 import { deviceLimitSettingsForWebApp, subscriptionDeviceInfoForWebApp } from "../deviceLimitWebApp.js";
 import { refreshPlaceholderDeviceSlots } from "../deviceLimitMigration.js";
-import { refreshPanelSettingsCache } from "../panelSettings.js";
+import { getPanelSettings, refreshPanelSettingsCache } from "../panelSettings.js";
 import {
   buildDailyGiftWebAppState,
   claimDailyGift,
@@ -442,6 +442,7 @@ router.post("/webapp/profile", async (req, res) => {
       inviter_reward_gb: referralCfg.inviter_reward_gb,
       inviter_reward_days: referralCfg.inviter_reward_days,
       invited_discount_percent: referralCfg.invited_discount_percent,
+      brand_name: getPanelSettings().panel.brandName.trim() || "HSN VPN",
       invited_friends: rewardRows.map((r) => ({
         reward_id: r.id,
         name: String(r.invitee_name || "Пользователь"),
@@ -1314,11 +1315,10 @@ router.post("/webapp/roulette/spin", async (req, res) => {
     res.status(400).json({ error: err });
     return;
   }
-  try {
-    await pushClientListToAllDeployedServers();
-  } catch {
-    // ignore
-  }
+  // Не блокируем ответ WebApp синхронизацией узлов — иначе спин «висит» десятки секунд.
+  void pushClientListToAllDeployedServers().catch((e) => {
+    console.error("[roulette] push after spin:", e);
+  });
   const piggyUserId = result.spin?.user_id;
   const piggyGb =
     piggyUserId && userHasUnlimitedTrafficForRoulette(piggyUserId) ? getRouletteGbPiggy(piggyUserId) : null;

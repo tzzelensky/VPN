@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Spinner from "./Spinner";
+import RoulettePrizeIcon from "./RoulettePrizeIcon";
 import { subscriptionLabel } from "../subscriptionLabel";
 import {
   buyMySubRouletteTickets,
@@ -9,6 +10,7 @@ import {
   type MySubRoulettePrizeDto,
   type RouletteGbPiggyDto,
   type RouletteTicketShopPublicDto,
+  type RouletteUiMode,
 } from "../api";
 import { formatClientError } from "../lib/clientError";
 import { playRouletteSpinSound, playRouletteWinChime } from "../lib/rouletteSpinSound";
@@ -18,16 +20,24 @@ import {
 } from "../lib/rouletteTicketPurchase";
 import { useHoldRepeatHandlers } from "../lib/useHoldRepeat";
 import {
+  CASE_ITEM_GAP,
+  CASE_ITEM_WIDTH,
+  CASE_REPEATS,
+  caseIdleOffset,
+  caseSpinTargetOffset,
+  wrapCaseOffsetToIdle,
+} from "../lib/rouletteCaseReel";
+import {
   labelTransformCss,
   rotationForPrizeIndex,
   segmentAngle as wheelSegmentAngle,
   wheelGradientCss,
 } from "../lib/rouletteWheel";
 import {
-  getPrizeColor,
+  getPrizeAccentClass,
   getPrizeFullTitle,
-  getPrizeIcon,
   getPrizeLabelTextClass,
+  getPrizeSectorColor,
   getPrizeShortTitle,
   getRouletteLoseMessage,
   historyStatusLabel,
@@ -36,8 +46,8 @@ import {
   type PrizeDisplayInput,
 } from "../roulettePrizeDisplay";
 
-const SPIN_MS = 4200;
-const SPIN_API_TIMEOUT_MS = 45_000;
+const SPIN_MS = 4000;
+const SPIN_API_TIMEOUT_MS = 15_000;
 
 function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
   return new Promise<T>((resolve, reject) => {
@@ -83,6 +93,8 @@ type Props = {
   subscriptions: RouletteSubscriptionDto[];
   ticketsPerPurchase: number;
   prizes: MySubRoulettePrizeDto[];
+  /** UI режим: колесо (по умолчанию) или CS-кейс. */
+  uiMode?: RouletteUiMode;
   ticketShop?: RouletteTicketShopPublicDto;
   history: Array<{ id: number; date: string; prize: string; status: string }>;
   ticketPurchaseHistory?: TicketPurchaseHistoryItem[];
@@ -158,6 +170,7 @@ export default function RouletteGame({
   subscriptions,
   ticketsPerPurchase,
   prizes,
+  uiMode = "wheel",
   ticketShop,
   history,
   ticketPurchaseHistory = [],
@@ -166,17 +179,22 @@ export default function RouletteGame({
   onRefreshProfile,
 }: Props) {
   const wheelRef = useRef<HTMLDivElement>(null);
+  const caseTrackRef = useRef<HTMLDivElement>(null);
+  const caseViewportRef = useRef<HTMLDivElement>(null);
   const stopSoundRef = useRef<(() => void) | null>(null);
   const rotationRef = useRef(0);
+  const caseOffsetRef = useRef(0);
   const spinInFlightRef = useRef(false);
   const pendingSpinRef = useRef(false);
   const autoSpinRef = useRef(false);
   const pendingSpinRafRef = useRef(0);
   const spinFinishTimerRef = useRef(0);
+  const uiModeRef = useRef(uiMode);
   const [wheelPx, setWheelPx] = useState(260);
   const [spinning, setSpinning] = useState(false);
   const [spinRequesting, setSpinRequesting] = useState(false);
   const [rotation, setRotation] = useState(0);
+  const [caseOffset, setCaseOffset] = useState(0);
   const [winModal, setWinModal] = useState<WinModalState | null>(null);
   const [ticketsHelpOpen, setTicketsHelpOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -196,10 +214,8 @@ export default function RouletteGame({
   );
   const [piggyExchanging, setPiggyExchanging] = useState(false);
   const [autoSpinToast, setAutoSpinToast] = useState<string | null>(null);
-
-  useEffect(() => {
-    rotationRef.current = rotation;
-  }, [rotation]);
+  const [winnerIndex, setWinnerIndex] = useState<number | null>(null);
+  const [stageWinFlash, setStageWinFlash] = useState(false);
 
   useEffect(() => {
     autoSpinRef.current = autoSpin;
@@ -260,11 +276,45 @@ export default function RouletteGame({
     };
   }, [stopSpinSound]);
 
+  useEffect(() => {
+    uiModeRef.current = uiMode;
+  }, [uiMode]);
+
+  useEffect(() => {
+    if (spinning) return;
+    rotationRef.current = rotation;
+    const el = wheelRef.current;
+    if (el) {
+      el.style.transition = "none";
+      el.style.transform = `rotate(${rotation}deg)`;
+    }
+  }, [rotation, spinning]);
+
+  useEffect(() => {
+    caseOffsetRef.current = caseOffset;
+  }, [caseOffset]);
+
   const stopPendingWheelSpin = useCallback(() => {
     if (pendingSpinRafRef.current) {
       window.cancelAnimationFrame(pendingSpinRafRef.current);
       pendingSpinRafRef.current = 0;
     }
+  }, []);
+
+  const activePrizesRef = useRef(prizes);
+  useEffect(() => {
+    activePrizesRef.current = prizes;
+  }, [prizes]);
+
+  const applyCaseTransform = useCallback((offset: number, withTransition: boolean, durationMs = SPIN_MS) => {
+    const el = caseTrackRef.current;
+    if (!el) return;
+    if (withTransition) {
+      el.style.transition = `transform ${durationMs}ms cubic-bezier(0.08, 0.82, 0.12, 1)`;
+    } else {
+      el.style.transition = "none";
+    }
+    el.style.transform = `translate3d(${offset}px, 0, 0)`;
   }, []);
 
   const startPendingWheelSpin = useCallback(() => {
@@ -273,23 +323,31 @@ export default function RouletteGame({
     const tick = (now: number) => {
       const dt = Math.min(48, now - lastTs);
       lastTs = now;
-      const next = rotationRef.current + dt * 0.14;
-      rotationRef.current = next;
-      setRotation(next);
+      if (uiModeRef.current === "case") {
+        // Быстрая «летящая» лента сразу после клика
+        let next = caseOffsetRef.current - dt * 2.6;
+        const n = Math.max(1, activePrizesRef.current.length);
+        const viewportW = caseViewportRef.current?.clientWidth || 320;
+        next = wrapCaseOffsetToIdle(next, n, viewportW);
+        caseOffsetRef.current = next;
+        applyCaseTransform(next, false);
+      } else {
+        const next = rotationRef.current + dt * 0.72;
+        rotationRef.current = next;
+        const el = wheelRef.current;
+        if (el) {
+          el.style.transition = "none";
+          el.style.transform = `rotate(${next}deg)`;
+        }
+      }
       pendingSpinRafRef.current = window.requestAnimationFrame(tick);
     };
     pendingSpinRafRef.current = window.requestAnimationFrame(tick);
-  }, [stopPendingWheelSpin]);
+  }, [stopPendingWheelSpin, applyCaseTransform]);
 
-  const animateWheelToFinal = useCallback((finalRotation: number, onSpinVisualStart?: () => void) => {
+  const animateWheelToFinal = useCallback((finalRotation: number, durationMs = SPIN_MS) => {
     return new Promise<void>((resolve) => {
       let settled = false;
-      let visualStarted = false;
-      const startVisual = () => {
-        if (visualStarted) return;
-        visualStarted = true;
-        onSpinVisualStart?.();
-      };
       const done = () => {
         if (settled) return;
         settled = true;
@@ -297,47 +355,69 @@ export default function RouletteGame({
           window.clearTimeout(spinFinishTimerRef.current);
           spinFinishTimerRef.current = 0;
         }
+        rotationRef.current = finalRotation;
+        setRotation(finalRotation);
         resolve();
       };
 
-      requestAnimationFrame(() => {
-        requestAnimationFrame(() => {
-          const el = wheelRef.current;
-          const startRot = rotationRef.current;
-          let visualStartTimer = 0;
-          if (el) {
-            const onStart = (e: TransitionEvent) => {
-              if (e.propertyName !== "transform") return;
-              el.removeEventListener("transitionstart", onStart);
-              if (visualStartTimer) window.clearTimeout(visualStartTimer);
-              startVisual();
-            };
-            el.addEventListener("transitionstart", onStart);
-            const onEnd = (e: TransitionEvent) => {
-              if (e.propertyName !== "transform") return;
-              el.removeEventListener("transitionend", onEnd);
-              done();
-            };
-            el.addEventListener("transitionend", onEnd);
-            el.style.transition = "none";
-            el.style.transform = `rotate(${startRot}deg)`;
-            void el.offsetHeight;
-            el.style.removeProperty("transition");
-            el.style.removeProperty("transform");
-            visualStartTimer = window.setTimeout(startVisual, 120);
-          } else {
-            visualStartTimer = window.setTimeout(startVisual, 0);
-          }
-          setRotation(finalRotation);
-          spinFinishTimerRef.current = window.setTimeout(done, SPIN_MS + 160);
-        });
-      });
+      const el = wheelRef.current;
+      const startRot = rotationRef.current;
+      if (el) {
+        el.style.transition = "none";
+        el.style.transform = `rotate(${startRot}deg)`;
+        void el.offsetHeight;
+        el.style.transition = `transform ${durationMs}ms cubic-bezier(0.08, 0.82, 0.12, 1)`;
+        el.style.transform = `rotate(${finalRotation}deg)`;
+        const onEnd = (e: TransitionEvent) => {
+          if (e.propertyName !== "transform") return;
+          el.removeEventListener("transitionend", onEnd);
+          done();
+        };
+        el.addEventListener("transitionend", onEnd);
+      }
+      setRotation(finalRotation);
+      spinFinishTimerRef.current = window.setTimeout(done, durationMs + 80);
     });
   }, []);
 
+  const animateCaseToFinal = useCallback((finalOffset: number, durationMs = SPIN_MS) => {
+    return new Promise<void>((resolve) => {
+      let settled = false;
+      const done = () => {
+        if (settled) return;
+        settled = true;
+        if (spinFinishTimerRef.current) {
+          window.clearTimeout(spinFinishTimerRef.current);
+          spinFinishTimerRef.current = 0;
+        }
+        caseOffsetRef.current = finalOffset;
+        setCaseOffset(finalOffset);
+        resolve();
+      };
+
+      const el = caseTrackRef.current;
+      const startOff = caseOffsetRef.current;
+      if (el) {
+        el.style.transition = "none";
+        el.style.transform = `translate3d(${startOff}px, 0, 0)`;
+        void el.offsetHeight;
+      }
+      setCaseOffset(finalOffset);
+      applyCaseTransform(finalOffset, true, durationMs);
+
+      const onEnd = (e: TransitionEvent) => {
+        if (e.propertyName !== "transform") return;
+        el?.removeEventListener("transitionend", onEnd);
+        done();
+      };
+      el?.addEventListener("transitionend", onEnd);
+      spinFinishTimerRef.current = window.setTimeout(done, durationMs + 80);
+    });
+  }, [applyCaseTransform]);
+
   const ticketCount = Math.max(0, localTickets);
   const spinBusy = spinning || spinRequesting;
-  const labelRadiusPx = Math.round(wheelPx * 0.36);
+  const labelRadiusPx = Math.round(wheelPx * 0.34);
   const shop = ticketShop;
   const shopVisible = !!shop?.visible;
   const minTickets = shop?.min_tickets ?? 1;
@@ -475,9 +555,35 @@ export default function RouletteGame({
   const catalog = useMemo(() => activePrizes.map(toDisplayPrize), [activePrizes]);
   const segAngle = wheelSegmentAngle(activePrizes.length);
   const compactLabel = segAngle < 32;
+  const caseStrip = useMemo(() => {
+    if (activePrizes.length === 0) return [] as Array<{ key: string; prize: MySubRoulettePrizeDto; index: number }>;
+    const out: Array<{ key: string; prize: MySubRoulettePrizeDto; index: number }> = [];
+    for (let r = 0; r < CASE_REPEATS; r++) {
+      for (let i = 0; i < activePrizes.length; i++) {
+        const p = activePrizes[i]!;
+        out.push({ key: `${p.id}-${r}-${i}`, prize: p, index: i });
+      }
+    }
+    return out;
+  }, [activePrizes]);
+
+  useEffect(() => {
+    if (uiMode !== "case" || activePrizes.length === 0) return;
+    const measure = () => {
+      const viewportW = caseViewportRef.current?.clientWidth || 320;
+      const start = caseIdleOffset(activePrizes.length, viewportW, 0);
+      setCaseOffset(start);
+      caseOffsetRef.current = start;
+      applyCaseTransform(start, false);
+    };
+    measure();
+    // После layout viewport может стать шире
+    const t = window.setTimeout(measure, 50);
+    return () => window.clearTimeout(t);
+  }, [uiMode, activePrizes.length, applyCaseTransform]);
 
   const wheelGradient = useMemo(() => {
-    const colors = activePrizes.map((p, i) => getPrizeColor(toDisplayPrize(p), i));
+    const colors = activePrizes.map((p, i) => getPrizeSectorColor(toDisplayPrize(p), i));
     return wheelGradientCss(colors);
   }, [activePrizes]);
 
@@ -542,11 +648,16 @@ export default function RouletteGame({
     }
 
     spinInFlightRef.current = true;
-    setSpinRequesting(true);
+    setWinnerIndex(null);
+    setStageWinFlash(false);
     setError(null);
+    // Визуальный старт сразу — не ждём API
+    setSpinRequesting(false);
+    setSpinning(true);
     if (fromAuto) {
       setAutoSpinToast(`Автопрокрутка… билетов: ${ticketCount}`);
     }
+    stopSpinSound();
     startPendingWheelSpin();
 
     try {
@@ -556,6 +667,7 @@ export default function RouletteGame({
         "Сервер не ответил вовремя. Попробуйте ещё раз.",
       );
       stopPendingWheelSpin();
+      stopSoundRef.current = playRouletteSpinSound(SPIN_MS);
 
       let idx = Math.max(0, Math.min(activePrizes.length - 1, result.prize_index ?? 0));
       if (result.prize?.id) {
@@ -565,15 +677,26 @@ export default function RouletteGame({
       const prizeDto = result.prize ?? activePrizes[idx];
       const prize = prizeDto ? toDisplayPrize(prizeDto) : catalog[idx]!;
       const lose = isRouletteLosePrize(prize);
-      const extraTurns = 5 + Math.floor(Math.random() * 3);
-      const finalRotation = rotationForPrizeIndex(rotationRef.current, idx, activePrizes.length, extraTurns);
 
-      setSpinRequesting(false);
-      setSpinning(true);
-      stopSpinSound();
-      await animateWheelToFinal(finalRotation, () => {
-        stopSoundRef.current = playRouletteSpinSound(SPIN_MS);
-      });
+      if (uiModeRef.current === "case") {
+        const viewportW = caseViewportRef.current?.clientWidth || 320;
+        const n = activePrizes.length;
+        // Продолжаем с текущей позиции ленты — без паузы и без сброса
+        const current = caseOffsetRef.current;
+        const jitter = (Math.random() - 0.5) * 0.28;
+        const minCycles = 4 + Math.floor(Math.random() * 2);
+        const finalOffset = caseSpinTargetOffset(current, idx, n, viewportW, minCycles, jitter);
+        await animateCaseToFinal(finalOffset, SPIN_MS);
+        const settled = wrapCaseOffsetToIdle(finalOffset, n, viewportW);
+        caseOffsetRef.current = settled;
+        setCaseOffset(settled);
+        applyCaseTransform(settled, false);
+      } else {
+        setRotation(rotationRef.current);
+        const extraTurns = 5 + Math.floor(Math.random() * 3);
+        const finalRotation = rotationForPrizeIndex(rotationRef.current, idx, activePrizes.length, extraTurns);
+        await animateWheelToFinal(finalRotation, SPIN_MS);
+      }
 
       const appliedTitle = result.spin?.prize_title?.trim();
       const appliedMessage = result.spin?.prize_display_message?.trim();
@@ -583,6 +706,11 @@ export default function RouletteGame({
       stopSpinSound();
       spinInFlightRef.current = false;
       setSpinning(false);
+      setWinnerIndex(idx);
+      if (!lose) {
+        setStageWinFlash(true);
+        window.setTimeout(() => setStageWinFlash(false), 1500);
+      }
       setLocalTickets(remaining);
       patchSelectedSub({ tickets: remaining });
       if (result.gb_piggy) applyPiggyFromResult(result.gb_piggy);
@@ -631,9 +759,10 @@ export default function RouletteGame({
     startPendingWheelSpin,
     stopPendingWheelSpin,
     animateWheelToFinal,
+    animateCaseToFinal,
+    applyCaseTransform,
     resetSpinState,
   ]);
-
   const requestSpin = useCallback(() => {
     if (autoSpinRef.current) {
       setAutoSpin(false);
@@ -861,18 +990,59 @@ export default function RouletteGame({
         </div>
       </section>
 
-      <div className="roulette-game__stage">
+      <div
+        className={`roulette-game__stage ${uiMode === "case" ? "roulette-game__stage--case" : ""} ${stageWinFlash ? "roulette-game__stage--win" : ""} ${winnerIndex != null && !spinning ? "roulette-game__stage--settled" : ""}`}
+      >
+        {uiMode === "case" ? (
+          <div
+            className={`roulette-case ${spinRequesting ? "roulette-case--pending" : ""} ${spinning ? "roulette-case--spinning" : ""} ${winnerIndex != null && !spinning ? "roulette-case--settled" : ""}`}
+          >
+            <div className="roulette-case__pointer roulette-case__pointer--top" aria-hidden />
+            <div className="roulette-case__pointer roulette-case__pointer--bottom" aria-hidden />
+            <div className="roulette-case__frame">
+            <div ref={caseViewportRef} className="roulette-case__viewport">
+              <div
+                ref={caseTrackRef}
+                className="roulette-case__track"
+                style={{ gap: CASE_ITEM_GAP }}
+              >
+                {caseStrip.map((slot) => {
+                  const display = toDisplayPrize(slot.prize);
+                  const isWinner = winnerIndex === slot.index && !spinning && !spinRequesting;
+                  return (
+                    <div
+                      key={slot.key}
+                      className={`roulette-case__item ${getPrizeAccentClass(display)} ${isWinner ? "roulette-case__item--winner" : ""}`}
+                      style={{ width: CASE_ITEM_WIDTH }}
+                    >
+                      <div className="roulette-case__icon-ring">
+                        <RoulettePrizeIcon type={display.type} size={28} className="roulette-case__icon-svg" />
+                      </div>
+                      <span className="roulette-case__label">{getPrizeShortTitle(display)}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+            </div>
+          </div>
+        ) : (
+          <>
         <div className="roulette-game__stage-glow" aria-hidden />
-        <div className="roulette-game__pointer-wrap" aria-hidden>
-          <div className="roulette-game__pointer" />
+        <div
+          className={`roulette-game__pointer-wrap ${winnerIndex != null && !spinning ? "roulette-game__pointer-wrap--landed" : ""}`}
+          aria-hidden
+        >
+          <div className="roulette-game__pointer">
+            <div className="roulette-game__pointer-body" />
+          </div>
         </div>
         <div className="roulette-game__wheel-frame">
           <div
             ref={wheelRef}
-            className={`roulette-game__wheel ${spinRequesting ? "roulette-game__wheel--pending" : ""} ${spinning ? "roulette-game__wheel--spinning" : ""}`}
+            className={`roulette-game__wheel ${spinRequesting ? "roulette-game__wheel--pending" : ""} ${spinning ? "roulette-game__wheel--spinning" : ""} ${winnerIndex != null && !spinning ? "roulette-game__wheel--settled" : ""}`}
             style={{
               background: wheelGradient,
-              transform: `rotate(${rotation}deg)`,
             }}
           >
             <div className="roulette-game__wheel-shine" aria-hidden />
@@ -886,17 +1056,19 @@ export default function RouletteGame({
             ))}
             {activePrizes.map((p, i) => {
             const display = toDisplayPrize(p);
-            const sectorColor = getPrizeColor(display, i);
+            const sectorColor = getPrizeSectorColor(display, i);
             const textClass = getPrizeLabelTextClass(sectorColor);
-            const icon = getPrizeIcon(display);
             const shortTitle = getPrizeShortTitle(display);
+            const isWinner = winnerIndex === i && !spinning;
             return (
               <div
                 key={p.id}
-                className={`roulette-game__label ${textClass}`}
+                className={`roulette-game__label ${textClass} ${getPrizeAccentClass(display)} ${isWinner ? "roulette-game__label--winner" : ""}`}
                 style={{ transform: labelTransformCss(i, activePrizes.length, labelRadiusPx) }}
               >
-                <span className="roulette-game__label-icon">{icon}</span>
+                <span className="roulette-game__label-icon-wrap">
+                  <RoulettePrizeIcon type={display.type} size={compactLabel ? 13 : 15} className="roulette-game__label-icon-svg" />
+                </span>
                 <span
                   className={`roulette-game__label-text ${compactLabel ? "roulette-game__label-text--compact" : ""}`}
                 >
@@ -907,16 +1079,22 @@ export default function RouletteGame({
           })}
           </div>
           <div className="roulette-game__rim-lights" aria-hidden>
-            {Array.from({ length: 16 }, (_, i) => (
+            {Array.from({ length: 12 }, (_, i) => (
               <span
                 key={i}
                 className="roulette-game__rim-light"
-                style={{ "--rim-angle": `${i * 22.5}deg` } as React.CSSProperties}
+                style={{ "--rim-angle": `${i * 30}deg` } as React.CSSProperties}
               />
             ))}
           </div>
         </div>
-        <div className="roulette-game__wheel-cap" aria-hidden />
+        <div className="roulette-game__wheel-cap" aria-hidden>
+          <span className="roulette-game__wheel-cap-btn">
+            <RoulettePrizeIcon type="custom" size={22} className="roulette-game__wheel-cap-icon" />
+          </span>
+        </div>
+          </>
+        )}
       </div>
 
       {error ? <div className="flash err">{error}</div> : null}
@@ -954,7 +1132,7 @@ export default function RouletteGame({
         >
           {spinBusy ? (
             <>
-              <Spinner /> {autoSpin ? "Автокрутка…" : spinRequesting ? "Запрос…" : "Крутим…"}
+              <Spinner /> {autoSpin ? "Автокрутка…" : "Крутим…"}
             </>
           ) : ticketCount <= 0 ? (
             "Нет билетов"
@@ -1103,7 +1281,7 @@ export default function RouletteGame({
                     return (
                       <li key={item.key}>
                         <span className="roulette-game__history-icon" aria-hidden>
-                          {getPrizeIcon(resolved)}
+                          <RoulettePrizeIcon type={resolved.type} size={18} className="roulette-game__history-icon-svg" />
                         </span>
                         <span className="roulette-game__history-text">
                           {getPrizeShortTitle(resolved)} — {historyStatusLabel(item.spin.status)}
@@ -1270,35 +1448,45 @@ export default function RouletteGame({
       {winModal ? (
         <div className="modal-backdrop roulette-game__win-backdrop" onClick={() => setWinModal(null)}>
           <div
-            className={`roulette-game__win-sheet ${winModal.lose ? "roulette-game__win-sheet--lose" : ""}`}
+            className={`roulette-game__win-sheet ${winModal.lose ? "roulette-game__win-sheet--lose" : ""} ${getPrizeAccentClass(winModal.prize)}`}
             onClick={(e) => e.stopPropagation()}
             role="dialog"
             aria-modal="true"
           >
             <div className="roulette-game__win-sheet-glow" aria-hidden />
             <div className="roulette-game__win-sheet-body">
-              <p className="roulette-game__win-eyebrow">{winModal.lose ? "Не повезло" : "Ваш приз"}</p>
+              <p className="roulette-game__win-eyebrow">{winModal.lose ? "🎲" : "🎉"}</p>
               <div className="roulette-game__win-icon-ring" aria-hidden>
-                <span className="roulette-game__win-icon">{getPrizeIcon(winModal.prize)}</span>
+                <RoulettePrizeIcon type={winModal.prize.type} size={44} className="roulette-game__win-icon-svg" />
               </div>
-              <h2 className="roulette-game__win-heading">{winModal.lose ? "Увы…" : "Поздравляем!"}</h2>
+              <h2 className="roulette-game__win-heading">{winModal.lose ? "Не повезло" : "Поздравляем!"}</h2>
               {winModal.lose ? (
                 <>
-                  <p className="roulette-game__win-prize">{winModal.winText ?? getRouletteLoseMessage()}</p>
+                  <p className="roulette-game__win-prize">{getRouletteLoseMessage()}</p>
                   <p className="roulette-game__win-sub">{winModal.winSub ?? "Билет списан. Попробуйте ещё раз!"}</p>
                 </>
               ) : (
                 <>
-                  <p className="roulette-game__win-prize">{winModal.winText ?? getPrizeFullTitle(winModal.prize)}</p>
+                  <p className="roulette-game__win-kicker">Вы выиграли</p>
+                  <p className="roulette-game__win-prize roulette-game__win-prize--big">
+                    {winModal.winText ?? getPrizeShortTitle(winModal.prize)}
+                  </p>
                   <p className="roulette-game__win-sub">{winModal.winSub ?? "Приз уже начислен в вашу подписку"}</p>
                 </>
               )}
             </div>
             <div className="roulette-game__win-sheet-actions">
+              <button
+                type="button"
+                className="primary roulette-game__win-btn roulette-game__win-btn--main"
+                onClick={() => setWinModal(null)}
+              >
+                {winModal.lose ? "Отлично" : "Забрать"}
+              </button>
               {!winModal.lose && ticketCount > 0 ? (
                 <button
                   type="button"
-                  className="primary roulette-game__win-btn roulette-game__win-btn--main"
+                  className="ghost roulette-game__win-btn"
                   onClick={() => {
                     setWinModal(null);
                     requestSpin();

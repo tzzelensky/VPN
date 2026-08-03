@@ -212,6 +212,12 @@ export async function pushClientListToAllDeployedServers(log?: SshLog): Promise<
       lastSyncedClientMapByServerId.set(row.id, nextMap);
       await refreshSpeedLimitsOnServer(row, path, clients, log);
     }
+    try {
+      const { pushHysteria2ClientsToAllDeployedServers } = await import("./hysteria2Deploy.js");
+      await pushHysteria2ClientsToAllDeployedServers(log);
+    } catch (e) {
+      log?.(`Hysteria2 sync: ${e instanceof Error ? e.message : String(e)}`);
+    }
   };
   const job = pushQueue.then(() => run());
   pushQueue = job.catch(() => {});

@@ -5,7 +5,6 @@ export type PanelSectionKey =
   | "servers"
   | "users"
   | "logs"
-  | "experiments"
   | "subscription_shop"
   | "communications"
   | "support_appeals"
@@ -26,6 +25,25 @@ export type PanelSubscriptionBanner = {
   telegramUrl: string;
   telegramLinkText: string;
 };
+
+export type TelegramButtonColors = Record<
+  | "menuHome"
+  | "menuSubscription"
+  | "menuPay"
+  | "menuBuyGb"
+  | "menuBuyDevice"
+  | "menuAdminClients"
+  | "deleteSubscription"
+  | "createNewSubscription"
+  | "pickSubscription"
+  | "comboOffer"
+  | "applyPromo"
+  | "buyWhitelist"
+  | "sendAppeal"
+  | "askAi"
+  | "inviteFriend",
+  string
+>;
 
 export type PanelSettings = {
   panel: {
@@ -55,6 +73,10 @@ export type PanelSettings = {
     notifyServerErrors: boolean;
     testMode: boolean;
     login2faEnabled: boolean;
+    buttonColors: TelegramButtonColors;
+    menuImagePath: string | null;
+    aiAssistantEnabled: boolean;
+    geminiModel: string;
   };
   security: {
     maskSecrets: boolean;
@@ -63,6 +85,10 @@ export type PanelSettings = {
     showDiagnosticDetails: boolean;
   };
   maintenance: { enabled: boolean };
+  vpnDisplay: {
+    serverOrder: number[];
+    entryOrder: string[];
+  };
   updatedAt: number;
 };
 
@@ -79,7 +105,10 @@ export type PanelSettingsResponse = {
   telegram: {
     botTokenConfigured: boolean;
     botTokenMasked: string;
+    geminiApiKeyConfigured: boolean;
+    geminiApiKeyMasked: string;
     adminIds: number[];
   };
   avatarUrl: string | null;
+  menuImageUrl: string | null;
 };

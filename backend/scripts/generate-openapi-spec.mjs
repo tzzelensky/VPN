@@ -54,8 +54,6 @@ const ROUTE_FILES = {
   "subscription.ts": { mount: "/api/subscription", tag: "Subscription", auth: false },
   "deviceLimit.ts": { mount: "/api/device-limit", tag: "Device limit" },
   "dailyGift.ts": { mount: "/api/daily-gift", tag: "Daily gift" },
-  "experiments.ts": { mount: "/api/experiments", tag: "Experiments" },
-  "experimentSubscription.ts": { mount: "/api/exp-sub", tag: "Experiment subscription", auth: false },
   "telegram.ts": { mount: "/api/telegram", tag: "Telegram webhook", auth: false },
 };
 
@@ -71,7 +69,6 @@ const rootEndpoints = [
   { method: "get", path: "/api/health", tag: "System", auth: false },
   { method: "get", path: "/comfort", tag: "System", auth: false },
   { method: "get", path: "/sub/{token}", tag: "Subscription", auth: false },
-  { method: "get", path: "/exp-sub/{token}", tag: "Experiment subscription", auth: false },
 ];
 
 for (const ep of rootEndpoints) {

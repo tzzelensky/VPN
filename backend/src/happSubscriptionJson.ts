@@ -1,12 +1,25 @@
 import { parseProxyUri, type ParsedVlessParams } from "./configVaultUri.js";
-import {
-  subscriptionWhitelistEntriesForUser,
-  userHasWhitelistClientJsonProfiles,
-} from "./whitelistVaultDb.js";
-import type { UserRow } from "./db.js";
+import { configVaultLinksForUser } from "./configVaultDb.js";
+import { subscriptionWhitelistEntriesForUser } from "./whitelistVaultDb.js";
+import { getServerSubscriptionSettings, listDeployedServers, type UserRow } from "./db.js";
+import { resolveVpnDisplayEntryOrderForUser } from "./vpnDisplayCatalog.js";
+import { parseVpnEntryKey } from "./vpnDisplayOrder.js";
+import { buildHysteria2UriForUser } from "./hysteria2Link.js";
+import { buildVlessUriFromSubscriptionSettings } from "./vlessLink.js";
 
 export function isHappUserAgent(ua: string | undefined | null): boolean {
   return /happ/i.test(String(ua ?? ""));
+}
+
+/** Happ и Incy — Xray-клиенты; им нужен JSON с pinnedPeerCertSha256, без allowInsecure. */
+export function isXrayJsonSubscriptionClient(
+  ua: string | undefined | null,
+  xClient?: string | undefined | null,
+): boolean {
+  if (/happ/i.test(String(ua ?? ""))) return true;
+  if (/incy/i.test(String(ua ?? ""))) return true;
+  if (/incy/i.test(String(xClient ?? ""))) return true;
+  return false;
 }
 
 function defaultInbounds(): unknown[] {
@@ -58,10 +71,15 @@ function buildVlessOutbound(p: ParsedVlessParams): Record<string, unknown> {
   } else if (p.security === "tls") {
     const tls: Record<string, unknown> = {
       serverName: p.sni || undefined,
-      allowInsecure: p.allowInsecure || false,
     };
     if (p.fingerprint) tls.fingerprint = p.fingerprint;
     if (p.alpn) tls.alpn = p.alpn.split(",").map((x) => x.trim()).filter(Boolean);
+    const pin = String(p.pinnedPeerCertSha256 ?? "")
+      .trim()
+      .replace(/:/g, "")
+      .toLowerCase();
+    if (pin) tls.pinnedPeerCertSha256 = pin;
+    // allowInsecure удалён в новых ядрах Xray/Happ — не эмитим
     stream.tlsSettings = tls;
   }
 
@@ -110,19 +128,55 @@ function buildVlessOutbound(p: ParsedVlessParams): Record<string, unknown> {
   };
 }
 
-/** Профиль Happ из vless:// (без полного routing — как обычный узел). */
+/** Outbound Hysteria2 для Happ/Xray (protocol hysteria, version 2). */
+function buildHysteria2Outbound(p: ParsedVlessParams): Record<string, unknown> {
+  const tls: Record<string, unknown> = {
+    serverName: p.sni || undefined,
+    alpn: ["h3"],
+  };
+  if (p.fingerprint) tls.fingerprint = p.fingerprint;
+  // allowInsecure удалён в Xray (2026-06-01) — только pin сертификата
+  const pin = String(p.pinnedPeerCertSha256 ?? "")
+    .trim()
+    .replace(/:/g, "")
+    .toLowerCase();
+  if (pin) tls.pinnedPeerCertSha256 = pin;
+  return {
+    protocol: "hysteria",
+    settings: {
+      version: 2,
+      address: p.address,
+      port: p.port,
+    },
+    streamSettings: {
+      network: "hysteria",
+      security: "tls",
+      hysteriaSettings: {
+        version: 2,
+        auth: p.uuid,
+      },
+      tlsSettings: tls,
+    },
+    tag: "proxy",
+  };
+}
+
+/** Профиль Happ из vless:// или hysteria2:// (без полного routing — как обычный узел). */
 export function shareLinkToHappProfile(uri: string): Record<string, unknown> | null {
   const trimmed = uri.trim();
   if (!trimmed || /^happ:\/\//i.test(trimmed)) return null;
-  if (!/^vless:\/\//i.test(trimmed)) return null;
+  const isHy = /^hysteria2:\/\//i.test(trimmed) || /^hysteria:\/\//i.test(trimmed);
+  const isVless = /^vless:\/\//i.test(trimmed);
+  if (!isHy && !isVless) return null;
   const p = parseProxyUri(trimmed);
   if (!p) return null;
   const remarks = (p.remark || `${p.address}:${p.port}`).slice(0, 120);
+  const outbound = isHy ? buildHysteria2Outbound(p) : buildVlessOutbound(p);
   return {
     dns: { queryStrategy: "AsIs", servers: ["1.1.1.1", "1.0.0.1", "8.8.8.8"] },
     inbounds: defaultInbounds(),
     outbounds: [
-      buildVlessOutbound(p),
+      outbound,
       { protocol: "freedom", tag: "direct" },
       { protocol: "blackhole", tag: "block" },
     ],
@@ -135,38 +189,91 @@ export function shareLinkToHappProfile(uri: string): Record<string, unknown> | n
 }
 
 /**
- * Тело подписки для Happ: JSON-массив профилей.
+ * Тело подписки для Happ/Incy: JSON-массив профилей Xray в порядке vpnDisplay.
  * Ключи БС с client_json идут as-is (routing + xhttp.extra сохраняются).
  */
 export function buildHappJsonSubscriptionBody(
   user: UserRow,
   shareLinks: string[],
 ): { contentType: string; body: string } | null {
-  const wl = subscriptionWhitelistEntriesForUser(user);
-  const hasFullJson = wl.some((e) => e.client_json != null);
-  if (!hasFullJson) return null;
-
   const profiles: Record<string, unknown>[] = [];
-  const usedUri = new Set(wl.map((e) => e.uri.trim().toLowerCase()).filter(Boolean));
+  const used = new Set<string>();
+  const pushProfile = (profile: Record<string, unknown> | null, dedupeKey?: string) => {
+    if (!profile) return;
+    const key = (dedupeKey || String(profile.remarks ?? "")).toLowerCase();
+    if (key && used.has(key)) return;
+    if (key) used.add(key);
+    profiles.push(profile);
+  };
 
-  for (const link of shareLinks) {
-    const t = link.trim();
-    if (!t || t.startsWith("#") || /^happ:\/\//i.test(t)) continue;
-    if (usedUri.has(t.toLowerCase())) continue;
-    const profile = shareLinkToHappProfile(t);
-    if (profile) profiles.push(profile);
-  }
+  const entryOrder = resolveVpnDisplayEntryOrderForUser(user);
+  if (entryOrder.length > 0) {
+    const servers = new Map(listDeployedServers().map((s) => [s.id, s]));
+    const vaultById = new Map(configVaultLinksForUser(user).map((x) => [x.vault_key_id, x]));
+    const wlById = new Map(subscriptionWhitelistEntriesForUser(user).map((x) => [x.key_id, x]));
 
-  for (const e of wl) {
-    if (e.client_json) {
-      const clone = { ...e.client_json };
-      clone.remarks = e.name || clone.remarks;
-      profiles.push(clone);
-    } else {
-      const profile = shareLinkToHappProfile(e.uri);
-      if (profile) {
-        if (e.name) profile.remarks = e.name;
-        profiles.push(profile);
+    for (const key of entryOrder) {
+      const p = parseVpnEntryKey(key);
+      if (!p) continue;
+      if (p.kind === "vless") {
+        const row = servers.get(p.id);
+        if (!row) continue;
+        const settings = getServerSubscriptionSettings(row);
+        const uri = buildVlessUriFromSubscriptionSettings(row, user, settings);
+        pushProfile(shareLinkToHappProfile(uri), uri);
+        continue;
+      }
+      if (p.kind === "hy2") {
+        const row = servers.get(p.id);
+        if (!row || row.hysteria2_deployed !== 1 || row.hysteria2_in_subscriptions !== 1) continue;
+        const uri = buildHysteria2UriForUser(row, user);
+        if (uri) pushProfile(shareLinkToHappProfile(uri), uri);
+        continue;
+      }
+      if (p.kind === "vault") {
+        const link = vaultById.get(p.id);
+        if (!link?.uri) continue;
+        const profile = shareLinkToHappProfile(link.uri);
+        if (profile && link.name) profile.remarks = link.name;
+        pushProfile(profile, link.uri);
+        continue;
+      }
+      if (p.kind === "whitelist") {
+        const e = wlById.get(p.id);
+        if (!e) continue;
+        if (e.client_json) {
+          const clone = { ...e.client_json };
+          clone.remarks = e.name || clone.remarks;
+          pushProfile(clone, `wl:${e.key_id}`);
+        } else {
+          const profile = shareLinkToHappProfile(e.uri);
+          if (profile && e.name) profile.remarks = e.name;
+          pushProfile(profile, e.uri);
+        }
+      }
+    }
+  } else {
+    const wl = subscriptionWhitelistEntriesForUser(user);
+    const usedUri = new Set(wl.map((e) => e.uri.trim().toLowerCase()).filter(Boolean));
+
+    for (const link of shareLinks) {
+      const t = link.trim();
+      if (!t || t.startsWith("#") || /^happ:\/\//i.test(t)) continue;
+      if (usedUri.has(t.toLowerCase())) continue;
+      pushProfile(shareLinkToHappProfile(t), t);
+    }
+
+    for (const e of wl) {
+      if (e.client_json) {
+        const clone = { ...e.client_json };
+        clone.remarks = e.name || clone.remarks;
+        pushProfile(clone, `wl:${e.key_id}`);
+      } else {
+        const profile = shareLinkToHappProfile(e.uri);
+        if (profile) {
+          if (e.name) profile.remarks = e.name;
+          pushProfile(profile, e.uri);
+        }
       }
     }
   }
@@ -178,6 +285,11 @@ export function buildHappJsonSubscriptionBody(
   };
 }
 
-export function shouldServeHappJsonSubscription(user: UserRow, userAgent: string): boolean {
-  return isHappUserAgent(userAgent) && userHasWhitelistClientJsonProfiles(user);
+export function shouldServeHappJsonSubscription(
+  _user: UserRow,
+  userAgent: string,
+  xClient?: string | null,
+): boolean {
+  // Happ/Incy на Xray: JSON с pinnedPeerCertSha256 (URI insecure→allowInsecure ломает ядро)
+  return isXrayJsonSubscriptionClient(userAgent, xClient);
 }

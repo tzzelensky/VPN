@@ -17,13 +17,13 @@ export function wheelGradientCss(colors: string[]): string {
   const parts: string[] = [];
   for (let i = 0; i < n; i++) {
     const start = i * a;
-    const mid = start + a * 0.55;
+    const mid = start + a * 0.52;
     const end = (i + 1) * a;
     const c = colors[i]!;
     parts.push(`${c} ${start}deg ${mid}deg`);
-    parts.push(`color-mix(in srgb, ${c} 72%, #000) ${mid}deg ${end}deg`);
+    parts.push(`color-mix(in srgb, ${c} 82%, #0c1222) ${mid}deg ${end}deg`);
   }
-  return `conic-gradient(${parts.join(", ")})`;
+  return `conic-gradient(from -90deg, ${parts.join(", ")})`;
 }
 
 /** Поворот колеса, чтобы центр сектора prizeIndex оказался под указателем сверху. */

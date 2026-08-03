@@ -21,8 +21,6 @@ import mySubRouter from "./routes/mySub.js";
 import subscriptionRouter from "./routes/subscription.js";
 import deviceLimitRouter from "./routes/deviceLimit.js";
 import dailyGiftRouter from "./routes/dailyGift.js";
-import experimentsRouter from "./routes/experiments.js";
-import experimentSubscriptionRouter from "./routes/experimentSubscription.js";
 import telegramRouter from "./routes/telegram.js";
 import { SUBSCRIPTION_DECOY_HTML } from "./subscriptionLanding.js";
 import { initDb, syncAllUsersDeviceLimitFromGlobal } from "./db.js";
@@ -169,9 +167,6 @@ app.use("/api/sub", subscriptionRouter);
 app.use("/api/subscription", subscriptionRouter);
 app.use("/api/device-limit", deviceLimitRouter);
 app.use("/api/daily-gift", dailyGiftRouter);
-app.use("/api/experiments", experimentsRouter);
-app.use("/exp-sub", experimentSubscriptionRouter);
-app.use("/api/exp-sub", experimentSubscriptionRouter);
 if (isTelegramWebhookEnabled()) {
   app.use("/api/telegram", telegramRouter);
 }

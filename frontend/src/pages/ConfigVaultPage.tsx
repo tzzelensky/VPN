@@ -1054,7 +1054,7 @@ export default function ConfigVaultPage({ onLogout }: { onLogout: () => void }) 
                 <textarea className="input" rows={12} value={jsonText} onChange={(e) => setJsonText(e.target.value)} />
               </label>
               <p className="vault-warn-sm">
-                Поддерживаются конфиги с outbound vless, trojan, hysteria, а также JSON-экспорт с полем keys.
+                Поддерживаются конфиги Happ/Xray (включая авто-выбор / balancer), а также JSON-экспорт с полем keys.
               </p>
             </div>
             <div className="modal-footer">

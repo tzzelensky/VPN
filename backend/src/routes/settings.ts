@@ -3,12 +3,16 @@ import os from "node:os";
 import { requireAuth } from "../middleware/requireAuth.js";
 import {
   deletePanelAvatarFiles,
+  deletePanelMenuImageFiles,
   readPanelAvatar,
+  readPanelMenuImage,
   savePanelAvatar,
+  savePanelMenuImage,
 } from "../panelSettingsFiles.js";
 import {
   defaultPanelSettings,
   normalizeSectionOrder,
+  normalizeVpnServerOrder,
   PANEL_SECTION_META,
   type PanelSectionKey,
   type PanelSettings,
@@ -16,16 +20,26 @@ import {
 import {
   exportSettingsForClient,
   getPanelBotToken,
+  getPanelGeminiApiKey,
   getPanelSettings,
   getPanelBotTokenMasked,
   getEffectiveTelegramAdminIds,
   resetPanelSettings,
   savePanelSettings,
   setPanelBotToken,
+  setPanelGeminiApiKey,
   settingsForExport,
   validateSections,
 } from "../panelSettings.js";
+import { listDeployedServers } from "../db.js";
+import {
+  applyVpnDisplayOrderToAllUsers,
+  normalizeGlobalVpnDisplayEntryOrder,
+} from "../vpnDisplayCatalog.js";
+import { entryOrderFromServerOrder, vlessIdsFromEntryOrder } from "../vpnDisplayOrder.js";
+import { clearAiLogs, listAiLogs } from "../aiLogStore.js";
 import { getTelegramBotToken } from "../telegram/env.js";
+import { normalizeTelegramButtonColors } from "../telegram/inlineButtonStyles.js";
 
 const router = Router();
 router.use(requireAuth);
@@ -84,6 +98,23 @@ router.get("/avatar", (_req, res) => {
   res.send(file.bytes);
 });
 
+router.get("/telegram-menu-image", (_req, res) => {
+  const s = getPanelSettings();
+  if (!s.telegram.menuImagePath) {
+    res.status(404).end();
+    return;
+  }
+  const file = readPanelMenuImage(s.telegram.menuImagePath);
+  if (!file) {
+    savePanelSettings({ ...s, telegram: { ...s.telegram, menuImagePath: null } });
+    res.status(404).end();
+    return;
+  }
+  res.setHeader("Content-Type", file.mime);
+  res.setHeader("Cache-Control", "private, no-cache");
+  res.send(file.bytes);
+});
+
 router.get("/telegram-bot-token", (_req, res) => {
   const token = getPanelBotToken();
   if (!token) {
@@ -91,6 +122,26 @@ router.get("/telegram-bot-token", (_req, res) => {
     return;
   }
   res.json({ botToken: token });
+});
+
+router.get("/gemini-api-key", (_req, res) => {
+  const geminiApiKey = getPanelGeminiApiKey();
+  if (!geminiApiKey) {
+    res.status(404).json({ error: "gemini_api_key_not_configured" });
+    return;
+  }
+  res.json({ geminiApiKey });
+});
+
+router.get("/ai-logs", (req, res) => {
+  const limit = Math.min(400, Math.max(1, Math.floor(Number(req.query.limit) || 200)));
+  res.json({ entries: listAiLogs(limit) });
+});
+
+router.delete("/ai-logs", (_req, res) => {
+  const cleared = clearAiLogs();
+  logSettingsAction(`AI chat logs cleared (${cleared})`);
+  res.json({ ok: true, cleared });
 });
 
 router.get("/export", (_req, res) => {
@@ -118,7 +169,12 @@ router.get("/system", (_req, res) => {
 });
 
 router.patch("/", (req, res) => {
-  const body = (req.body ?? {}) as { settings?: Partial<PanelSettings>; botToken?: unknown };
+  const body = (req.body ?? {}) as {
+    settings?: Partial<PanelSettings>;
+    botToken?: unknown;
+    geminiApiKey?: unknown;
+    clearGeminiApiKey?: unknown;
+  };
   const prev = getPanelSettings();
   const next = {
     ...prev,
@@ -132,7 +188,22 @@ router.patch("/", (req, res) => {
     telegram: { ...prev.telegram, ...(body.settings?.telegram ?? {}) },
     security: { ...prev.security, ...(body.settings?.security ?? {}) },
     maintenance: { ...prev.maintenance, ...(body.settings?.maintenance ?? {}) },
+    vpnDisplay: { ...prev.vpnDisplay, ...(body.settings?.vpnDisplay ?? {}) },
   };
+  if (body.settings?.vpnDisplay !== undefined) {
+    const deployedIds = listDeployedServers().map((s) => s.id);
+    const incoming = body.settings.vpnDisplay;
+    let entryOrder =
+      incoming.entryOrder !== undefined
+        ? normalizeGlobalVpnDisplayEntryOrder(incoming.entryOrder)
+        : normalizeGlobalVpnDisplayEntryOrder(prev.vpnDisplay?.entryOrder ?? []);
+    if ((!entryOrder.length || incoming.entryOrder === undefined) && Array.isArray(incoming.serverOrder)) {
+      const fromServers = entryOrderFromServerOrder(incoming.serverOrder);
+      if (fromServers.length) entryOrder = normalizeGlobalVpnDisplayEntryOrder(fromServers);
+    }
+    const serverOrder = normalizeVpnServerOrder(vlessIdsFromEntryOrder(entryOrder), deployedIds);
+    next.vpnDisplay = { serverOrder, entryOrder };
+  }
   if (!String(next.panel.title ?? "").trim()) {
     res.status(400).json({ error: "title_required" });
     return;
@@ -173,6 +244,20 @@ router.patch("/", (req, res) => {
       .map((x) => Math.floor(Number(x)))
       .filter((n) => Number.isFinite(n) && n > 0);
   }
+  if (body.settings?.telegram?.buttonColors) {
+    next.telegram.buttonColors = normalizeTelegramButtonColors(body.settings.telegram.buttonColors);
+  }
+  // Путь картинки меню меняется только через upload/delete endpoints.
+  next.telegram.menuImagePath = prev.telegram.menuImagePath ?? null;
+  if (body.settings?.telegram && "aiAssistantEnabled" in body.settings.telegram) {
+    next.telegram.aiAssistantEnabled = body.settings.telegram.aiAssistantEnabled === true;
+  }
+  if (body.settings?.telegram && "geminiModel" in body.settings.telegram) {
+    const m = String(body.settings.telegram.geminiModel ?? "")
+      .trim()
+      .slice(0, 80);
+    next.telegram.geminiModel = m || prev.telegram.geminiModel || "gemini-2.5-flash-lite";
+  }
   if (body.settings?.ui && "webAppNewDesign" in body.settings.ui) {
     next.ui.webAppNewDesign = body.settings.ui.webAppNewDesign === true;
   }
@@ -185,7 +270,29 @@ router.patch("/", (req, res) => {
     setPanelBotToken(token);
     logSettingsAction("Telegram bot token updated (value not logged)");
   }
+  if (body.clearGeminiApiKey === true) {
+    setPanelGeminiApiKey(null);
+    logSettingsAction("Gemini API key cleared");
+  } else if (body.geminiApiKey != null && String(body.geminiApiKey).trim()) {
+    const key = String(body.geminiApiKey).trim();
+    if (key.length < 16 || key.length > 512) {
+      res.status(400).json({ error: "invalid_gemini_api_key" });
+      return;
+    }
+    setPanelGeminiApiKey(key);
+    logSettingsAction("Gemini API key updated (value not logged)");
+  }
   const saved = savePanelSettings(next);
+  if (body.settings?.vpnDisplay !== undefined) {
+    const prevEntry = prev.vpnDisplay?.entryOrder ?? [];
+    const nextEntry = saved.vpnDisplay.entryOrder;
+    const orderChanged =
+      prevEntry.length !== nextEntry.length || prevEntry.some((k, i) => k !== nextEntry[i]);
+    if (orderChanged) {
+      const applied = applyVpnDisplayOrderToAllUsers(nextEntry);
+      logSettingsAction(`VPN display entry order updated (users reordered: ${applied.updated_users})`);
+    }
+  }
   if (body.settings?.panel?.title && body.settings.panel.title !== prev.panel.title) {
     logSettingsAction(`Panel title changed to "${saved.panel.title}"`);
   }
@@ -225,8 +332,42 @@ router.delete("/avatar", (_req, res) => {
   res.json(exportSettingsForClient(saved));
 });
 
+router.post("/telegram-menu-image", (req, res) => {
+  const body = req.body as { photo_base64?: unknown; photo_mime?: unknown };
+  const parsed = body.photo_base64 != null ? parseDataUrl(String(body.photo_base64)) : null;
+  if (!parsed) {
+    res.status(400).json({ error: "invalid_menu_image" });
+    return;
+  }
+  try {
+    const rel = savePanelMenuImage(parsed.bytes, String(body.photo_mime ?? parsed.mime));
+    const prev = getPanelSettings();
+    const saved = savePanelSettings({
+      ...prev,
+      telegram: { ...prev.telegram, menuImagePath: rel },
+    });
+    logSettingsAction("Telegram menu image updated");
+    res.json(exportSettingsForClient(saved));
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    res.status(400).json({ error: msg });
+  }
+});
+
+router.delete("/telegram-menu-image", (_req, res) => {
+  deletePanelMenuImageFiles();
+  const prev = getPanelSettings();
+  const saved = savePanelSettings({
+    ...prev,
+    telegram: { ...prev.telegram, menuImagePath: null },
+  });
+  logSettingsAction("Telegram menu image removed");
+  res.json(exportSettingsForClient(saved));
+});
+
 router.post("/reset", (_req, res) => {
   deletePanelAvatarFiles();
+  deletePanelMenuImageFiles();
   const saved = resetPanelSettings();
   logSettingsAction("Settings reset to defaults");
   res.json(exportSettingsForClient(saved));
@@ -245,9 +386,25 @@ router.post("/import", (req, res) => {
     ui: { ...defaultPanelSettings().ui, ...(raw.settings.ui ?? {}) },
     sections: { ...defaultPanelSettings().sections, ...(raw.settings.sections ?? {}) },
     sectionOrder: normalizeSectionOrder(raw.settings.sectionOrder ?? defaultPanelSettings().sectionOrder),
-    telegram: { ...defaultPanelSettings().telegram, ...(raw.settings.telegram ?? {}) },
+    telegram: {
+      ...defaultPanelSettings().telegram,
+      ...(raw.settings.telegram ?? {}),
+      buttonColors: normalizeTelegramButtonColors(raw.settings.telegram?.buttonColors),
+    },
     security: { ...defaultPanelSettings().security, ...(raw.settings.security ?? {}) },
     maintenance: { ...defaultPanelSettings().maintenance, ...(raw.settings.maintenance ?? {}) },
+    vpnDisplay: {
+      serverOrder: Array.isArray(raw.settings.vpnDisplay?.serverOrder)
+        ? normalizeVpnServerOrder(
+            raw.settings.vpnDisplay.serverOrder,
+            listDeployedServers().map((s) => s.id),
+          )
+        : [],
+      entryOrder: normalizeGlobalVpnDisplayEntryOrder(
+        raw.settings.vpnDisplay?.entryOrder ??
+          entryOrderFromServerOrder(raw.settings.vpnDisplay?.serverOrder),
+      ),
+    },
   };
   if (!String(merged.panel.title ?? "").trim()) {
     res.status(400).json({ error: "title_required" });

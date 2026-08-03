@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
+  fetchUserConfigVaultLinks,
   loadSubscriptionShop,
   notifyUserExpired,
   notifyUserExpiring,
@@ -188,6 +189,24 @@ export default function UserModal({
     setExtraVlessLinks(user.extra_vless_links?.length ? [...user.extra_vless_links] : []);
     setConfigVaultLinks(user.config_vault_links?.length ? [...user.config_vault_links] : []);
   }, [open, mode, userId, user, deployedServers]);
+
+  useEffect(() => {
+    if (!open || mode === "create" || !userId) return;
+    if (user?.config_vault_links?.length) return;
+    const count = user?.config_vault_links_count ?? 0;
+    if (count <= 0) return;
+    let cancelled = false;
+    void fetchUserConfigVaultLinks(userId)
+      .then((links) => {
+        if (!cancelled) setConfigVaultLinks(links);
+      })
+      .catch(() => {
+        if (!cancelled) setConfigVaultLinks([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, mode, userId, user?.config_vault_links, user?.config_vault_links_count]);
 
   useEffect(() => {
     if (!open || mode === "create" || !user || shopPlans.length === 0 || planTouchedRef.current) return;

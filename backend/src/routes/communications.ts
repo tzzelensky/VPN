@@ -1,21 +1,32 @@
 import { Router } from "express";
+import { randomBytes } from "node:crypto";
 import surveysRouter from "./surveys.js";
 import { buildSegmentRows, toChatId, uniqTargets, type TargetUserLite } from "../communicationTargets.js";
 import { logCommunicationMessage, stripHtmlPreview } from "../communicationLog.js";
+import { readCommunicationPhoto, saveCommunicationPhoto, deleteCommunicationPhoto } from "../communicationMediaFiles.js";
 import {
   createCommunicationSegment,
   deleteCommunicationSegment,
   ensureTestSubscriptionSegment,
+  ensureWhitelistConnectedSegment,
+  getCommunicationMessageLogById,
+  deleteCommunicationMessageLog,
   getUser,
+  isSystemCommunicationSegment,
   isTestSubscriptionSystemSegment,
+  isWhitelistConnectedSystemSegment,
   listCommunicationMessageLog,
   listCommunicationSegments,
   listTestSubscriptionSegmentUserIds,
+  listWhitelistConnectedSegmentUserIds,
   listUsers,
   refreshTestSubscriptionSegment,
+  refreshWhitelistConnectedSegment,
   updateCommunicationSegment,
+  WHITELIST_CONNECTED_SEGMENT_NAME,
   type CommunicationSegmentRow,
 } from "../db.js";
+import { sweepExpiredManualWhitelistGrants } from "../whitelistVaultDb.js";
 import { requireAuth } from "../middleware/requireAuth.js";
 import { getAutoCommunicationsConfig, setAutoCommunicationsConfig } from "../autoCommunicationsStore.js";
 import { normalizeAutoCommunicationsConfig } from "../autoCommunicationsTypes.js";
@@ -30,6 +41,7 @@ router.use(requireAuth);
 type SendBody = {
   mode?: unknown;
   text?: unknown;
+  title?: unknown;
   user_id?: unknown;
   user_ids?: unknown;
   segment_id?: unknown;
@@ -140,8 +152,8 @@ function parseSegmentBody(body: SegmentBody): Omit<CommunicationSegmentRow, "id"
 }
 
 type CommInlineBtn =
-  | { text: string; callback_data: string }
-  | { text: string; web_app: { url: string } };
+  | { text: string; callback_data: string; style?: "primary" | "success" | "danger" }
+  | { text: string; web_app: { url: string }; style?: "primary" | "success" | "danger" };
 
 function parseButtons(raw: unknown): CommInlineBtn[] {
   const arr = Array.isArray(raw) ? raw : [];
@@ -152,7 +164,9 @@ function parseButtons(raw: unknown): CommInlineBtn[] {
     else if (id === "ref") out.push({ text: "Пригласи друга", callback_data: "ref_menu" });
     else if (id === "sub") out.push({ text: "Подписка", callback_data: "sub" });
     else if (id === "buygb") out.push({ text: "Докупить ГБ", callback_data: "buygb" });
-    else if (id === "webapp") {
+    else if (id === "whitelist") {
+      out.push({ text: "Белые списки", callback_data: "wlmenu", style: "success" });
+    } else if (id === "webapp") {
       const url = getTelegramWebAppUrl();
       if (url) out.push({ text: "Открыть приложение", web_app: { url } });
     }
@@ -161,8 +175,11 @@ function parseButtons(raw: unknown): CommInlineBtn[] {
 }
 
 router.get("/segments", (_req, res) => {
+  sweepExpiredManualWhitelistGrants();
   ensureTestSubscriptionSegment();
   refreshTestSubscriptionSegment();
+  ensureWhitelistConnectedSegment();
+  refreshWhitelistConnectedSegment();
   res.json({ segments: listCommunicationSegments() });
 });
 
@@ -170,11 +187,62 @@ router.get("/history", (req, res) => {
   const limit = Number(req.query.limit);
   const from = String(req.query.from ?? "").trim();
   const to = String(req.query.to ?? "").trim();
+  const manual =
+    req.query.manual === "1" ||
+    req.query.manual === "true" ||
+    req.query.manual_only === "1" ||
+    req.query.manual_only === "true";
   const rows = listCommunicationMessageLog(Number.isFinite(limit) ? limit : 200, {
     fromYmd: from || undefined,
     toYmd: to || undefined,
+    manualOnly: manual,
   });
   res.json({ items: rows });
+});
+
+router.get("/history/:id", (req, res) => {
+  const id = String(req.params.id ?? "").trim();
+  const row = getCommunicationMessageLogById(id);
+  if (!row) {
+    res.status(404).json({ error: "not_found" });
+    return;
+  }
+  res.json(row);
+});
+
+router.get("/history/:id/photo", (req, res) => {
+  const id = String(req.params.id ?? "").trim();
+  const row = getCommunicationMessageLogById(id);
+  if (!row?.photo_path) {
+    res.status(404).json({ error: "photo_not_found" });
+    return;
+  }
+  const photo = readCommunicationPhoto(row.photo_path);
+  if (!photo) {
+    res.status(404).json({ error: "photo_not_found" });
+    return;
+  }
+  res.setHeader("Content-Type", photo.mime);
+  res.setHeader(
+    "Content-Disposition",
+    `inline; filename="${encodeURIComponent(row.photo_name || photo.filename)}"`,
+  );
+  res.send(photo.bytes);
+});
+
+router.delete("/history/:id", (req, res) => {
+  const id = String(req.params.id ?? "").trim();
+  if (!id) {
+    res.status(400).json({ error: "id_required" });
+    return;
+  }
+  const removed = deleteCommunicationMessageLog(id);
+  if (!removed) {
+    res.status(404).json({ error: "not_found" });
+    return;
+  }
+  if (removed.photo_path) deleteCommunicationPhoto(removed.photo_path);
+  res.json({ ok: true, id });
 });
 
 const MODE_SOURCE_LABELS: Record<string, string> = {
@@ -216,6 +284,19 @@ router.patch("/segments/:id", (req, res) => {
     res.json(updated ?? refreshTestSubscriptionSegment());
     return;
   }
+  if (isWhitelistConnectedSystemSegment(existing)) {
+    sweepExpiredManualWhitelistGrants();
+    const updated = updateCommunicationSegment(id, {
+      name: WHITELIST_CONNECTED_SEGMENT_NAME,
+      days_mode: "any",
+      gb_mode: "any",
+      user_ids: listWhitelistConnectedSegmentUserIds(),
+      preset_enabled: false,
+      preset_text: "",
+    });
+    res.json(updated ?? refreshWhitelistConnectedSegment());
+    return;
+  }
   const updated = updateCommunicationSegment(id, body);
   if (!updated) {
     res.status(404).json({ error: "segment_not_found" });
@@ -231,7 +312,7 @@ router.delete("/segments/:id", (req, res) => {
     return;
   }
   const existing = listCommunicationSegments().find((s) => s.id === id);
-  if (existing && isTestSubscriptionSystemSegment(existing)) {
+  if (existing && isSystemCommunicationSegment(existing)) {
     res.status(403).json({ error: "system_segment_protected" });
     return;
   }
@@ -246,8 +327,14 @@ router.delete("/segments/:id", (req, res) => {
 router.post("/segments/:id/refresh-test-subscriptions", (req, res) => {
   const id = String(req.params.id ?? "").trim();
   const existing = listCommunicationSegments().find((s) => s.id === id);
-  if (!existing || !isTestSubscriptionSystemSegment(existing)) {
+  if (!existing || !isSystemCommunicationSegment(existing)) {
     res.status(404).json({ error: "segment_not_found" });
+    return;
+  }
+  if (isWhitelistConnectedSystemSegment(existing)) {
+    sweepExpiredManualWhitelistGrants();
+    const segment = refreshWhitelistConnectedSegment();
+    res.json(segment);
     return;
   }
   const segment = refreshTestSubscriptionSegment();
@@ -435,14 +522,59 @@ router.post("/send", async (req, res) => {
   const segment =
     mode === "segment" ? listCommunicationSegments().find((s) => s.id === String(body.segment_id ?? "").trim()) : undefined;
 
+  const logId = randomBytes(8).toString("hex");
+  let photoMeta: { photo_path: string; photo_mime: string; photo_name: string } | null = null;
+  if (photo) {
+    try {
+      photoMeta = saveCommunicationPhoto(logId, photo.bytes, photo.mime, photo.filename);
+    } catch (e) {
+      console.error("[communications] save photo:", e instanceof Error ? e.message : e);
+    }
+  }
+
+  const buttonsStored = Array.isArray(body.buttons)
+    ? [
+        ...new Set(
+          body.buttons
+            .map((x) => String(x ?? "").trim())
+            .filter(
+              (x) =>
+                x === "pay" ||
+                x === "ref" ||
+                x === "sub" ||
+                x === "buygb" ||
+                x === "webapp" ||
+                x === "whitelist",
+            ),
+        ),
+      ]
+    : [];
+
+  const selectedUserIds =
+    mode === "selected" || mode === "single" ? targets.map((t) => t.userId) : [];
+
   try {
     logCommunicationMessage({
+      id: logId,
       automatic: false,
       source_label: MODE_SOURCE_LABELS[mode] ?? "Рассылка из панели",
       mode: mode as "global" | "single" | "selected" | "segment",
       ...(segment ? { segment_id: segment.id, segment_name: segment.name } : {}),
       text: stripHtmlPreview(`${header}${text}`),
+      body_text: text,
+      ...(String(body.title ?? "").trim() ? { title: String(body.title).trim() } : {}),
+      mark_enabled: markEnabled,
+      ...(markText ? { mark_text: markText } : {}),
+      ...(buttonsStored.length ? { buttons: buttonsStored } : {}),
+      ...(selectedUserIds.length ? { user_ids: selectedUserIds } : {}),
       has_photo: Boolean(photo),
+      ...(photoMeta
+        ? {
+            photo_path: photoMeta.photo_path,
+            photo_mime: photoMeta.photo_mime,
+            photo_name: photoMeta.photo_name,
+          }
+        : {}),
       recipients: targets.map((t) => ({ user_id: t.userId, user_name: t.userName })),
       sent,
       attempted: targets.length,

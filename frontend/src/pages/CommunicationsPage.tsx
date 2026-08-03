@@ -7,6 +7,7 @@ import PanelTabs from "../components/PanelTabs";
 import AdminModalBackdrop from "../components/AdminModalBackdrop";
 import BroadcastWizard from "../components/comms/BroadcastWizard";
 import { usePanelSettings } from "../panelSettingsContext";
+import { usePanelTabParam } from "../lib/panelTabRoute";
 import {
   listCommunicationHistory,
   listCommunicationSegments,
@@ -16,7 +17,7 @@ import {
   type CommunicationTargetDto,
 } from "../api";
 
-type CommsTab = "broadcasts" | "surveys" | "history" | "auto" | "triggers";
+const COMMS_TABS = ["mailings", "triggermailing", "surveys", "auto", "history"] as const;
 
 function ymdInTimezone(ts: number, timeZone: string): string {
   return new Intl.DateTimeFormat("en-CA", {
@@ -40,7 +41,7 @@ export default function CommunicationsPage({ onLogout }: { onLogout: () => void 
   const panelTz = panelSettings?.ui.timezone?.trim() || "Asia/Yekaterinburg";
   const brandName = panelSettings?.panel.brandName?.trim() || "HSN VPN";
 
-  const [commsTab, setCommsTab] = useState<CommsTab>("broadcasts");
+  const { tab: commsTab, setTab: setCommsTab } = usePanelTabParam("/communications", COMMS_TABS);
   const [targets, setTargets] = useState<CommunicationTargetDto[]>([]);
   const [segments, setSegments] = useState<CommunicationSegmentDto[]>([]);
   const [msg, setMsg] = useState<{ type: "ok" | "err"; text: string } | null>(null);
@@ -100,8 +101,8 @@ export default function CommunicationsPage({ onLogout }: { onLogout: () => void 
         </p>
         <PanelTabs
           tabs={[
-            { id: "broadcasts", label: "Рассылки" },
-            { id: "triggers", label: "Триггерные рассылки" },
+            { id: "mailings", label: "Рассылки" },
+            { id: "triggermailing", label: "Триггерные рассылки" },
             { id: "surveys", label: "Опросы" },
             { id: "auto", label: "Авто-рассылки" },
             { id: "history", label: "История отправок" },
@@ -110,13 +111,13 @@ export default function CommunicationsPage({ onLogout }: { onLogout: () => void 
           onChange={setCommsTab}
           className="comms-main-tabs-bar"
         />
-        {commsTab === "broadcasts" && msg ? (
+        {commsTab === "mailings" && msg ? (
           <div className={`flash ${msg.type === "ok" ? "ok" : "err"}`}>{msg.text}</div>
         ) : null}
-        {commsTab === "broadcasts" && photoNotice ? <div className="flash ok">{photoNotice}</div> : null}
+        {commsTab === "mailings" && photoNotice ? <div className="flash ok">{photoNotice}</div> : null}
       </section>
 
-      {commsTab === "triggers" ? (
+      {commsTab === "triggermailing" ? (
         <section className="panel comms-panel">
           <TriggeredMailingsPanel />
         </section>
@@ -134,7 +135,7 @@ export default function CommunicationsPage({ onLogout }: { onLogout: () => void 
         </section>
       ) : null}
 
-      {commsTab === "broadcasts" ? (
+      {commsTab === "mailings" ? (
         <section className="panel comms-panel comms-panel--wizard">
           <BroadcastWizard
             targets={targets}

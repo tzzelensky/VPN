@@ -46,7 +46,7 @@ async function sendLowTrafficReminder(u: UserRow, chatId: number): Promise<void>
   };
   const body = fillAutoMessageTemplate(cfg.low_message, vars);
   const sourceLabel = fillAutoMessageTemplate(cfg.source_label_low, vars);
-  await sendTelegramHtml(chatId, body, buyGbReminderInline);
+  await sendTelegramHtml(chatId, body, buyGbReminderInline());
   logCommunicationMessage({
     automatic: true,
     source_label: sourceLabel,
@@ -68,7 +68,7 @@ async function sendEmptyTrafficReminder(u: UserRow, chatId: number): Promise<voi
     threshold_gb: String(cfg.low_gb_threshold),
   };
   const body = fillAutoMessageTemplate(cfg.empty_message, vars);
-  await sendTelegramHtml(chatId, body, buyGbReminderInline);
+  await sendTelegramHtml(chatId, body, buyGbReminderInline());
   logCommunicationMessage({
     automatic: true,
     source_label: cfg.source_label_empty,

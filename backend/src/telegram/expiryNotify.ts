@@ -2,6 +2,7 @@ import { getAutoCommunicationsConfig } from "../autoCommunicationsStore.js";
 import { fillAutoMessageTemplate } from "../autoCommunicationsTypes.js";
 import { logCommunicationMessage, stripHtmlPreview } from "../communicationLog.js";
 import { getUser, listUsers, updateUserRow, type UserRow } from "../db.js";
+import { sweepExpiredManualWhitelistGrants } from "../whitelistVaultDb.js";
 import {
   calendarDaysUntilExpiry,
   isNotifySlot,
@@ -155,6 +156,7 @@ function shouldAutoNotifyExpired(u: UserRow, now = Date.now()): boolean {
 }
 
 export async function runAutoExpiredNotificationsOnce(): Promise<void> {
+  sweepExpiredManualWhitelistGrants();
   const cfg = getAutoCommunicationsConfig().expiry;
   if (!cfg.enabled || !getTelegramBotToken()) return;
 

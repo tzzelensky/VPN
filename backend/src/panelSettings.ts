@@ -9,6 +9,8 @@ import {
   type PanelSectionKey,
   type PanelSettings,
 } from "./panelSettingsTypes.js";
+import { entryOrderFromServerOrder, parseVpnEntryKey } from "./vpnDisplayOrder.js";
+import { normalizeTelegramButtonColors } from "./telegram/inlineButtonStyles.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const dataFile = process.env.DATA_PATH ?? path.join(__dirname, "..", "data.json");
@@ -17,6 +19,7 @@ const secretsPath = process.env.PANEL_SECRETS_PATH ?? path.join(path.dirname(dat
 
 type PanelSecrets = {
   botToken?: string;
+  geminiApiKey?: string;
 };
 
 let cached: PanelSettings | null = null;
@@ -55,11 +58,54 @@ function mergeSettings(raw: Partial<PanelSettings> | null): PanelSettings {
     ui: { ...base.ui, ...(raw.ui ?? {}) },
     sections: { ...base.sections, ...(raw.sections ?? {}) },
     sectionOrder: normalizeSectionOrder(raw.sectionOrder ?? base.sectionOrder),
-    telegram: { ...base.telegram, ...(raw.telegram ?? {}) },
+    telegram: {
+      ...base.telegram,
+      ...(raw.telegram ?? {}),
+      buttonColors: normalizeTelegramButtonColors(raw.telegram?.buttonColors ?? base.telegram.buttonColors),
+      menuImagePath:
+        raw.telegram?.menuImagePath !== undefined
+          ? raw.telegram.menuImagePath
+            ? String(raw.telegram.menuImagePath).trim() || null
+            : null
+          : base.telegram.menuImagePath,
+      aiAssistantEnabled:
+        raw.telegram?.aiAssistantEnabled === undefined
+          ? base.telegram.aiAssistantEnabled
+          : raw.telegram.aiAssistantEnabled === true,
+      geminiModel: (() => {
+        const m = String(raw.telegram?.geminiModel ?? base.telegram.geminiModel ?? "").trim();
+        return m || base.telegram.geminiModel || "gemini-2.5-flash-lite";
+      })(),
+    },
     security: { ...base.security, ...(raw.security ?? {}) },
     maintenance: { ...base.maintenance, ...(raw.maintenance ?? {}) },
+    vpnDisplay: normalizeVpnDisplay(raw.vpnDisplay, base.vpnDisplay),
     updatedAt: raw.updatedAt ?? base.updatedAt,
   };
+}
+
+function normalizeVpnDisplay(
+  raw: PanelSettings["vpnDisplay"] | undefined,
+  base: PanelSettings["vpnDisplay"],
+): PanelSettings["vpnDisplay"] {
+  const serverOrder = Array.isArray(raw?.serverOrder)
+    ? raw!.serverOrder.map((x) => Math.floor(Number(x))).filter((n) => Number.isFinite(n) && n > 0)
+    : [...base.serverOrder];
+  let entryOrder: string[] = [];
+  if (Array.isArray(raw?.entryOrder) && raw!.entryOrder.length > 0) {
+    const seen = new Set<string>();
+    for (const item of raw!.entryOrder) {
+      const p = parseVpnEntryKey(item);
+      if (!p || seen.has(p.key)) continue;
+      seen.add(p.key);
+      entryOrder.push(p.key);
+    }
+  } else if (serverOrder.length > 0) {
+    entryOrder = entryOrderFromServerOrder(serverOrder);
+  } else {
+    entryOrder = [...base.entryOrder];
+  }
+  return { serverOrder, entryOrder };
 }
 
 function readSettingsFile(): PanelSettings {
@@ -103,6 +149,7 @@ export function savePanelSettings(next: PanelSettings): PanelSettings {
   const out: PanelSettings = {
     ...merged,
     sectionOrder: normalizeSectionOrder(next.sectionOrder ?? merged.sectionOrder),
+    vpnDisplay: normalizeVpnDisplay(next.vpnDisplay, merged.vpnDisplay),
     updatedAt: Date.now(),
   };
   writeSettingsFile(out);
@@ -130,6 +177,21 @@ export function setPanelBotToken(token: string | null): void {
   writeSecretsFile(secrets);
 }
 
+export function getPanelGeminiApiKey(): string {
+  const secrets = cachedSecrets ?? readSecretsFile();
+  const fromStore = String(secrets.geminiApiKey ?? "").trim();
+  if (fromStore) return fromStore;
+  return (process.env.GEMINI_API_KEY ?? "").trim();
+}
+
+export function setPanelGeminiApiKey(key: string | null): void {
+  const secrets = { ...(cachedSecrets ?? readSecretsFile()) };
+  const t = String(key ?? "").trim();
+  if (t) secrets.geminiApiKey = t;
+  else delete secrets.geminiApiKey;
+  writeSecretsFile(secrets);
+}
+
 export function maskSecret(value: string, visibleTail = 4): string {
   const v = String(value ?? "").trim();
   if (!v) return "";
@@ -149,6 +211,12 @@ export function getPanelBotTokenMasked(): { configured: boolean; masked: string 
   const token = getPanelBotToken();
   if (!token) return { configured: false, masked: "" };
   return { configured: true, masked: maskSecret(token, 4) };
+}
+
+export function getPanelGeminiApiKeyMasked(): { configured: boolean; masked: string } {
+  const key = getPanelGeminiApiKey();
+  if (!key) return { configured: false, masked: "" };
+  return { configured: true, masked: maskSecret(key, 4) };
 }
 
 export function getEffectiveTelegramAdminIds(settings?: PanelSettings): number[] {
@@ -187,16 +255,22 @@ export function firstVisibleSectionPath(settings?: PanelSettings): string {
 
 export function exportSettingsForClient(settings: PanelSettings) {
   const tokenInfo = getPanelBotTokenMasked();
+  const geminiInfo = getPanelGeminiApiKeyMasked();
   return {
     settings,
     meta: { sections: orderPanelSectionMeta(settings.sectionOrder) },
     telegram: {
       botTokenConfigured: tokenInfo.configured,
       botTokenMasked: tokenInfo.masked,
+      geminiApiKeyConfigured: geminiInfo.configured,
+      geminiApiKeyMasked: geminiInfo.masked,
       adminIds: getEffectiveTelegramAdminIds(settings),
     },
     avatarUrl: settings.panel.avatarPath
       ? `/api/settings/avatar?v=${settings.updatedAt}`
+      : null,
+    menuImageUrl: settings.telegram.menuImagePath
+      ? `/api/settings/telegram-menu-image?v=${settings.updatedAt}`
       : null,
   };
 }

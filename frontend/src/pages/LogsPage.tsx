@@ -1,23 +1,34 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import DashboardLayout from "../components/DashboardLayout";
 import {
+  clearAiLogs,
   clearServerXrayLogs,
+  fetchAiLogs,
   fetchServerXrayLogs,
   listServers,
   patchServerXrayLogLevel,
+  type AiLogEntryDto,
   type ServerDto,
   type XrayLogLevel,
   type XrayLogStreamDto,
   type XrayLogsSnapshotDto,
 } from "../api";
+import { usePanelTabParam } from "../lib/panelTabRoute";
 
 const LOG_LEVELS: XrayLogLevel[] = ["none", "error", "warning", "info", "debug"];
 const TAIL_LINES = 300;
 const AUTO_REFRESH_MS = 4000;
 const LS_SERVER = "xray_logs_server_id";
 const LS_AUTO = "xray_logs_auto_refresh";
+const LS_SOURCE = "panel_logs_source";
 
-type LogTab = "error" | "access";
+const LOG_TABS = ["error", "access"] as const;
+type LogSource = "ai" | "xray";
+
+function readLogSource(): LogSource {
+  const v = localStorage.getItem(LS_SOURCE);
+  return v === "xray" ? "xray" : "ai";
+}
 
 const MASK_RE =
   /(\*{8,}|\[masked\]|(?:\*{4}-){3}\*{4}|\*{8}-\*{4}-\*{4}-\*{4}-\*{12})/g;
@@ -260,14 +271,16 @@ function LogTerminal({
 }
 
 export default function LogsPage({ onLogout }: { onLogout: () => void }) {
+  const [source, setSource] = useState<LogSource>(() => readLogSource());
   const [servers, setServers] = useState<ServerDto[]>([]);
   const [serverId, setServerId] = useState<number | "">("");
   const [snapshot, setSnapshot] = useState<XrayLogsSnapshotDto | null>(null);
+  const [aiEntries, setAiEntries] = useState<AiLogEntryDto[]>([]);
   const [loading, setLoading] = useState(false);
   const [levelBusy, setLevelBusy] = useState(false);
   const [autoRefresh, setAutoRefresh] = useState(() => localStorage.getItem(LS_AUTO) === "1");
   const [msg, setMsg] = useState<{ type: "ok" | "err"; text: string } | null>(null);
-  const [activeTab, setActiveTab] = useState<LogTab>("error");
+  const { tab: activeTab, setTab: setActiveTab } = usePanelTabParam("/logs", LOG_TABS);
   const [search, setSearch] = useState("");
   const [fullscreen, setFullscreen] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
@@ -281,6 +294,19 @@ export default function LogsPage({ onLogout }: { onLogout: () => void }) {
       list.find((s) => s.vless_deployed)?.id ??
       list[0]?.id;
     if (pick) setServerId(pick);
+  }, []);
+
+  const loadAiLogs = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true);
+    setMsg(null);
+    try {
+      const data = await fetchAiLogs(200);
+      setAiEntries(data.entries);
+    } catch (e) {
+      setMsg({ type: "err", text: String(e) });
+    } finally {
+      if (!silent) setLoading(false);
+    }
   }, []);
 
   const loadLogs = useCallback(async (silent = false) => {
@@ -298,24 +324,40 @@ export default function LogsPage({ onLogout }: { onLogout: () => void }) {
   }, [serverId]);
 
   useEffect(() => {
-    loadServers().catch((e) => setMsg({ type: "err", text: String(e) }));
-  }, [loadServers]);
+    localStorage.setItem(LS_SOURCE, source);
+  }, [source]);
 
   useEffect(() => {
+    if (source === "xray") {
+      loadServers().catch((e) => setMsg({ type: "err", text: String(e) }));
+    } else {
+      loadAiLogs().catch((e) => setMsg({ type: "err", text: String(e) }));
+    }
+  }, [source, loadServers, loadAiLogs]);
+
+  useEffect(() => {
+    if (source !== "xray") return;
     if (typeof serverId === "number") {
       localStorage.setItem(LS_SERVER, String(serverId));
       loadLogs().catch(() => {});
     }
-  }, [serverId, loadLogs]);
+  }, [source, serverId, loadLogs]);
 
   useEffect(() => {
     localStorage.setItem(LS_AUTO, autoRefresh ? "1" : "0");
-    if (!autoRefresh || typeof serverId !== "number") return;
+    if (!autoRefresh) return;
+    if (source === "ai") {
+      const t = window.setInterval(() => {
+        loadAiLogs(true).catch(() => {});
+      }, AUTO_REFRESH_MS);
+      return () => window.clearInterval(t);
+    }
+    if (typeof serverId !== "number") return;
     const t = window.setInterval(() => {
       loadLogs(true).catch(() => {});
     }, AUTO_REFRESH_MS);
     return () => window.clearInterval(t);
-  }, [autoRefresh, serverId, loadLogs]);
+  }, [autoRefresh, source, serverId, loadLogs, loadAiLogs]);
 
   useEffect(() => {
     if (!fullscreen) return;
@@ -353,6 +395,21 @@ export default function LogsPage({ onLogout }: { onLogout: () => void }) {
   }
 
   async function onClear() {
+    if (source === "ai") {
+      if (!window.confirm("Очистить журнал AI-диалогов?")) return;
+      setLoading(true);
+      setMsg(null);
+      try {
+        const r = await clearAiLogs();
+        setAiEntries([]);
+        setMsg({ type: "ok", text: `Очищено записей: ${r.cleared}` });
+      } catch (e) {
+        setMsg({ type: "err", text: String(e) });
+      } finally {
+        setLoading(false);
+      }
+      return;
+    }
     if (typeof serverId !== "number") return;
     if (!window.confirm("Очистить access и error логи на сервере?")) return;
     setLoading(true);
@@ -372,6 +429,20 @@ export default function LogsPage({ onLogout }: { onLogout: () => void }) {
   }
 
   function copyLogs() {
+    if (source === "ai") {
+      const text = filteredAi
+        .map((e) => {
+          const who = e.username ? `@${e.username}` : `tg:${e.tgUserId}`;
+          const status = e.ok ? "OK" : "ERR";
+          return `[${new Date(e.ts).toISOString()}] ${status} ${who} model=${e.model} ${e.latencyMs}ms\n> ${e.prompt}\n< ${e.ok ? e.reply ?? "" : e.error ?? ""}`;
+        })
+        .join("\n\n");
+      void navigator.clipboard.writeText(text || "(пусто)").then(
+        () => setMsg({ type: "ok", text: "Логи AI скопированы." }),
+        () => setMsg({ type: "err", text: "Не удалось скопировать." }),
+      );
+      return;
+    }
     if (!snapshot) return;
     const chunks: string[] = [];
     const push = (label: string, stream: XrayLogStreamDto) => {
@@ -392,6 +463,15 @@ export default function LogsPage({ onLogout }: { onLogout: () => void }) {
     );
   }
 
+  const filteredAi = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return aiEntries;
+    return aiEntries.filter((e) => {
+      const hay = `${e.prompt} ${e.reply ?? ""} ${e.error ?? ""} ${e.username ?? ""} ${e.tgUserId} ${e.model}`.toLowerCase();
+      return hay.includes(q);
+    });
+  }, [aiEntries, search]);
+
   const logLevel = snapshot?.log.loglevel ?? "warning";
   const loggingOff = logLevel === "none";
   const activeStream = snapshot ? (activeTab === "error" ? snapshot.error : snapshot.access) : null;
@@ -401,9 +481,11 @@ export default function LogsPage({ onLogout }: { onLogout: () => void }) {
     <DashboardLayout onLogout={onLogout}>
       <div className={`xray-logs-page${fullscreen ? " xray-logs-page--fullscreen-active" : ""}`}>
         <header className="xray-logs-head">
-          <h1 className="xray-logs-title">Логи Xray</h1>
+          <h1 className="xray-logs-title">{source === "ai" ? "Логи AI" : "Логи Xray"}</h1>
           <p className="xray-logs-sub">
-            Просмотр access/error логов на VPN-сервере, смена loglevel и перезапуск Xray.
+            {source === "ai"
+              ? "Журнал диалогов с Gemini в Telegram-боте: запросы, ответы и ошибки."
+              : "Просмотр access/error логов на VPN-сервере, смена loglevel и перезапуск Xray."}
           </p>
         </header>
 
@@ -417,43 +499,65 @@ export default function LogsPage({ onLogout }: { onLogout: () => void }) {
               </span>
               <select
                 className="xray-select"
-                value={serverId}
-                onChange={(e) => setServerId(e.target.value ? Number(e.target.value) : "")}
+                value={source}
+                onChange={(e) => setSource(e.target.value === "xray" ? "xray" : "ai")}
                 disabled={loading || levelBusy}
-                aria-label="Сервер"
+                aria-label="Источник логов"
               >
-                <option value="">— выберите сервер —</option>
-                {servers.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.name || s.host} ({s.host}){s.vless_deployed ? "" : " · не развёрнут"}
-                  </option>
-                ))}
+                <option value="ai">AI-помощник</option>
+                <option value="xray">Серверы (Xray)</option>
               </select>
             </label>
 
-            <label className="xray-select-wrap">
-              <span className="xray-select-icon" aria-hidden>
-                <IconSliders />
-              </span>
-              <select
-                className="xray-select"
-                value={logLevel}
-                onChange={(e) => void onLevelChange(e.target.value as XrayLogLevel)}
-                disabled={!serverId || loading || levelBusy}
-                title="Сохраняет конфиг и перезапускает Xray"
-                aria-label="Уровень логирования"
-              >
-                {LOG_LEVELS.map((l) => (
-                  <option key={l} value={l}>
-                    loglevel: {l}
-                  </option>
-                ))}
-              </select>
-            </label>
+            {source === "xray" ? (
+              <>
+                <label className="xray-select-wrap">
+                  <span className="xray-select-icon" aria-hidden>
+                    <IconServer />
+                  </span>
+                  <select
+                    className="xray-select"
+                    value={serverId}
+                    onChange={(e) => setServerId(e.target.value ? Number(e.target.value) : "")}
+                    disabled={loading || levelBusy}
+                    aria-label="Сервер"
+                  >
+                    <option value="">— выберите сервер —</option>
+                    {servers.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.name || s.host} ({s.host}){s.vless_deployed ? "" : " · не развёрнут"}
+                      </option>
+                    ))}
+                  </select>
+                </label>
 
-            {loggingOff ? (
-              <span className="badge warn xray-logs-badge-warn">Логирование отключено</span>
-            ) : null}
+                <label className="xray-select-wrap">
+                  <span className="xray-select-icon" aria-hidden>
+                    <IconSliders />
+                  </span>
+                  <select
+                    className="xray-select"
+                    value={logLevel}
+                    onChange={(e) => void onLevelChange(e.target.value as XrayLogLevel)}
+                    disabled={!serverId || loading || levelBusy}
+                    title="Сохраняет конфиг и перезапускает Xray"
+                    aria-label="Уровень логирования"
+                  >
+                    {LOG_LEVELS.map((l) => (
+                      <option key={l} value={l}>
+                        loglevel: {l}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                {loggingOff ? (
+                  <span className="badge warn xray-logs-badge-warn">Логирование отключено</span>
+                ) : null}
+              </>
+            ) : (
+              <span className="badge muted">Записей: {aiEntries.length}</span>
+            )}
           </div>
 
           <div className="xray-logs-toolbar-actions">
@@ -461,8 +565,8 @@ export default function LogsPage({ onLogout }: { onLogout: () => void }) {
               <button
                 type="button"
                 className="btn xray-btn-primary"
-                onClick={() => void loadLogs()}
-                disabled={!serverId || loading}
+                onClick={() => void (source === "ai" ? loadAiLogs() : loadLogs())}
+                disabled={loading || (source === "xray" && !serverId)}
               >
                 <IconRefresh spin={loading} />
                 {loading ? "Загрузка…" : "Обновить"}
@@ -473,13 +577,18 @@ export default function LogsPage({ onLogout }: { onLogout: () => void }) {
                   className={`toggle toggle-sm ${autoRefresh ? "on" : ""}`}
                   aria-pressed={autoRefresh}
                   aria-label="Автообновление"
-                  disabled={!serverId}
+                  disabled={source === "xray" && !serverId}
                   onClick={() => setAutoRefresh((v) => !v)}
                 />
                 <span className="xray-auto-switch-label">Авто ({AUTO_REFRESH_MS / 1000} с)</span>
               </div>
             </div>
-            <button type="button" className="btn btn-secondary xray-btn-icon" onClick={copyLogs} disabled={!snapshot}>
+            <button
+              type="button"
+              className="btn btn-secondary xray-btn-icon"
+              onClick={copyLogs}
+              disabled={source === "ai" ? filteredAi.length === 0 : !snapshot}
+            >
               <IconCopy />
               Скопировать
             </button>
@@ -487,7 +596,7 @@ export default function LogsPage({ onLogout }: { onLogout: () => void }) {
               type="button"
               className="btn btn-danger xray-btn-icon"
               onClick={() => void onClear()}
-              disabled={!serverId || loading}
+              disabled={loading || (source === "xray" && !serverId)}
             >
               <IconTrash />
               Очистить
@@ -495,98 +604,157 @@ export default function LogsPage({ onLogout }: { onLogout: () => void }) {
           </div>
         </div>
 
-        {snapshot ? (
-          <div className="xray-logs-status card">
-            <span className="xray-logs-status-name">{snapshot.server_name}</span>
-            <span className="xray-logs-status-sep">·</span>
-            <span>{snapshot.host}</span>
-            <span className="xray-logs-status-sep">·</span>
-            <span>
-              Xray:{" "}
-              {snapshot.xray_running ? (
-                <span className="badge ok">запущен</span>
-              ) : (
-                <span className="badge warn">не запущен</span>
-              )}
-            </span>
-            {snapshot.log.dnsLog ? (
-              <>
-                <span className="xray-logs-status-sep">·</span>
-                <span className="badge muted">DNS log</span>
-              </>
-            ) : null}
-            {snapshot.hint ? (
-              <p className="xray-logs-hint">
-                {snapshot.hint}
-                {loggingOff ? (
-                  <span className="badge warn xray-logs-badge-warn xray-logs-badge-warn--inline">
-                    loglevel = none — Xray почти не пишет логи
-                  </span>
-                ) : null}
-              </p>
-            ) : loggingOff ? (
-              <p className="xray-logs-hint">
-                <span className="badge warn xray-logs-badge-warn xray-logs-badge-warn--inline">
-                  loglevel = none — Xray почти не пишет логи
-                </span>
-              </p>
-            ) : null}
-          </div>
-        ) : null}
-
-        {snapshot && activeStream ? (
-          <div className={`xray-terminal card${fullscreen ? " xray-terminal--fullscreen" : ""}`}>
-            <div className="xray-terminal-toolbar">
-              <div className="xray-log-tabs" role="tablist">
-                <button
-                  type="button"
-                  role="tab"
-                  className={`xray-log-tab${activeTab === "error" ? " active" : ""}`}
-                  aria-selected={activeTab === "error"}
-                  onClick={() => setActiveTab("error")}
-                >
-                  Error log
-                  <span className="xray-log-tab-count">{snapshot.error.lines.length}</span>
-                </button>
-                <button
-                  type="button"
-                  role="tab"
-                  className={`xray-log-tab${activeTab === "access" ? " active" : ""}`}
-                  aria-selected={activeTab === "access"}
-                  onClick={() => setActiveTab("access")}
-                >
-                  Access log
-                  <span className="xray-log-tab-count">{snapshot.access.lines.length}</span>
-                </button>
-              </div>
-              <div className="xray-terminal-tools">
-                <label className="xray-log-search">
-                  <IconSearch />
-                  <input
-                    ref={searchRef}
-                    type="search"
-                    value={search}
-                    onChange={(e) => setSearch(e.target.value)}
-                    placeholder="Поиск по логам… (Ctrl+F)"
-                    aria-label="Поиск по логам"
-                  />
-                </label>
-                <button
-                  type="button"
-                  className="ghost xray-terminal-fs-btn"
-                  onClick={() => setFullscreen((v) => !v)}
-                  title={fullscreen ? "Выйти из полноэкранного режима (Esc)" : "На весь экран"}
-                  aria-label={fullscreen ? "Свернуть" : "Развернуть на весь экран"}
-                >
-                  <IconFullscreen exit={fullscreen} />
-                </button>
-              </div>
+        {source === "ai" ? (
+          <div className={`ai-logs-panel card${fullscreen ? " ai-logs-panel--fullscreen" : ""}`}>
+            <div className="ai-logs-toolbar">
+              <label className="xray-log-search">
+                <IconSearch />
+                <input
+                  ref={searchRef}
+                  type="search"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder="Поиск по AI-логам… (Ctrl+F)"
+                  aria-label="Поиск по AI-логам"
+                />
+              </label>
+              <button
+                type="button"
+                className="ghost xray-terminal-fs-btn"
+                onClick={() => setFullscreen((v) => !v)}
+                title={fullscreen ? "Выйти из полноэкранного режима (Esc)" : "На весь экран"}
+              >
+                <IconFullscreen exit={fullscreen} />
+              </button>
             </div>
-            <LogTerminal stream={activeStream} search={search} tailHint={tailHint} />
+            {filteredAi.length === 0 ? (
+              <div className="ai-logs-empty">
+                {loading ? "Загрузка…" : search.trim() ? "Ничего не найдено." : "Пока нет обращений к AI."}
+              </div>
+            ) : (
+              <ul className="ai-logs-list">
+                {filteredAi.map((e) => (
+                  <li key={e.id} className={`ai-log-card ${e.ok ? "ai-log-card--ok" : "ai-log-card--err"}`}>
+                    <div className="ai-log-card-head">
+                      <span className={`ai-log-status ${e.ok ? "ok" : "err"}`}>{e.ok ? "OK" : "ERR"}</span>
+                      <time dateTime={new Date(e.ts).toISOString()}>
+                        {new Date(e.ts).toLocaleString("ru-RU")}
+                      </time>
+                      <span className="ai-log-user">
+                        {e.username ? `@${e.username}` : `id ${e.tgUserId}`}
+                      </span>
+                      <span className="ai-log-meta">{e.model}</span>
+                      <span className="ai-log-meta">{e.latencyMs} мс</span>
+                    </div>
+                    <div className="ai-log-prompt">
+                      <span className="ai-log-label">Запрос</span>
+                      <p>{e.prompt}</p>
+                    </div>
+                    <div className="ai-log-reply">
+                      <span className="ai-log-label">{e.ok ? "Ответ" : "Ошибка"}</span>
+                      <p>{e.ok ? e.reply || "—" : e.error || "—"}</p>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
-        ) : !loading && serverId ? (
-          <div className="card xray-logs-placeholder card">Нажмите «Обновить», чтобы загрузить логи.</div>
-        ) : null}
+        ) : (
+          <>
+            {snapshot ? (
+              <div className="xray-logs-status card">
+                <span className="xray-logs-status-name">{snapshot.server_name}</span>
+                <span className="xray-logs-status-sep">·</span>
+                <span>{snapshot.host}</span>
+                <span className="xray-logs-status-sep">·</span>
+                <span>
+                  Xray:{" "}
+                  {snapshot.xray_running ? (
+                    <span className="badge ok">запущен</span>
+                  ) : (
+                    <span className="badge warn">не запущен</span>
+                  )}
+                </span>
+                {snapshot.log.dnsLog ? (
+                  <>
+                    <span className="xray-logs-status-sep">·</span>
+                    <span className="badge muted">DNS log</span>
+                  </>
+                ) : null}
+                {snapshot.hint ? (
+                  <p className="xray-logs-hint">
+                    {snapshot.hint}
+                    {loggingOff ? (
+                      <span className="badge warn xray-logs-badge-warn xray-logs-badge-warn--inline">
+                        loglevel = none — Xray почти не пишет логи
+                      </span>
+                    ) : null}
+                  </p>
+                ) : loggingOff ? (
+                  <p className="xray-logs-hint">
+                    <span className="badge warn xray-logs-badge-warn xray-logs-badge-warn--inline">
+                      loglevel = none — Xray почти не пишет логи
+                    </span>
+                  </p>
+                ) : null}
+              </div>
+            ) : null}
+
+            {snapshot && activeStream ? (
+              <div className={`xray-terminal card${fullscreen ? " xray-terminal--fullscreen" : ""}`}>
+                <div className="xray-terminal-toolbar">
+                  <div className="xray-log-tabs" role="tablist">
+                    <button
+                      type="button"
+                      role="tab"
+                      className={`xray-log-tab${activeTab === "error" ? " active" : ""}`}
+                      aria-selected={activeTab === "error"}
+                      onClick={() => setActiveTab("error")}
+                    >
+                      Error log
+                      <span className="xray-log-tab-count">{snapshot.error.lines.length}</span>
+                    </button>
+                    <button
+                      type="button"
+                      role="tab"
+                      className={`xray-log-tab${activeTab === "access" ? " active" : ""}`}
+                      aria-selected={activeTab === "access"}
+                      onClick={() => setActiveTab("access")}
+                    >
+                      Access log
+                      <span className="xray-log-tab-count">{snapshot.access.lines.length}</span>
+                    </button>
+                  </div>
+                  <div className="xray-terminal-tools">
+                    <label className="xray-log-search">
+                      <IconSearch />
+                      <input
+                        ref={searchRef}
+                        type="search"
+                        value={search}
+                        onChange={(e) => setSearch(e.target.value)}
+                        placeholder="Поиск по логам… (Ctrl+F)"
+                        aria-label="Поиск по логам"
+                      />
+                    </label>
+                    <button
+                      type="button"
+                      className="ghost xray-terminal-fs-btn"
+                      onClick={() => setFullscreen((v) => !v)}
+                      title={fullscreen ? "Выйти из полноэкранного режима (Esc)" : "На весь экран"}
+                      aria-label={fullscreen ? "Свернуть" : "Развернуть на весь экран"}
+                    >
+                      <IconFullscreen exit={fullscreen} />
+                    </button>
+                  </div>
+                </div>
+                <LogTerminal stream={activeStream} search={search} tailHint={tailHint} />
+              </div>
+            ) : !loading && serverId ? (
+              <div className="card xray-logs-placeholder">Нажмите «Обновить», чтобы загрузить логи.</div>
+            ) : null}
+          </>
+        )}
       </div>
     </DashboardLayout>
   );

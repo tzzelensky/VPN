@@ -1176,11 +1176,11 @@
 
 .mn-app .roulette-game__stage {
   min-height: 0;
-  margin: 0;
+  margin: 0 0 0.35rem;
   padding: 0.85rem 0.65rem 0.45rem;
   align-items: center;
   justify-content: center;
-  overflow: visible;
+  overflow: hidden;
   box-sizing: border-box;
   width: 100%;
 }
@@ -1199,8 +1199,34 @@
 }
 
 .mn-app .roulette-game__stage-glow {
-  width: min(300px, calc(100vw - 5rem));
-  height: min(300px, calc(100vw - 5rem));
+  inset: 0;
+  width: auto;
+  height: auto;
+}
+
+.mn-app .roulette-game__stage--case {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  padding: 0.35rem 0 0.55rem;
+  margin: 0 0 0.25rem;
+  min-height: 0;
+  overflow: visible;
+}
+
+.mn-app .roulette-case__label {
+  color: var(--mn-text);
+}
+
+.mn-app .roulette-case__frame {
+  border: 1px solid var(--mn-border);
+  background: color-mix(in srgb, var(--mn-card) 82%, transparent);
+}
+
+.mn-app .roulette-case__viewport {
+  border-radius: 0;
+  border: none;
+  background: transparent;
 }
 
 .mn-app .roulette-game__actions {

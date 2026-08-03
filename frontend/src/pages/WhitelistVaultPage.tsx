@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import DashboardLayout from "../components/DashboardLayout";
 import PanelTabs from "../components/PanelTabs";
 import PageLoadingState from "../components/PageLoadingState";
-import DualListPicker, { type DualListItem } from "../components/DualListPicker";
+import Spinner from "../components/Spinner";
 import {
-  bulkAssignWhitelistVaultKeys,
   bulkDeleteWhitelistVaultKeys,
   bulkRenameWhitelistVaultKeys,
   checkAllWhitelistVaultKeys,
@@ -14,6 +14,7 @@ import {
   deleteWhitelistVaultGroup,
   deleteWhitelistVaultKey,
   fetchWhitelistVaultKeyRaw,
+  grantWhitelistAccessToUser,
   importWhitelistVaultJson,
   importWhitelistVaultKeys,
   listUsers,
@@ -25,17 +26,16 @@ import {
   patchWhitelistVaultSettings,
   removeWhitelistVaultKeyFromSubscriptions,
   restoreWhitelistVaultKeyToSubscriptions,
+  revokeWhitelistAccessFromUser,
   listWhitelistPurchases,
   resetAllWhitelistPurchases,
   uploadWhitelistInstructionPhoto,
   deleteWhitelistInstructionPhoto,
   testWhitelistInstruction,
-  setWhitelistVaultAssignment,
   updateWhitelistVaultGroup,
   updateWhitelistVaultKey,
   type ConfigVaultCheckDto,
   type UserDto,
-  type WhitelistAssignmentModeDto,
   type WhitelistVaultGroupDto,
   type WhitelistVaultKeyDto,
   type WhitelistVaultOverviewDto,
@@ -44,6 +44,9 @@ import {
   type VlessCheckStatusDto,
 } from "../api";
 import { usePanelSettings } from "../panelSettingsContext";
+import { usePanelTabParam } from "../lib/panelTabRoute";
+
+const WHITELIST_TABS = ["keys", "purchase", "instruction", "history"] as const;
 
 const STATUS_LABEL: Record<VlessCheckStatusDto, string> = {
   available: "Доступен",
@@ -64,6 +67,22 @@ function formatDt(iso: string | null): string {
   }
 }
 
+function formatSubExpiry(expiryTime: number | undefined | null): string {
+  const t = Number(expiryTime) || 0;
+  if (t <= 0) return "без срока";
+  return new Date(t).toLocaleDateString("ru-RU", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  });
+}
+
+function userHasActiveMainSub(u: UserDto): boolean {
+  if (!u.enable) return false;
+  if (u.expiry_time > 0 && u.expiry_time <= Date.now()) return false;
+  return true;
+}
+
 function parseErr(e: unknown): string {
   if (e instanceof Error) {
     try {
@@ -82,10 +101,12 @@ function whitelistKeyInSubscriptions(k: WhitelistVaultKeyDto): boolean {
 }
 
 export default function WhitelistVaultPage({ onLogout }: { onLogout: () => void }) {
+  const navigate = useNavigate();
   const { confirmDangerous, maskSecret } = usePanelSettings();
   const [data, setData] = useState<WhitelistVaultOverviewDto | null>(null);
   const [loading, setLoading] = useState(true);
   const [users, setUsers] = useState<UserDto[]>([]);
+  const [usersLoading, setUsersLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState<{ type: "ok" | "err"; text: string } | null>(null);
 
@@ -104,7 +125,9 @@ export default function WhitelistVaultPage({ onLogout }: { onLogout: () => void 
   const [viewRawUri, setViewRawUri] = useState<string | null>(null);
 
   const [editKey, setEditKey] = useState<WhitelistVaultKeyDto | null>(null);
-  const [assignKey, setAssignKey] = useState<WhitelistVaultKeyDto | null>(null);
+  const [bsUsersModalOpen, setBsUsersModalOpen] = useState(false);
+  const [bsUserIds, setBsUserIds] = useState<number[]>([]);
+  const [bsPickUserId, setBsPickUserId] = useState(0);
   const [historyKey, setHistoryKey] = useState<WhitelistVaultKeyDto | null>(null);
   const [history, setHistory] = useState<ConfigVaultCheckDto[]>([]);
   const [historyFilter, setHistoryFilter] = useState<{ status: string; triggered: string }>({
@@ -115,26 +138,21 @@ export default function WhitelistVaultPage({ onLogout }: { onLogout: () => void 
   const [formName, setFormName] = useState("");
   const [formUri, setFormUri] = useState("");
   const [formActive, setFormActive] = useState(true);
-  const [formIncludeInSale, setFormIncludeInSale] = useState(false);
+  const [formIncludeInSale, setFormIncludeInSale] = useState(true);
   const [formNotify, setFormNotify] = useState(true);
   const [formRemoveOnUnavailable, setFormRemoveOnUnavailable] = useState(false);
   const [formChecksBeforeRemove, setFormChecksBeforeRemove] = useState(3);
   const [importText, setImportText] = useState("");
   const [importPrefix, setImportPrefix] = useState("");
-  const [pageTab, setPageTab] = useState<"keys" | "purchase" | "instruction" | "history">("keys");
+  const { tab: pageTab, setTab: setPageTab } = usePanelTabParam("/whitelist-vault", WHITELIST_TABS);
   const [purchases, setPurchases] = useState<WhitelistPurchaseRowDto[]>([]);
   const [purchaseForm, setPurchaseForm] = useState<WhitelistVaultSettingsDto["purchase"] | null>(null);
   const [instructionForm, setInstructionForm] = useState<WhitelistVaultSettingsDto["instruction"] | null>(null);
   const [testAdminChatId, setTestAdminChatId] = useState("");
   const [settingsForm, setSettingsForm] = useState<WhitelistVaultSettingsDto | null>(null);
-  const [formAssignment, setFormAssignment] = useState<WhitelistAssignmentModeDto>("none");
-  const [formUserIds, setFormUserIds] = useState<number[]>([]);
   const [selectedKeyIds, setSelectedKeyIds] = useState<number[]>([]);
   const [bulkRenameOpen, setBulkRenameOpen] = useState(false);
   const [bulkRemark, setBulkRemark] = useState("");
-  const [usersPickerOpen, setUsersPickerOpen] = useState(false);
-  const [usersPickerTitle, setUsersPickerTitle] = useState("Кому назначить белые списки");
-  const [usersPickerPurpose, setUsersPickerPurpose] = useState<null | "form" | "assign-one" | "assign-bulk">(null);
   const [collapsedGroupIds, setCollapsedGroupIds] = useState<number[]>([]);
   const [groupMergeOpen, setGroupMergeOpen] = useState(false);
   const [groupMergeName, setGroupMergeName] = useState("");
@@ -142,11 +160,17 @@ export default function WhitelistVaultPage({ onLogout }: { onLogout: () => void 
   const [formGroupName, setFormGroupName] = useState("");
   const [formGroupRemoveOnUnavailable, setFormGroupRemoveOnUnavailable] = useState(false);
   const [formGroupChecksBeforeRemove, setFormGroupChecksBeforeRemove] = useState(3);
+  const [assignedUsersOpen, setAssignedUsersOpen] = useState(false);
 
   const showToast = useCallback((type: "ok" | "err", text: string) => {
     setToast({ type, text });
     window.setTimeout(() => setToast(null), 4500);
   }, []);
+
+  function openAssignedUser(userId: number) {
+    setAssignedUsersOpen(false);
+    navigate(`/users/active?user=${userId}`);
+  }
 
   const reload = useCallback(async () => {
     const r = await loadWhitelistVault();
@@ -159,10 +183,19 @@ export default function WhitelistVaultPage({ onLogout }: { onLogout: () => void 
 
   useEffect(() => {
     void reload().catch((e) => showToast("err", parseErr(e)));
+    setUsersLoading(true);
     void listUsers()
       .then(setUsers)
-      .catch(() => setUsers([]));
+      .catch(() => setUsers([]))
+      .finally(() => setUsersLoading(false));
   }, [reload, showToast]);
+
+  useEffect(() => {
+    if (pageTab !== "history") return;
+    void listWhitelistPurchases()
+      .then((r) => setPurchases(r.purchases))
+      .catch(() => setPurchases([]));
+  }, [pageTab]);
 
   const keys = useMemo(() => {
     const list = data?.keys ?? [];
@@ -209,6 +242,20 @@ export default function WhitelistVaultPage({ onLogout }: { onLogout: () => void 
   }, [data?.groups, keys]);
 
   const ungroupedKeys = useMemo(() => keys.filter((k) => k.group_id == null), [keys]);
+  const usersWithWhitelist = useMemo(() => {
+    const now = Date.now();
+    return users
+      .filter((u) => {
+        if (u.whitelist_purchased) {
+          const until = Number(u.whitelist_active_until ?? 0);
+          return until <= 0 || until > now;
+        }
+        // Ручные БС только при активной основной подписке.
+        if (u.whitelist_happ_enabled) return userHasActiveMainSub(u);
+        return false;
+      })
+      .sort((a, b) => a.name.localeCompare(b.name, "ru"));
+  }, [users]);
 
   async function runBusy<T>(fn: () => Promise<T>): Promise<T | undefined> {
     setBusy(true);
@@ -240,8 +287,6 @@ export default function WhitelistVaultPage({ onLogout }: { onLogout: () => void 
     setFormNotify(k.notify_on_fail);
     setFormRemoveOnUnavailable(!!k.remove_on_unavailable);
     setFormChecksBeforeRemove(k.checks_before_remove ?? 3);
-    setFormAssignment(k.assignment_mode);
-    setFormUserIds(k.assigned_user_ids ?? []);
     const uri = (prefilledUri ?? k.raw_uri ?? "").trim();
     if (uri) {
       setFormUri(uri);
@@ -252,78 +297,67 @@ export default function WhitelistVaultPage({ onLogout }: { onLogout: () => void 
     if (r?.key.raw_uri) setFormUri(r.key.raw_uri);
   }
 
-  const purchasedUserIds = useMemo(
-    () => users.filter((u) => u.whitelist_purchased).map((u) => u.id),
-    [users],
+  function openBsUsersModal() {
+    setBsUserIds(usersWithWhitelist.map((u) => u.id));
+    setBsPickUserId(0);
+    setBsUsersModalOpen(true);
+  }
+
+  const usersById = useMemo(() => new Map(users.map((u) => [u.id, u])), [users]);
+  const bsUserRows = useMemo(
+    () =>
+      bsUserIds
+        .map((id) => usersById.get(id))
+        .filter((u): u is UserDto => !!u)
+        .sort((a, b) => a.name.localeCompare(b.name, "ru")),
+    [bsUserIds, usersById],
+  );
+  const bsAvailableUsers = useMemo(
+    () =>
+      users
+        .filter((u) => !bsUserIds.includes(u.id) && userHasActiveMainSub(u))
+        .sort((a, b) => a.name.localeCompare(b.name, "ru")),
+    [users, bsUserIds],
   );
 
-  const whitelistUserPickerItems = useMemo((): DualListItem[] => {
-    return users.map((u) => {
-      const title = (u.name || u.email || `Клиент #${u.id}`).trim();
-      const bought = u.whitelist_purchased ? " (куплено)" : "";
-      return { id: u.id, label: `#${u.id} ${title}${bought}` };
-    });
-  }, [users]);
-
-  function openUsersPicker(title: string, purpose: "form" | "assign-one" | "assign-bulk", ids: number[]) {
-    setUsersPickerTitle(title);
-    setUsersPickerPurpose(purpose);
-    setFormUserIds(ids);
-    setFormAssignment("selected");
-    setUsersPickerOpen(true);
+  function whitelistSourceLabel(u: UserDto): string {
+    return u.whitelist_purchased ? "Купил в боте" : "Добавлено вручную";
   }
 
-  async function openAssign(k: WhitelistVaultKeyDto) {
-    setAssignKey(k);
-    if (k.assignment_mode === "all" || k.assignment_mode === "none" || k.assignment_mode === "purchasers") {
-      void openEdit(k);
-      return;
+  async function reloadUsers() {
+    setUsersLoading(true);
+    try {
+      const list = await listUsers();
+      setUsers(list);
+      return list;
+    } catch {
+      setUsers([]);
+      return [] as UserDto[];
+    } finally {
+      setUsersLoading(false);
     }
-    let ids = k.assigned_user_ids ?? [];
-    if (ids.length === 0 && (k.assigned_users_count ?? 0) > 0) {
-      try {
-        const { key } = await fetchWhitelistVaultKeyRaw(k.id);
-        ids = key.assigned_user_ids ?? [];
-      } catch {
-        /* список ключей после обновления API уже содержит ids */
+  }
+
+  async function handleSaveBsUsersModal() {
+    const currentIds = new Set(usersWithWhitelist.map((u) => u.id));
+    const nextIds = new Set(bsUserIds);
+    const toGrant = [...nextIds].filter((id) => !currentIds.has(id));
+    const toRevoke = [...currentIds].filter((id) => !nextIds.has(id));
+    await runBusy(async () => {
+      for (const id of toGrant) {
+        await grantWhitelistAccessToUser(id);
       }
-    }
-    openUsersPicker(`Кому назначить: ${k.name}`, "assign-one", ids);
-  }
-
-  async function handleUsersPickerSave(ids: number[]) {
-    setFormUserIds(ids);
-    setFormAssignment("selected");
-    setUsersPickerOpen(false);
-    const purpose = usersPickerPurpose;
-    setUsersPickerPurpose(null);
-
-    if (purpose === "assign-one" && assignKey) {
-      await runBusy(async () => {
-        await setWhitelistVaultAssignment(assignKey.id, "selected", ids);
-        await reload();
-        setAssignKey(null);
-        showToast("ok", "Назначение сохранено");
-      });
-      return;
-    }
-
-    if (purpose === "assign-bulk") {
-      if (selectedKeyIds.length === 0) return;
-      await runBusy(async () => {
-        const r = await bulkAssignWhitelistVaultKeys({
-          ids: selectedKeyIds,
-          assignment_mode: "selected",
-          assigned_user_ids: ids,
-        });
-        await reload();
-        clearKeySelection();
-        showToast(
-          "ok",
-          `Назначено ключей: ${r.updated}${r.errors.length ? `, ошибок: ${r.errors.length}` : ""}`,
-        );
-      });
-    }
+      for (const id of toRevoke) {
+        await revokeWhitelistAccessFromUser(id);
+      }
+      await reloadUsers();
+      await reload();
+      setBsUsersModalOpen(false);
+      showToast(
+        "ok",
+        `БС обновлены: добавлено ${toGrant.length}, убрано ${toRevoke.length}. Пользователям доступны все активные ключи.`,
+      );
+    });
   }
 
   async function openHistory(k: WhitelistVaultKeyDto) {
@@ -353,15 +387,14 @@ export default function WhitelistVaultPage({ onLogout }: { onLogout: () => void 
         active: formActive,
         include_in_sale: formIncludeInSale,
         notify_on_fail: formNotify,
-        assignment_mode: formAssignment,
-        assigned_user_ids: formAssignment === "selected" ? formUserIds : [],
+        assignment_mode: "none",
+        assigned_user_ids: [],
       });
       await reload();
       setAddOpen(false);
       setFormName("");
       setFormUri("");
-      setFormAssignment("none");
-      setFormUserIds([]);
+      setFormIncludeInSale(true);
       showToast("ok", "VLESS-ключ белого списка добавлен");
     });
   }
@@ -374,8 +407,8 @@ export default function WhitelistVaultPage({ onLogout }: { onLogout: () => void 
         active: formActive,
         include_in_sale: formIncludeInSale,
         notify_on_fail: formNotify,
-        assignment_mode: formAssignment,
-        assigned_user_ids: formAssignment === "selected" ? formUserIds : [],
+        assignment_mode: "none",
+        assigned_user_ids: [],
       });
       setData((d) => (d ? { ...d, keys: r.keys } : d));
       setImportOpen(false);
@@ -395,8 +428,8 @@ export default function WhitelistVaultPage({ onLogout }: { onLogout: () => void 
         active: formActive,
         include_in_sale: formIncludeInSale,
         notify_on_fail: formNotify,
-        assignment_mode: formAssignment,
-        assigned_user_ids: formAssignment === "selected" ? formUserIds : [],
+        assignment_mode: "none",
+        assigned_user_ids: [],
       });
       await reload();
       setJsonImportOpen(false);
@@ -421,8 +454,8 @@ export default function WhitelistVaultPage({ onLogout }: { onLogout: () => void 
               checks_before_remove: formChecksBeforeRemove,
             }
           : {}),
-        assignment_mode: formAssignment,
-        assigned_user_ids: formAssignment === "selected" ? formUserIds : [],
+        assignment_mode: "none",
+        assigned_user_ids: [],
       });
       await reload();
       setEditKey(null);
@@ -543,7 +576,7 @@ export default function WhitelistVaultPage({ onLogout }: { onLogout: () => void 
             </span>
             {k.last_check_latency_ms != null && <span className="muted">{k.last_check_latency_ms} мс</span>}
             <span className="muted">Проверка: {formatDt(k.last_check_at)}</span>
-            <span className="muted">Подключено: {k.assignment_label}</span>
+            <span className="muted">{k.include_in_sale ? "В продаже" : "Не в продаже"}</span>
             {(k.consecutive_unavailable_checks ?? 0) > 0 ? (
               <span className="muted">Сбой подряд: {k.consecutive_unavailable_checks}</span>
             ) : null}
@@ -558,9 +591,6 @@ export default function WhitelistVaultPage({ onLogout }: { onLogout: () => void 
           </button>
           <button type="button" className="btn btn-sm" disabled={busy} onClick={() => void checkOne(k)}>
             Проверить
-          </button>
-          <button type="button" className="btn btn-sm" disabled={busy} onClick={() => openAssign(k)}>
-            Назначить
           </button>
           <button type="button" className="btn btn-sm" onClick={() => void openHistory(k)}>
             История
@@ -700,65 +730,13 @@ export default function WhitelistVaultPage({ onLogout }: { onLogout: () => void 
 
   const stats = data?.stats;
 
-  function renderAssignmentFields() {
-    const assignedCount = formUserIds.length;
-    const pickedPurchased = formUserIds.filter((id) => purchasedUserIds.includes(id)).length;
-    return (
-      <>
-        <label className="field">
-          <span>Кому назначить</span>
-          <select
-            className="input"
-            value={formAssignment}
-            onChange={(e) => {
-              const mode = e.target.value as WhitelistAssignmentModeDto;
-              setFormAssignment(mode);
-              if (mode === "selected") {
-                openUsersPicker("Кому назначить белые списки", "form", formUserIds);
-              } else {
-                setFormUserIds([]);
-              }
-            }}
-          >
-            <option value="none">Никому</option>
-            <option value="purchasers">Пользователям с купленными БС</option>
-            <option value="all">Всем пользователям (с режимом белых списков)</option>
-            <option value="selected">Выбранным пользователям</option>
-          </select>
-        </label>
-        {formAssignment === "purchasers" && (
-          <p className="muted vault-hint">
-            Ключ получат все с активной покупкой белых списков
-            {purchasedUserIds.length > 0 ? ` (сейчас: ${purchasedUserIds.length})` : " (сейчас покупателей нет)"}.
-          </p>
-        )}
-        {formAssignment === "selected" && (
-          <div className="field">
-            <button
-              type="button"
-              className="btn"
-              onClick={() => openUsersPicker("Кому назначить белые списки", "form", formUserIds)}
-            >
-              Выбрать пользователей
-            </button>
-            <span className="muted vault-hint">
-              Назначено вручную: {assignedCount}
-              {purchasedUserIds.length > 0
-                ? ` · с покупкой (куплено): ${purchasedUserIds.length}${pickedPurchased > 0 ? `, из них в списке: ${pickedPurchased}` : ""}`
-                : ""}
-            </span>
-          </div>
-        )}
-      </>
-    );
-  }
-
   return (
     <DashboardLayout onLogout={onLogout}>
       <div className="vault-page">
         <h1 className="page-title">Белые списки</h1>
         <p className="vault-lead muted">
-          VLESS-ключи для белых списков: назначение пользователям, проверка доступности и уведомления.
+          VLESS-ключи для белых списков. Новые активные ключи сразу попадают в подписку пользователям, добавленным через
+          «Добавить БС пользователю», а также тем, кто купил БС в боте.
         </p>
 
         <div className="vault-global-toggle">
@@ -1085,10 +1063,15 @@ export default function WhitelistVaultPage({ onLogout }: { onLogout: () => void 
             <span className="vault-stat-label">Всего ключей</span>
             <strong>{stats?.total ?? 0}</strong>
           </div>
-          <div className="vault-stat-card">
+          <button
+            type="button"
+            className="vault-stat-card vault-stat-card--clickable"
+            onClick={() => setAssignedUsersOpen(true)}
+            title="Показать пользователей с подключенными БС"
+          >
             <span className="vault-stat-label">Назначено пользователям</span>
-            <strong>{stats?.assigned_users ?? 0}</strong>
-          </div>
+            <strong>{usersLoading ? (stats?.assigned_users ?? "…") : usersWithWhitelist.length}</strong>
+          </button>
           <div className="vault-stat-card vault-stat-card--ok">
             <span className="vault-stat-label">Доступны</span>
             <strong>{stats?.available ?? 0}</strong>
@@ -1116,12 +1099,14 @@ export default function WhitelistVaultPage({ onLogout }: { onLogout: () => void 
             setFormName("");
             setFormUri("");
             setFormActive(true);
+            setFormIncludeInSale(true);
             setFormNotify(true);
-            setFormAssignment("none");
-            setFormUserIds([]);
             setAddOpen(true);
           }}>
             Добавить ключ
+          </button>
+          <button type="button" className="btn" disabled={busy || usersLoading} onClick={openBsUsersModal}>
+            Добавить БС пользователю
           </button>
           <button type="button" className="btn" disabled={busy} onClick={() => setImportOpen(true)}>
             Импорт VLESS-ссылок
@@ -1237,15 +1222,6 @@ export default function WhitelistVaultPage({ onLogout }: { onLogout: () => void 
                   }}
                 >
                   Переименовать
-                </button>
-                <button
-                  type="button"
-                  className="btn btn-sm"
-                  onClick={() =>
-                    openUsersPicker(`Назначить клиентам (${selectedKeyIds.length})`, "assign-bulk", [])
-                  }
-                >
-                  Назначить клиентам
                 </button>
                 <button type="button" className="btn btn-sm danger" disabled={busy} onClick={() => void handleBulkDelete()}>
                   Удалить выбранные
@@ -1454,7 +1430,6 @@ export default function WhitelistVaultPage({ onLogout }: { onLogout: () => void 
                 <input type="checkbox" checked={formNotify} onChange={(e) => setFormNotify(e.target.checked)} />
                 Уведомлять при недоступности
               </label>
-              {renderAssignmentFields()}
             </div>
             <div className="modal-footer">
               <button type="button" className="btn" onClick={() => setAddOpen(false)}>
@@ -1531,7 +1506,6 @@ export default function WhitelistVaultPage({ onLogout }: { onLogout: () => void 
                   Ключ в группе «{editKey.group_name ?? "—"}». Авто-снятие настраивается в редактировании группы.
                 </p>
               )}
-              {renderAssignmentFields()}
             </div>
             <div className="modal-footer">
               <button type="button" className="btn" onClick={() => setEditKey(null)}>
@@ -1580,8 +1554,8 @@ export default function WhitelistVaultPage({ onLogout }: { onLogout: () => void 
                 <dd>{viewKey.last_check_latency_ms != null ? `${viewKey.last_check_latency_ms} мс` : "—"}</dd>
                 <dt>Ошибка</dt>
                 <dd>{viewKey.last_error ?? "—"}</dd>
-                <dt>Назначение</dt>
-                <dd>{viewKey.assignment_label}</dd>
+                <dt>В продаже</dt>
+                <dd>{viewKey.include_in_sale ? "Да" : "Нет"}</dd>
                 <dt>Активен</dt>
                 <dd>{viewKey.active ? "Да" : "Нет"}</dd>
                 <dt>Уведомления</dt>
@@ -1591,9 +1565,6 @@ export default function WhitelistVaultPage({ onLogout }: { onLogout: () => void 
             <div className="modal-footer">
               <button type="button" className="btn" disabled={busy} onClick={() => void checkOne(viewKey)}>
                 Проверить сейчас
-              </button>
-              <button type="button" className="btn" onClick={() => openAssign(viewKey)}>
-                Назначить
               </button>
               {viewKey.removed_from_subscriptions ? (
                 <button
@@ -1650,10 +1621,9 @@ export default function WhitelistVaultPage({ onLogout }: { onLogout: () => void 
                 <input className="input" value={formName} onChange={(e) => setFormName(e.target.value)} />
               </label>
               <label className="field">
-                <span>JSON-конфиг Xray</span>
+                <span>JSON-конфиг Happ/Xray (в т.ч. авто-выбор / balancer)</span>
                 <textarea className="input" rows={12} value={jsonText} onChange={(e) => setJsonText(e.target.value)} />
               </label>
-              {renderAssignmentFields()}
             </div>
             <div className="modal-footer">
               <button type="button" className="btn" onClick={() => setJsonImportOpen(false)}>
@@ -1882,21 +1852,165 @@ export default function WhitelistVaultPage({ onLogout }: { onLogout: () => void 
         </div>
       )}
 
-      <DualListPicker
-        open={usersPickerOpen}
-        title={usersPickerTitle}
-        leftLabel="Доступные пользователи"
-        rightLabel="Назначено"
-        items={whitelistUserPickerItems}
-        selectedIds={formUserIds}
-        onClose={() => {
-          const purpose = usersPickerPurpose;
-          setUsersPickerOpen(false);
-          setUsersPickerPurpose(null);
-          if (purpose === "assign-one") setAssignKey(null);
-        }}
-        onSave={(ids) => void handleUsersPickerSave(ids)}
-      />
+      {bsUsersModalOpen ? (
+        <div className="modal-backdrop">
+          <div className="modal modal--sm vault-modal">
+            <div className="modal-head">
+              <h3>Добавить БС пользователю</h3>
+              <button type="button" className="modal-close" onClick={() => setBsUsersModalOpen(false)}>
+                ×
+              </button>
+            </div>
+            <div className="modal-body">
+              <p className="muted vault-hint" style={{ marginTop: 0 }}>
+                Пользователю будут доступны все активные ключи белых списков. Ручное добавление действует до окончания
+                основной подписки; после истечения БС пропадают и при продлении сами не возвращаются. После сохранения
+                нужно обновить подписку в приложении.
+              </p>
+              <div className="field">
+                <span className="muted vault-hint">Добавленные пользователи: {bsUserRows.length}</span>
+              </div>
+              {bsUserRows.length === 0 ? (
+                <p className="muted vault-hint">Пока никого не добавлено.</p>
+              ) : (
+                <div className="table-wrap">
+                  <table className="data-table">
+                    <thead>
+                      <tr>
+                        <th>Пользователь</th>
+                        <th>Подписка до</th>
+                        <th>Источник</th>
+                        <th />
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {bsUserRows.map((u) => (
+                        <tr key={u.id}>
+                          <td>
+                            #{u.id} {u.name || u.email || "Пользователь"}
+                          </td>
+                          <td>{formatSubExpiry(u.expiry_time)}</td>
+                          <td>{whitelistSourceLabel(u)}</td>
+                          <td>
+                            <button
+                              type="button"
+                              className="btn btn-sm danger"
+                              onClick={() => setBsUserIds((prev) => prev.filter((id) => id !== u.id))}
+                            >
+                              Убрать
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+              <div className="field" style={{ marginTop: "0.75rem" }}>
+                <span>Кого добавить</span>
+                <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+                  <select
+                    className="input"
+                    value={bsPickUserId || ""}
+                    onChange={(e) => setBsPickUserId(Number(e.target.value) || 0)}
+                    style={{ flex: "1 1 16rem" }}
+                  >
+                    <option value="">Выберите пользователя</option>
+                    {bsAvailableUsers.map((u) => (
+                      <option key={u.id} value={u.id}>
+                        #{u.id} {(u.name || u.email || "Пользователь").trim()}
+                        {" · до "}
+                        {formatSubExpiry(u.expiry_time)}
+                        {u.whitelist_purchased ? " · купил в боте" : ""}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    className="btn"
+                    disabled={!bsPickUserId}
+                    onClick={() => {
+                      if (!bsPickUserId) return;
+                      setBsUserIds((prev) => (prev.includes(bsPickUserId) ? prev : [...prev, bsPickUserId]));
+                      setBsPickUserId(0);
+                    }}
+                  >
+                    Добавить
+                  </button>
+                </div>
+              </div>
+            </div>
+            <div className="modal-footer">
+              <button type="button" className="btn" onClick={() => setBsUsersModalOpen(false)}>
+                Отмена
+              </button>
+              <button type="button" className="btn primary" disabled={busy} onClick={() => void handleSaveBsUsersModal()}>
+                Сохранить
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {assignedUsersOpen ? (
+        <div className="modal-backdrop">
+          <div className="modal modal--sm vault-modal">
+            <div className="modal-head">
+              <h3>Пользователи с подключенными БС</h3>
+              <button type="button" className="modal-close" onClick={() => setAssignedUsersOpen(false)}>
+                ×
+              </button>
+            </div>
+            <div className="modal-body">
+              {usersLoading ? (
+                <div className="vault-assigned-users-loading" aria-busy="true">
+                  <Spinner />
+                  <span>Загрузка пользователей…</span>
+                </div>
+              ) : usersWithWhitelist.length === 0 ? (
+                <p className="vault-muted">Пока нет пользователей с подключенными БС.</p>
+              ) : (
+                <div className="table-wrap">
+                  <table className="data-table">
+                    <thead>
+                      <tr>
+                        <th>Пользователь</th>
+                        <th>Telegram ID</th>
+                        <th>Источник</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {usersWithWhitelist.map((u) => (
+                        <tr
+                          key={u.id}
+                          className="data-table__row--clickable"
+                          title="Открыть карточку пользователя"
+                          onClick={() => openAssignedUser(u.id)}
+                        >
+                          <td>{u.name}</td>
+                          <td>{u.tg_id || "—"}</td>
+                          <td>
+                            {u.whitelist_happ_enabled
+                              ? "Подключено в подписке"
+                              : u.whitelist_purchased
+                                ? "Куплено"
+                                : "—"}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+            <div className="modal-footer">
+              <button type="button" className="btn" onClick={() => setAssignedUsersOpen(false)}>
+                Закрыть
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
       </div>
     </DashboardLayout>
   );

@@ -16,6 +16,7 @@ import {
 import { getPanelSettings } from "./panelSettings.js";
 import { sendTelegramHtml } from "./telegram/api.js";
 import { getTelegramAdminIds, getTelegramBotToken } from "./telegram/env.js";
+import { isClientJsonProfileUri } from "./configVaultUri.js";
 import { probeVlessEndpoint } from "./vlessKeyChecker.js";
 
 let whitelistVaultCheckAllRunning = false;
@@ -69,6 +70,9 @@ export async function runWhitelistVaultCheckForKey(
   if (!keyBefore) throw new Error("Ключ не найден");
   if (!keyBefore.active && triggeredBy === "auto") {
     throw new Error("Ключ отключён");
+  }
+  if (isClientJsonProfileUri(keyBefore.raw_uri)) {
+    throw new Error("JSON-профиль (balancer/routing) — проверка TCP недоступна");
   }
   setWhitelistVaultKeyChecking(keyId);
   const probe = await probeVlessEndpoint(
@@ -143,7 +147,7 @@ export function startWhitelistVaultCheckAllBackground(
 }
 
 export async function runWhitelistVaultCheckAll(triggeredBy: "manual" | "auto"): Promise<number> {
-  const keys = listWhitelistVaultKeys().filter((k) => k.active);
+  const keys = listWhitelistVaultKeys().filter((k) => k.active && !isClientJsonProfileUri(k.raw_uri));
   let done = 0;
   for (const k of keys) {
     try {

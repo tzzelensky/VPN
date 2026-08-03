@@ -94,6 +94,7 @@ router.get("/:token", async (req, res) => {
     const requestIp = getRequestClientIp(req);
     const parsedClient = parseDeviceFromRequest(req);
     const userAgent = String(req.headers?.["user-agent"] ?? "").trim();
+    const xClient = String(req.headers?.["x-client"] ?? "").trim();
     const resolvedForHit = resolveDeviceIdFromRequest(req);
     const hitDid =
       resolvedForHit.deviceId ||
@@ -155,7 +156,7 @@ router.get("/:token", async (req, res) => {
       device_limit_pressure: deviceLimitPressure,
     };
 
-    if (shouldServeHappJsonSubscription(subUser, userAgent)) {
+    if (shouldServeHappJsonSubscription(subUser, userAgent, xClient)) {
       const links = resolveSubscriptionLinks(subUser, resolveCtx);
       const happ = buildHappJsonSubscriptionBody(subUser, links);
       if (happ) {

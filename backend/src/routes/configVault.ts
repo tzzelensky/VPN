@@ -28,7 +28,8 @@ function includeRaw(): boolean {
 }
 
 function mapKeys(keys: ReturnType<typeof listConfigVaultKeys>) {
-  return keys.map((k) => vaultKeyForApi(k, includeRaw()));
+  // Список хранилища: никогда не отдаём raw_uri целиком (открой ключ отдельно при необходимости).
+  return keys.map((k) => vaultKeyForApi(k, false));
 }
 
 router.get("/", (_req, res) => {

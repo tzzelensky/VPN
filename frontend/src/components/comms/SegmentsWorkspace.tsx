@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { CommunicationSegmentDto, CommunicationTargetDto } from "../../api";
-import { isTestSubscriptionSystemSegment } from "./commsTypes";
+import { isSystemCommunicationSegment } from "./commsTypes";
 import SegmentEditor, { type SegmentFormState } from "./SegmentEditor";
 
 function emptyForm(): SegmentFormState {
@@ -94,7 +94,7 @@ export default function SegmentsWorkspace({
   }, [segments, query]);
 
   const selected = segments.find((s) => s.id === selectedId) ?? null;
-  const isSystem = selected ? isTestSubscriptionSystemSegment(selected) : false;
+  const isSystem = selected ? isSystemCommunicationSegment(selected) : false;
 
   function startCreate() {
     setSelectedId("");
@@ -148,7 +148,7 @@ export default function SegmentsWorkspace({
             <p className="field-hint">Сегментов пока нет.</p>
           ) : (
             filtered.map((s) => {
-              const sys = isTestSubscriptionSystemSegment(s);
+              const sys = isSystemCommunicationSegment(s);
               return (
                 <div
                   key={s.id}

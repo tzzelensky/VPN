@@ -1,3 +1,6 @@
+import type { TelegramColoredButtonKey } from "./telegram/inlineButtonStyles.js";
+import { DEFAULT_TELEGRAM_BUTTON_COLORS } from "./telegram/inlineButtonStyles.js";
+
 export type PanelTheme = "system" | "light" | "dark";
 export type PanelAccent = "blue" | "green" | "purple" | "orange" | "red" | string;
 
@@ -5,7 +8,6 @@ export type PanelSectionKey =
   | "servers"
   | "users"
   | "logs"
-  | "experiments"
   | "subscription_shop"
   | "communications"
   | "support_appeals"
@@ -26,6 +28,8 @@ export type PanelSubscriptionBanner = {
   telegramUrl: string;
   telegramLinkText: string;
 };
+
+export type TelegramButtonColors = Record<TelegramColoredButtonKey, string>;
 
 export type PanelSettings = {
   panel: {
@@ -58,6 +62,14 @@ export type PanelSettings = {
     testMode: boolean;
     /** Код входа в панель через Telegram (по умолчанию включено). */
     login2faEnabled: boolean;
+    /** HEX цвета кнопок бота (в API — primary / success / danger). */
+    buttonColors: TelegramButtonColors;
+    /** Относительный путь к картинке главного меню бота (panel-avatars/menu-image.*). */
+    menuImagePath: string | null;
+    /** Показывать кнопку «Спросить AI» в боте (нужен ещё Gemini API key). */
+    aiAssistantEnabled: boolean;
+    /** Модель Gemini, например gemini-2.5-flash-lite. */
+    geminiModel: string;
   };
   security: {
     maskSecrets: boolean;
@@ -67,6 +79,13 @@ export type PanelSettings = {
   };
   maintenance: {
     enabled: boolean;
+  };
+  /** Порядок элементов подписки в VPN-клиенте. */
+  vpnDisplay: {
+    /** @deprecated Миграция → entryOrder (только vless-id). */
+    serverOrder: number[];
+    /** vless:1 | hy2:1 | vault:5 | whitelist:3 */
+    entryOrder: string[];
   };
   updatedAt: number;
 };
@@ -80,7 +99,6 @@ export const PANEL_SECTION_META: Array<{
   { key: "servers", path: "/servers", label: "Сервера", description: "Управление VPN-узлами" },
   { key: "users", path: "/users", label: "Пользователи", description: "Клиенты и подписки" },
   { key: "logs", path: "/logs", label: "Логи", description: "Логи Xray и диагностика" },
-  { key: "experiments", path: "/experiments", label: "Эксперименты", description: "Тестовые конфигурации" },
   { key: "subscription_shop", path: "/subscription-shop", label: "Подписки", description: "Тарифы и магазин" },
   { key: "communications", path: "/communications", label: "Коммуникации", description: "Рассылки и опросы" },
   { key: "support_appeals", path: "/support-appeals", label: "Обращения", description: "Обращения в поддержку" },
@@ -143,6 +161,32 @@ export function orderPanelSectionMeta(order: PanelSectionKey[]): Array<(typeof P
   return order.map((k) => byKey.get(k)).filter((m): m is (typeof PANEL_SECTION_META)[number] => m != null);
 }
 
+/** Нормализация порядка VPN-серверов: известные id из order, затем недостающие по возрастанию id. */
+export function normalizeVpnServerOrder(order: unknown, deployedIds: number[]): number[] {
+  const valid = new Set(deployedIds);
+  const seen = new Set<number>();
+  const out: number[] = [];
+  if (Array.isArray(order)) {
+    for (const x of order) {
+      const id = Math.floor(Number(x));
+      if (!Number.isFinite(id) || id <= 0 || !valid.has(id) || seen.has(id)) continue;
+      seen.add(id);
+      out.push(id);
+    }
+  }
+  const rest = deployedIds.filter((id) => !seen.has(id)).sort((a, b) => a - b);
+  return [...out, ...rest];
+}
+
+/** Переставить выбранные id пользователя под эталонный порядок (состав сохраняется). */
+export function reorderIdsByTemplate(userIds: number[], templateOrder: number[]): number[] {
+  const set = new Set(userIds);
+  const head = templateOrder.filter((id) => set.has(id));
+  const headSet = new Set(head);
+  const tail = userIds.filter((id) => !headSet.has(id));
+  return [...head, ...tail];
+}
+
 export function defaultPanelSettings(): PanelSettings {
   const sections = {} as Record<PanelSectionKey, boolean>;
   for (const s of PANEL_SECTION_META) sections[s.key] = true;
@@ -151,7 +195,7 @@ export function defaultPanelSettings(): PanelSettings {
       title: "Панель управления",
       subtitle: "Управление пользователями, коммуникациями и сервисами",
       avatarPath: null,
-      brandName: "HSN",
+      brandName: "HSN VPN",
       telegramFooter: "",
       subscriptionBanner: {
         enabled: false,
@@ -180,6 +224,10 @@ export function defaultPanelSettings(): PanelSettings {
       notifyServerErrors: true,
       testMode: false,
       login2faEnabled: true,
+      buttonColors: { ...DEFAULT_TELEGRAM_BUTTON_COLORS },
+      menuImagePath: null,
+      aiAssistantEnabled: true,
+      geminiModel: "gemini-2.5-flash-lite",
     },
     security: {
       maskSecrets: true,
@@ -188,6 +236,7 @@ export function defaultPanelSettings(): PanelSettings {
       showDiagnosticDetails: true,
     },
     maintenance: { enabled: false },
+    vpnDisplay: { serverOrder: [], entryOrder: [] },
     updatedAt: Date.now(),
   };
 }

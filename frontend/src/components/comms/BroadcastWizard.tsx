@@ -17,9 +17,10 @@ import MessageComposer from "./MessageComposer";
 import TelegramPreview from "./TelegramPreview";
 import SendConfirmBar from "./SendConfirmBar";
 import SegmentsWorkspace, { type SegmentFormState } from "./SegmentsWorkspace";
+import SentMailingsPanel, { type SentCopyDraft } from "./SentMailingsPanel";
 import { prepareCompressedPhoto } from "./photoUtils";
 import {
-  isTestSubscriptionSystemSegment,
+  isSystemCommunicationSegment,
   type AudienceCard,
   type BroadcastMode,
   type MessageButtonId,
@@ -28,7 +29,7 @@ import {
 const LS_KEY_MARK_ENABLED = "comms_mark_enabled";
 const LS_KEY_MARK_TEXT = "comms_mark_text";
 
-type SubTab = "send" | "segments";
+type SubTab = "send" | "segments" | "sent";
 
 type Props = {
   targets: CommunicationTargetDto[];
@@ -57,7 +58,9 @@ export default function BroadcastWizard({
   const [pickerOpen, setPickerOpen] = useState(false);
   const [segmentId, setSegmentId] = useState("");
   const [segmentQuery, setSegmentQuery] = useState("");
-  const [segmentPreviewCount, setSegmentPreviewCount] = useState<number | null>(null);
+  const [segmentPreviewUsers, setSegmentPreviewUsers] = useState<Array<{ id: number; name: string; tg_id: string }>>(
+    [],
+  );
   const [segmentPreviewLoading, setSegmentPreviewLoading] = useState(false);
 
   const [title, setTitle] = useState("");
@@ -77,6 +80,7 @@ export default function BroadcastWizard({
   const [segmentBusy, setSegmentBusy] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [lastResult, setLastResult] = useState<SendCommunicationResult | null>(null);
+  const [formFlash, setFormFlash] = useState(false);
 
   const reachable = useMemo(
     () => targets.filter((u) => Number.isFinite(Number(u.tg_id)) && Number(u.tg_id) > 0),
@@ -95,9 +99,9 @@ export default function BroadcastWizard({
   const recipientCount = useMemo(() => {
     if (audience === "global") return reachable.length;
     if (audience === "users") return selectedUsers.length;
-    if (audience === "segment") return segmentPreviewCount ?? 0;
+    if (audience === "segment") return segmentPreviewUsers.length;
     return 0;
-  }, [audience, reachable.length, selectedUsers.length, segmentPreviewCount]);
+  }, [audience, reachable.length, selectedUsers.length, segmentPreviewUsers.length]);
 
   const needsConfirm = audience === "global" || audience === "segment" || selectedUsers.length >= 5;
   const canSend =
@@ -116,7 +120,7 @@ export default function BroadcastWizard({
 
   useEffect(() => {
     if (audience !== "segment" || !segmentId) {
-      setSegmentPreviewCount(null);
+      setSegmentPreviewUsers([]);
       setSegmentPreviewLoading(false);
       return;
     }
@@ -125,9 +129,9 @@ export default function BroadcastWizard({
     void (async () => {
       try {
         const data = await listCommunicationSegmentUsers(segmentId);
-        if (!cancelled) setSegmentPreviewCount(data.users.length);
+        if (!cancelled) setSegmentPreviewUsers(data.users);
       } catch {
-        if (!cancelled) setSegmentPreviewCount(0);
+        if (!cancelled) setSegmentPreviewUsers([]);
       } finally {
         if (!cancelled) setSegmentPreviewLoading(false);
       }
@@ -157,6 +161,36 @@ export default function BroadcastWizard({
   async function reloadSegments() {
     const segs = await listCommunicationSegments();
     onSegmentsChange(segs.segments);
+  }
+
+  function resetSendForm() {
+    setAudience("global");
+    setSelectedIds([]);
+    setSegmentId("");
+    setSegmentQuery("");
+    setSegmentPreviewUsers([]);
+    setTitle("");
+    setText("");
+    setPhoto(null);
+    setMessageButtons([]);
+    setConfirmOpen(false);
+    setLastResult(null);
+    setPickerOpen(false);
+  }
+
+  function applyCopyDraft(draft: SentCopyDraft) {
+    setAudience(draft.audience);
+    setSelectedIds(draft.selectedIds);
+    setSegmentId(draft.segmentId);
+    setTitle(draft.title);
+    setText(draft.text);
+    setPhoto(draft.photo);
+    setMessageButtons(draft.messageButtons);
+    if (draft.markEnabled !== undefined) setMarkEnabled(draft.markEnabled);
+    if (draft.markText !== undefined && draft.markText.trim()) setMarkText(draft.markText);
+    setConfirmOpen(false);
+    setLastResult(null);
+    setSubTab("send");
   }
 
   async function doSend() {
@@ -194,6 +228,7 @@ export default function BroadcastWizard({
       const result = await sendCommunication({
         mode,
         text: cleanText,
+        ...(title.trim() ? { title: title.trim() } : {}),
         ...(mode === "selected" ? { user_ids: selectedUsers.map((u) => u.id) } : {}),
         ...(mode === "segment" ? { segment_id: segmentId } : {}),
         mark_enabled: markEnabled,
@@ -213,6 +248,11 @@ export default function BroadcastWizard({
               ? `Глобальная рассылка завершена: ${result.sent}/${result.attempted}.`
               : `Сообщение отправлено: ${result.sent}/${result.attempted}.`,
         });
+        setFormFlash(true);
+        window.setTimeout(() => {
+          resetSendForm();
+          setFormFlash(false);
+        }, 280);
       } else {
         onFlash({
           type: "err",
@@ -265,7 +305,7 @@ export default function BroadcastWizard({
 
   async function removeSegment(id: string) {
     const seg = segments.find((s) => s.id === id);
-    if (seg && isTestSubscriptionSystemSegment(seg)) {
+    if (seg && isSystemCommunicationSegment(seg)) {
       onFlash({ type: "err", text: "Системный сегмент нельзя удалить." });
       return;
     }
@@ -327,7 +367,7 @@ export default function BroadcastWizard({
   const onForceNewConsumed = useCallback(() => setForceNewSegment(false), []);
 
   return (
-    <div className="comms-wiz">
+    <div className={`comms-wiz${formFlash ? " comms-wiz--flash" : ""}`}>
       <div className="survey-segmented comms-wiz-subtabs" role="tablist" aria-label="Раздел рассылок">
         <button
           type="button"
@@ -347,6 +387,15 @@ export default function BroadcastWizard({
         >
           Сегменты
         </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={subTab === "sent"}
+          className={`survey-segmented-btn${subTab === "sent" ? " active" : ""}`}
+          onClick={() => setSubTab("sent")}
+        >
+          Отправлено
+        </button>
       </div>
 
       {subTab === "send" ? (
@@ -356,7 +405,7 @@ export default function BroadcastWizard({
               audience={audience}
               onAudienceChange={handleAudienceChange}
               busy={busy}
-              reachableCount={reachable.length}
+              globalRecipients={reachable}
               selectedUsers={selectedUsers}
               onOpenPicker={() => setPickerOpen(true)}
               onClearSelected={() => setSelectedIds([])}
@@ -365,7 +414,7 @@ export default function BroadcastWizard({
               segmentQuery={segmentQuery}
               onSegmentQueryChange={setSegmentQuery}
               onSegmentSelect={handleSegmentSelect}
-              segmentPreviewCount={segmentPreviewCount}
+              segmentPreviewUsers={segmentPreviewUsers}
               segmentPreviewLoading={segmentPreviewLoading}
             />
 
@@ -435,7 +484,9 @@ export default function BroadcastWizard({
             </aside>
           ) : null}
         </div>
-      ) : (
+      ) : null}
+
+      {subTab === "segments" ? (
         <SegmentsWorkspace
           segments={segments}
           chatReachable={chatReachable}
@@ -448,7 +499,11 @@ export default function BroadcastWizard({
           onRefreshSystem={refreshSystem}
           onMessage={(type, textMsg) => onFlash({ type, text: textMsg })}
         />
-      )}
+      ) : null}
+
+      {subTab === "sent" ? (
+        <SentMailingsPanel busy={busy} onCopy={applyCopyDraft} onFlash={onFlash} />
+      ) : null}
 
       <ClientPickerModal
         open={pickerOpen}

@@ -9,7 +9,16 @@ import { COUNTRY_CODES_ALPHA2, countryCodeLabel } from "../countryCodes";
 import { countryFlagEmoji } from "../flagEmoji";
 import Spinner from "./Spinner";
 
-export type ServerBusyAction = "ssh" | "xray" | "vless" | "save" | "addSubs" | "removeSubs" | null;
+export type ServerBusyAction =
+  | "ssh"
+  | "xray"
+  | "vless"
+  | "hysteria2"
+  | "hy2Subs"
+  | "save"
+  | "addSubs"
+  | "removeSubs"
+  | null;
 
 type Props = {
   server: ServerDto;
@@ -20,6 +29,8 @@ type Props = {
   onTestSsh: () => void;
   onInstallXray: () => void;
   onDeployVless: () => void;
+  onConnectHysteria2: () => void;
+  onToggleHysteria2Subscriptions: () => void;
   onDelete: () => Promise<void>;
   onAddToAllSubscriptions?: () => void;
   onRemoveFromAllSubscriptions?: () => void;
@@ -247,6 +258,8 @@ export default function ServerCard({
   onTestSsh,
   onInstallXray,
   onDeployVless,
+  onConnectHysteria2,
+  onToggleHysteria2Subscriptions,
   onDelete,
   onAddToAllSubscriptions,
   onRemoveFromAllSubscriptions,
@@ -419,6 +432,13 @@ export default function ServerCard({
             <StatusBadge tone={ssh.tone}>{ssh.text}</StatusBadge>
             <StatusBadge tone={xray.tone}>{xray.text}</StatusBadge>
             <StatusBadge tone={vless.tone}>{vless.text}</StatusBadge>
+            <StatusBadge tone={s.hysteria2_deployed ? "ok" : "muted"}>
+              {s.hysteria2_deployed
+                ? s.hysteria2_in_subscriptions
+                  ? `HY2 :${s.hysteria2_port ?? "—"} в подписке`
+                  : `HY2 :${s.hysteria2_port ?? "—"}`
+                : "HY2 выкл"}
+            </StatusBadge>
             <StatusBadge tone="muted">{`:${vlessPort}`}</StatusBadge>
           </div>
         </header>
@@ -598,6 +618,40 @@ export default function ServerCard({
                     "Развернуть VLESS"
                   )}
                 </button>
+                <button
+                  type="button"
+                  className={s.hysteria2_deployed ? "ghost" : "primary"}
+                  disabled={isBusy}
+                  onClick={onConnectHysteria2}
+                >
+                  {busyAction === "hysteria2" ? (
+                    <>
+                      <Spinner /> {s.hysteria2_deployed ? "Обновляем HY2…" : "Подключаем HY2…"}
+                    </>
+                  ) : s.hysteria2_deployed ? (
+                    "Обновить Hysteria2"
+                  ) : (
+                    "Подключить Hysteria2"
+                  )}
+                </button>
+                {s.hysteria2_deployed ? (
+                  <button
+                    type="button"
+                    className="ghost"
+                    disabled={isBusy}
+                    onClick={onToggleHysteria2Subscriptions}
+                  >
+                    {busyAction === "hy2Subs" ? (
+                      <>
+                        <Spinner /> Сохраняем…
+                      </>
+                    ) : s.hysteria2_in_subscriptions ? (
+                      "Убрать Hysteria2 из подписок"
+                    ) : (
+                      "Добавить Hysteria2 в подписки"
+                    )}
+                  </button>
+                ) : null}
                 {onAddToAllSubscriptions &&
                 s.vless_deployed &&
                 s.subscription_users_missing != null &&

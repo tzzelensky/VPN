@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type SVGProps } from "react";
+import { useSearchParams } from "react-router-dom";
 import {
   bulkDeleteInactiveUsers,
   createUser,
@@ -24,6 +25,7 @@ import {
 } from "../expiryNotify";
 import { isAdminMobileShell } from "../adminMobile";
 import { subscriptionLabel } from "../subscriptionLabel";
+import { usePanelTabParam } from "../lib/panelTabRoute";
 import DashboardLayout from "../components/DashboardLayout";
 import PageLoadingState from "../components/PageLoadingState";
 import Spinner from "../components/Spinner";
@@ -62,7 +64,7 @@ function nodesCountLabel(u: UserDto, previewCount: number | undefined, deployedT
   }
   if (previewCount != null) return String(previewCount);
   const servers = u.subscription_server_ids?.length ?? 0;
-  const vault = u.config_vault_links?.length ?? 0;
+  const vault = u.config_vault_links_count ?? u.config_vault_links?.length ?? 0;
   const manual = u.extra_vless_links?.length ?? 0;
   if (servers + vault + manual > 0) return String(servers + vault + manual);
   if (servers > 0) return String(servers);
@@ -74,7 +76,7 @@ function nodesCountLabel(u: UserDto, previewCount: number | undefined, deployedT
 function nodesSubLabel(u: UserDto): string {
   if (!clientAlive(u)) return "неактивна";
   const servers = u.subscription_server_ids?.length ?? 0;
-  const vault = u.config_vault_links?.length ?? 0;
+  const vault = u.config_vault_links_count ?? u.config_vault_links?.length ?? 0;
   if (servers > 0 && vault > 0) return `${servers} + ${vault} хран.`;
   if (servers > 0) {
     return u.subscription_server_count === 0 ? `все (${servers})` : `${servers} узл.`;
@@ -219,9 +221,11 @@ function IconPower(p: SVGProps<SVGSVGElement>) {
 }
 
 type UserModalState = { kind: "closed" } | { kind: "create" } | { kind: "edit"; userId: number };
-type UsersTab = "active" | "inactive";
+const USERS_TABS = ["active", "inactive"] as const;
 
 export default function UsersPage({ onLogout }: { onLogout: () => void }) {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const { tab: activeTab, setTab: setActiveTab } = usePanelTabParam("/users", USERS_TABS);
   const [users, setUsers] = useState<UserDto[]>(() => readUsersListCache()?.users ?? []);
   const [pageLoading, setPageLoading] = useState(() => !(readUsersListCache()?.users?.length));
   const [msg, setMsg] = useState<{ type: "ok" | "err"; text: string } | null>(null);
@@ -243,7 +247,6 @@ export default function UsersPage({ onLogout }: { onLogout: () => void }) {
   const [expirySort, setExpirySort] = useState<SortTri>(0);
   const [trafficSort, setTrafficSort] = useState<SortTri>(0);
   const [expiryTipUserId, setExpiryTipUserId] = useState<number | null>(null);
-  const [activeTab, setActiveTab] = useState<UsersTab>("active");
   const [inactiveDeleteOpen, setInactiveDeleteOpen] = useState(false);
   const [inactiveDeleteBusy, setInactiveDeleteBusy] = useState(false);
   const [inactiveSelectedIds, setInactiveSelectedIds] = useState<number[]>([]);
@@ -310,6 +313,22 @@ export default function UsersPage({ onLogout }: { onLogout: () => void }) {
       .then((cfg) => setExpiryDaysBefore(cfg.expiry.days_before))
       .catch(() => {});
   }, []);
+
+  useEffect(() => {
+    const id = Math.floor(Number(searchParams.get("user") || 0));
+    if (id <= 0) return;
+    if (!users.some((u) => u.id === id)) return;
+    setModal((cur) => (cur.kind === "edit" && cur.userId === id ? cur : { kind: "edit", userId: id }));
+  }, [searchParams, users]);
+
+  const closeUserModal = useCallback(() => {
+    setModal({ kind: "closed" });
+    if (searchParams.has("user")) {
+      const next = new URLSearchParams(searchParams);
+      next.delete("user");
+      setSearchParams(next, { replace: true });
+    }
+  }, [searchParams, setSearchParams]);
 
   useEffect(() => {
     if (expiryTipUserId == null) return;
@@ -909,7 +928,7 @@ export default function UsersPage({ onLogout }: { onLogout: () => void }) {
         mode={modal.kind === "edit" ? "edit" : "create"}
         user={modal.kind === "edit" ? users.find((u) => u.id === modal.userId) ?? null : null}
         deployedServers={deployedServers}
-        onClose={() => setModal({ kind: "closed" })}
+        onClose={closeUserModal}
         onCreate={async (p) => {
           await onCreateUser(p);
         }}

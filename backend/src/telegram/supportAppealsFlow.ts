@@ -7,6 +7,7 @@ import {
 import { notifyAdminsNewSupportAppeal } from "../supportAppealsNotify.js";
 import { sendTelegramHtml } from "./api.js";
 import { backHomeRow } from "./keyboards.js";
+import { inlineBtn } from "./inlineButtonStyles.js";
 
 type TgUser = { id: number; username?: string; first_name?: string };
 
@@ -20,13 +21,15 @@ type AppealDraft = {
 
 const appealDraftByChat = new Map<number, AppealDraft>();
 
-export const appealComposeInline = {
-  inline_keyboard: [
-    [{ text: "✅ Отправить обращение", callback_data: "appeal_send" }],
-    [{ text: "Отмена", callback_data: "appeal_cancel" }],
-    [{ text: "« В меню", callback_data: "home" }],
-  ],
-};
+export function appealComposeInline() {
+  return {
+    inline_keyboard: [
+      [inlineBtn("✅ Отправить обращение", "appeal_send", "sendAppeal")],
+      [{ text: "Отмена", callback_data: "appeal_cancel" }],
+      [inlineBtn("« В меню", "home", "menuHome")],
+    ],
+  };
+}
 
 const APPEAL_INTRO =
   "Если у вас возник вопрос или проблема, <b>опишите её</b> в одном или нескольких сообщениях. " +
@@ -48,7 +51,7 @@ export function clearSupportAppealDraft(chatId: number): void {
 
 export async function startSupportAppealCompose(chatId: number, from: TgUser): Promise<void> {
   if (!isSupportAppealsEnabled()) {
-    await sendTelegramHtml(chatId, "Обращения в поддержку сейчас отключены.", backHomeRow);
+    await sendTelegramHtml(chatId, "Обращения в поддержку сейчас отключены.", backHomeRow());
     return;
   }
   appealDraftByChat.set(chatId, {
@@ -58,18 +61,18 @@ export async function startSupportAppealCompose(chatId: number, from: TgUser): P
     tg_username: from.username,
     tg_first_name: from.first_name,
   });
-  await sendTelegramHtml(chatId, APPEAL_INTRO, appealComposeInline);
+  await sendTelegramHtml(chatId, APPEAL_INTRO, appealComposeInline());
 }
 
 export async function cancelSupportAppealCompose(chatId: number): Promise<void> {
   appealDraftByChat.delete(chatId);
-  await sendTelegramHtml(chatId, "Обращение отменено.", backHomeRow);
+  await sendTelegramHtml(chatId, "Обращение отменено.", backHomeRow());
 }
 
 export async function submitSupportAppealFromDraft(chatId: number, fromId: number): Promise<boolean> {
   const draft = appealDraftByChat.get(chatId);
   if (!draft || draft.ownerId !== fromId) {
-    await sendTelegramHtml(chatId, "Черновик обращения не найден. Нажмите «Сообщить о проблеме» ещё раз.", backHomeRow);
+    await sendTelegramHtml(chatId, "Черновик обращения не найден. Нажмите «Сообщить о проблеме» ещё раз.", backHomeRow());
     return true;
   }
   const text = draft.text.trim();
@@ -77,7 +80,7 @@ export async function submitSupportAppealFromDraft(chatId: number, fromId: numbe
     await sendTelegramHtml(
       chatId,
       "Добавьте описание проблемы или хотя бы одно фото, затем нажмите «Отправить обращение».",
-      appealComposeInline,
+      appealComposeInline(),
     );
     return true;
   }
@@ -101,7 +104,7 @@ export async function submitSupportAppealFromDraft(chatId: number, fromId: numbe
   await sendTelegramHtml(
     chatId,
     "<b>Сообщение отправлено.</b>\n\nМы получили ваше обращение. Результат ответа придёт в этот чат.",
-    backHomeRow,
+    backHomeRow(),
   );
   return true;
 }
@@ -129,13 +132,13 @@ export async function onSupportAppealDraftMessage(msg: {
     if (draft.photoFileIds.length < 10) draft.photoFileIds.push(fileId);
   }
   if (!piece && !photos?.length) {
-    await sendTelegramHtml(chatId, "Отправьте текст и/или фото для обращения.", appealComposeInline);
+    await sendTelegramHtml(chatId, "Отправьте текст и/или фото для обращения.", appealComposeInline());
     return true;
   }
   await sendTelegramHtml(
     chatId,
     `Черновик сохранён (${draft.photoFileIds.length} фото). Нажмите «Отправить обращение», когда будете готовы.`,
-    appealComposeInline,
+    appealComposeInline(),
   );
   return true;
 }

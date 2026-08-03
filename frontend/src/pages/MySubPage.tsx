@@ -22,6 +22,7 @@ import {
   type MySubProfileDto,
 } from "../api";
 import { subscriptionLabel } from "../subscriptionLabel";
+import { applyReferralInviteVars } from "../referralInvitePreview";
 
 type Tab = "home" | "subscription" | "game" | "friends" | "profile";
 
@@ -678,7 +679,16 @@ export default function MySubPage() {
       setMsg("Реферальная ссылка недоступна.");
       return;
     }
-    const text = data.referral.invite_copy_text || "Присоединяйся по моей ссылке!";
+    const discountPct = Math.max(0, Math.floor(Number(data.referral.invited_discount_percent) || 20));
+    const brand = data.referral.brand_name || "HSN VPN";
+    const text = applyReferralInviteVars(
+      data.referral.invite_copy_text || "Я пользуюсь {brand}, вот тебе скидка {discount} на первую покупку!",
+      {
+        ref_link: data.referral.invite_link,
+        discount: `${discountPct}%`,
+        brand,
+      },
+    );
     const shareUrl = `https://t.me/share/url?url=${encodeURIComponent(data.referral.invite_link)}&text=${encodeURIComponent(text)}`;
     const tgWebApp = (window as unknown as { Telegram?: { WebApp?: { openTelegramLink?: (url: string) => void } } }).Telegram?.WebApp;
     if (tgWebApp?.openTelegramLink) tgWebApp.openTelegramLink(shareUrl);
@@ -1739,6 +1749,7 @@ export default function MySubPage() {
                 }))}
                 ticketsPerPurchase={data.roulette.tickets_per_purchase ?? data.tickets_per_purchase ?? 1}
                 prizes={data.roulette.prizes ?? []}
+                uiMode={data.roulette.ui_mode === "case" ? "case" : "wheel"}
                 ticketShop={data.roulette.ticket_shop}
                 history={data.roulette.history ?? []}
                 ticketPurchaseHistory={data.roulette.ticket_purchase_history ?? []}

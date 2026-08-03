@@ -71,6 +71,10 @@ export type ServerDto = {
   subscription_settings?: ServerSubscriptionSettingsDto;
   subscription_settings_custom?: boolean;
   vless_deployed: boolean;
+  hysteria2_deployed?: boolean;
+  hysteria2_in_subscriptions?: boolean;
+  hysteria2_port?: number;
+  hysteria2_sni?: string;
   experimental_only?: boolean;
   last_ssh_ok: boolean;
   last_error: string | null;
@@ -420,6 +424,23 @@ export async function deployVlessStream(id: number, onEvent: (ev: NdjsonEvent) =
   await postNdjsonStream(`/api/servers/${id}/deploy-vless?stream=1`, onEvent, { method: "POST" });
 }
 
+export async function connectHysteria2Stream(id: number, onEvent: (ev: NdjsonEvent) => void): Promise<void> {
+  await postNdjsonStream(`/api/servers/${id}/connect-hysteria2?stream=1`, onEvent, { method: "POST" });
+}
+
+export async function setServerHysteria2InSubscriptions(
+  id: number,
+  enabled: boolean,
+): Promise<{ ok: boolean; server: ServerDto | null }> {
+  const res = await fetch(`/api/servers/${id}/hysteria2-subscriptions`, {
+    method: "POST",
+    credentials: "include",
+    headers: jsonHeaders,
+    body: JSON.stringify({ enabled }),
+  });
+  return handle(res);
+}
+
 export type UserDto = {
   id: number;
   name: string;
@@ -445,6 +466,8 @@ export type UserDto = {
   subscription_server_count: number;
   /** Id серверов в подписке (явный выбор). */
   subscription_server_ids: number[];
+  /** Порядок элементов подписки (vless:/hy2:/vault:/whitelist:). */
+  subscription_entry_order?: string[];
   /** Включено ли ограничение устройств для подписки. */
   device_limit_enabled: boolean;
   /** Глобальный переключатель лимита устройств в настройках панели. */
@@ -473,13 +496,15 @@ export type UserDto = {
   online_devices: number;
   /** Unix ms последнего sync трафика с узлов. */
   stats_synced_at: number;
-  /** Билеты «Дроппер»; при одинаковом tg_id сумма по записям — общий пул в WebApp. */
+  /** Билеты игры на этой подписке (отдельный счётчик на каждую строку). */
   dropper_tickets: number;
   /** Победы в дроппере: при том же tg_id — общее число для Telegram; иначе по строке подписки. */
   dropper_wins: number;
   extra_vless_links: ExtraVlessLinkDto[];
-  /** Ключи из конфиг-хранилища, попадающие в подписку этого клиента (только чтение). */
+  /** Ключи из конфиг-хранилища (полные URI — только после ленивой загрузки в модалке). */
   config_vault_links?: ConfigVaultLinkDto[];
+  /** Число ключей хранилища в подписке (без URI — для списка). */
+  config_vault_links_count?: number;
   /** Число строк в подписке (серверы + хранилище + прочее); 0 если подписка неактивна. */
   subscription_nodes_count?: number;
   /** Статус авто-напоминания о сроке: sent | waiting | error | null */
@@ -537,6 +562,7 @@ export type CreateUserPayload = {
   reality_spx?: string;
   subscription_server_count?: number;
   subscription_server_ids?: number[];
+  subscription_entry_order?: string[];
   device_limit_enabled?: boolean;
   device_limit_count?: number;
   speed_limit_mbps?: number;
@@ -581,6 +607,12 @@ function compactPatch(p: Partial<CreateUserPayload>): Record<string, unknown> {
     else out[k] = v;
   }
   return out;
+}
+
+export async function fetchUserConfigVaultLinks(id: number): Promise<ConfigVaultLinkDto[]> {
+  const res = await fetch(`/api/users/${id}/config-vault-links`, { credentials: "include" });
+  const data = (await handle(res)) as { links?: ConfigVaultLinkDto[] };
+  return Array.isArray(data.links) ? data.links : [];
 }
 
 export async function patchUser(id: number, payload: Partial<CreateUserPayload>): Promise<{ user: UserDto }> {
@@ -903,6 +935,18 @@ export async function resetUserTraffic(id: number): Promise<{ ok: boolean; user:
   return handle(res);
 }
 
+export async function renewUserSubscription(
+  id: number,
+): Promise<{ ok: boolean; traffic_reset: boolean; user: UserDto }> {
+  const res = await fetch(`/api/users/${id}/renew-subscription`, {
+    method: "POST",
+    credentials: "include",
+    headers: jsonHeaders,
+    body: JSON.stringify({}),
+  });
+  return handle(res);
+}
+
 export type SubscriptionShopPlanDto = {
   id: number;
   title: string;
@@ -1125,6 +1169,7 @@ export async function listCommunicationTargets(): Promise<{ users: Communication
 export type SendCommunicationPayload = {
   mode: "global" | "single" | "selected" | "segment";
   text: string;
+  title?: string;
   user_id?: number;
   user_ids?: number[];
   segment_id?: string;
@@ -1133,7 +1178,7 @@ export type SendCommunicationPayload = {
   photo_base64?: string;
   photo_mime?: string;
   photo_name?: string;
-  buttons?: Array<"pay" | "ref" | "sub" | "buygb" | "webapp">;
+  buttons?: Array<"pay" | "ref" | "sub" | "buygb" | "webapp" | "whitelist">;
 };
 
 export type SendCommunicationResult = {
@@ -1226,7 +1271,16 @@ export type CommunicationMessageLogDto = {
   segment_id?: string;
   segment_name?: string;
   text: string;
+  body_text?: string;
+  title?: string;
+  mark_enabled?: boolean;
+  mark_text?: string;
+  buttons?: Array<"pay" | "ref" | "sub" | "buygb" | "webapp" | "whitelist" | string>;
+  user_ids?: number[];
   has_photo: boolean;
+  photo_path?: string;
+  photo_mime?: string;
+  photo_name?: string;
   recipients: Array<{ user_id: number; user_name: string }>;
   sent: number;
   attempted: number;
@@ -1237,12 +1291,47 @@ export async function listCommunicationHistory(opts?: {
   limit?: number;
   from?: string;
   to?: string;
+  manualOnly?: boolean;
 }): Promise<{ items: CommunicationMessageLogDto[] }> {
   const q = new URLSearchParams();
   q.set("limit", String(opts?.limit ?? 200));
   if (opts?.from) q.set("from", opts.from);
   if (opts?.to) q.set("to", opts.to);
+  if (opts?.manualOnly) q.set("manual", "1");
   const res = await fetch(`/api/communications/history?${q}`, {
+    credentials: "include",
+  });
+  return handle(res);
+}
+
+export async function getCommunicationHistoryItem(id: string): Promise<CommunicationMessageLogDto> {
+  const res = await fetch(`/api/communications/history/${encodeURIComponent(id)}`, {
+    credentials: "include",
+  });
+  return handle(res);
+}
+
+export async function fetchCommunicationHistoryPhoto(id: string): Promise<File | null> {
+  const res = await fetch(`/api/communications/history/${encodeURIComponent(id)}/photo`, {
+    credentials: "include",
+  });
+  if (res.status === 404) return null;
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(text || `HTTP ${res.status}`);
+  }
+  const blob = await res.blob();
+  const mime = blob.type || "image/jpeg";
+  const disposition = res.headers.get("Content-Disposition") || "";
+  const m = /filename\*=UTF-8''([^;]+)|filename="?([^";]+)"?/i.exec(disposition);
+  const rawName = decodeURIComponent((m?.[1] || m?.[2] || "photo.jpg").trim());
+  const name = rawName || "photo.jpg";
+  return new File([blob], name, { type: mime });
+}
+
+export async function deleteCommunicationHistory(id: string): Promise<{ ok: boolean; id: string }> {
+  const res = await fetch(`/api/communications/history/${encodeURIComponent(id)}`, {
+    method: "DELETE",
     credentials: "include",
   });
   return handle(res);
@@ -1567,6 +1656,8 @@ export function surveyExportUrl(id: number): string {
 export type PanelSettingsPatchPayload = {
   settings?: Partial<PanelSettings>;
   botToken?: string;
+  geminiApiKey?: string;
+  clearGeminiApiKey?: boolean;
 };
 
 export async function fetchPanelSettings(): Promise<PanelSettingsResponse> {
@@ -1576,6 +1667,35 @@ export async function fetchPanelSettings(): Promise<PanelSettingsResponse> {
 
 export async function fetchPanelTelegramBotToken(): Promise<{ botToken: string }> {
   const res = await fetch("/api/settings/telegram-bot-token", { credentials: "include" });
+  return handle(res);
+}
+
+export async function fetchPanelGeminiApiKey(): Promise<{ geminiApiKey: string }> {
+  const res = await fetch("/api/settings/gemini-api-key", { credentials: "include" });
+  return handle(res);
+}
+
+export type AiLogEntryDto = {
+  id: string;
+  ts: number;
+  chatId: number;
+  tgUserId: number;
+  username?: string;
+  prompt: string;
+  reply?: string;
+  ok: boolean;
+  error?: string;
+  model: string;
+  latencyMs: number;
+};
+
+export async function fetchAiLogs(limit = 200): Promise<{ entries: AiLogEntryDto[] }> {
+  const res = await fetch(`/api/settings/ai-logs?limit=${limit}`, { credentials: "include" });
+  return handle(res);
+}
+
+export async function clearAiLogs(): Promise<{ ok: boolean; cleared: number }> {
+  const res = await fetch("/api/settings/ai-logs", { method: "DELETE", credentials: "include" });
   return handle(res);
 }
 
@@ -1611,6 +1731,21 @@ export async function uploadPanelAvatar(photo_base64: string, photo_mime: string
 
 export async function deletePanelAvatar(): Promise<PanelSettingsResponse> {
   const res = await fetch("/api/settings/avatar", { method: "DELETE", credentials: "include" });
+  return handle(res);
+}
+
+export async function uploadPanelMenuImage(photo_base64: string, photo_mime: string): Promise<PanelSettingsResponse> {
+  const res = await fetch("/api/settings/telegram-menu-image", {
+    method: "POST",
+    credentials: "include",
+    headers: jsonHeaders,
+    body: JSON.stringify({ photo_base64, photo_mime }),
+  });
+  return handle(res);
+}
+
+export async function deletePanelMenuImage(): Promise<PanelSettingsResponse> {
+  const res = await fetch("/api/settings/telegram-menu-image", { method: "DELETE", credentials: "include" });
   return handle(res);
 }
 
@@ -1901,6 +2036,8 @@ export type MySubProfileDto = {
     tickets: number;
     tickets_per_purchase: number;
     chance_sum: number;
+    /** `wheel` — классическое колесо; `case` — лента как CS-кейс. */
+    ui_mode?: "wheel" | "case";
     prizes: MySubRoulettePrizeDto[];
     ticket_shop?: RouletteTicketShopPublicDto;
     history: Array<{
@@ -1930,6 +2067,7 @@ export type MySubProfileDto = {
     inviter_reward_gb?: number;
     inviter_reward_days?: number;
     invited_discount_percent?: number;
+    brand_name?: string;
     invited_friends: Array<{
       reward_id: string;
       name: string;
@@ -2288,7 +2426,7 @@ export async function resetAllDropperGameTickets(): Promise<{ ok: boolean }> {
 export async function setDropperUserTicketsPool(body: {
   user_id: number;
   tickets: number;
-}): Promise<{ ok: boolean }> {
+}): Promise<{ ok: boolean; tickets: number }> {
   const res = await fetch("/api/dropper-game/set-user-tickets", {
     method: "POST",
     credentials: "include",
@@ -2422,11 +2560,14 @@ export type RouletteTicketShopPublicDto = {
   };
 };
 
+export type RouletteUiMode = "wheel" | "case";
+
 export type GameSettingsDto = {
   active_game: WebAppActiveGame;
   tickets_per_purchase: number;
   roulette_enabled: boolean;
   dropper_enabled: boolean;
+  ui_mode?: RouletteUiMode;
   chance_sum: number;
   prizes: RoulettePrizeAdminDto[];
   ticket_shop?: RouletteTicketShopConfigDto;
@@ -2495,6 +2636,7 @@ export async function loadGameSettings(): Promise<GameSettingsDto> {
 export async function saveGameSettings(body: {
   active_game?: WebAppActiveGame;
   tickets_per_purchase?: number;
+  ui_mode?: RouletteUiMode;
   ticket_shop?: Partial<RouletteTicketShopConfigDto>;
 }): Promise<GameSettingsDto> {
   const res = await fetch("/api/roulette-game/settings", {
@@ -2855,204 +2997,6 @@ export async function clearServerXrayLogs(
     credentials: "include",
     headers: jsonHeaders,
     body: JSON.stringify({ targets }),
-  });
-  return handle(res);
-}
-
-export type ExperimentPresetDto = {
-  id: string;
-  label: string;
-  description: string;
-  defaults: Record<string, unknown>;
-};
-
-export type ExperimentDto = {
-  id: number;
-  name: string;
-  server_id: number;
-  server_name: string;
-  host: string;
-  preset_id: string;
-  port: number;
-  network: string;
-  security: string;
-  flow: string;
-  fingerprint: string;
-  server_name_sni: string;
-  inbound_tag: string;
-  vless_uuid_masked: string;
-  reality_pbk_masked: string;
-  reality_sid_masked: string;
-  sub_url: string;
-  vless_uri: string;
-  status: string;
-  deploy_error: string | null;
-  diag_status: string;
-  diag_has_accepted: boolean;
-  diag_has_handshake_fail: boolean;
-  user_note: "" | "works" | "fail" | "partial";
-  query_strategy: string;
-  sniff_quic: boolean;
-  dns_mode: string;
-  mux_enabled: boolean;
-  port_warning: string | null;
-  active_on_443: boolean;
-  experimental_only_server: boolean;
-  created_at: string;
-  updated_at: string;
-};
-
-export type CreateExperimentPayload = {
-  name: string;
-  server_id: number;
-  preset_id?: string;
-  port?: number;
-  network?: "tcp" | "ws" | "grpc";
-  security?: "reality" | "tls" | "none";
-  flow?: string;
-  fingerprint?: string;
-  server_name?: string;
-  query_strategy?: "UseIP" | "UseIPv4";
-  sniff_quic?: boolean;
-  dns_mode?: "default" | "proxy" | "no_direct_dns";
-  mux_enabled?: boolean;
-  xudp_enabled?: boolean;
-  mtu?: number | null;
-  log_level?: string;
-  force_non_443?: boolean;
-  replace_443_slot?: boolean;
-};
-
-export async function listExperimentPresets(): Promise<{ presets: ExperimentPresetDto[] }> {
-  const res = await fetch("/api/experiments/presets", { credentials: "include" });
-  return handle(res);
-}
-
-export async function listExperiments(): Promise<{ experiments: ExperimentDto[] }> {
-  const res = await fetch("/api/experiments", { credentials: "include" });
-  return handle(res);
-}
-
-export async function createExperiment(
-  payload: CreateExperimentPayload,
-): Promise<
-  ExperimentDto & {
-    port_warning?: string | null;
-    deploy_post_check?: PortCheckDto | null;
-    firewall_open?: FirewallOpenDto | null;
-  }
-> {
-  const res = await fetch("/api/experiments", {
-    method: "POST",
-    credentials: "include",
-    headers: jsonHeaders,
-    body: JSON.stringify(payload),
-  });
-  return handle(res);
-}
-
-export async function fetchExperimentPortPlan(serverId: number, port = 443): Promise<PortPlanDto> {
-  const res = await fetch(`/api/experiments/port-plan?server_id=${serverId}&port=${port}`, { credentials: "include" });
-  return handle(res);
-}
-
-export async function fetchMobileTestInfo(): Promise<{
-  mobile_warning: string;
-  honest_test_hint: string;
-  options: string[];
-}> {
-  const res = await fetch("/api/experiments/mobile-test-info", { credentials: "include" });
-  return handle(res);
-}
-
-export async function activateMobilePreset(serverId: number, presetId: string): Promise<ExperimentDto> {
-  const res = await fetch("/api/experiments/activate-mobile", {
-    method: "POST",
-    credentials: "include",
-    headers: jsonHeaders,
-    body: JSON.stringify({ server_id: serverId, preset_id: presetId }),
-  });
-  return handle(res);
-}
-
-export async function checkExperimentPort(id: number): Promise<PortCheckDto> {
-  const res = await fetch(`/api/experiments/${id}/port-check`, { method: "POST", credentials: "include" });
-  return handle(res);
-}
-
-export async function fetchExperimentDiagnosticReport(id: number): Promise<{ text: string }> {
-  const res = await fetch(`/api/experiments/${id}/diagnostic-report`, { credentials: "include" });
-  return handle(res);
-}
-
-export type PortPlanDto = {
-  host: string;
-  listen_ip: string;
-  requested_port: number;
-  experimental_only: boolean;
-  port_443_free: boolean;
-  port_443_blockers: { tag: string; port: number; protocol: string }[];
-  assigned_port: number | null;
-  can_use_443: boolean;
-  honest_mobile_test_possible: boolean;
-  warning: string | null;
-  mobile_test_hint: string;
-};
-
-export type PortCheckDto = {
-  ok: boolean;
-  host: string;
-  port: number;
-  inbound_tag: string | null;
-  checks: { name: string; ok: boolean; detail: string }[];
-  xray_running: boolean;
-  port_listening: boolean;
-  inbound_in_config: boolean;
-  firewall_hint: string | null;
-  diag_status: string;
-  diag_status_key: string;
-  diag_has_incoming: boolean;
-  diag_has_accepted: boolean;
-  diag_has_handshake_fail: boolean;
-  cloud_security_group_hint: string | null;
-};
-
-export type FirewallOpenDto = {
-  kind: string;
-  opened: boolean;
-  already_open: boolean;
-  detail: string;
-  manual_command: string | null;
-  cloud_security_group_hint: string | null;
-};
-
-export async function fetchExperimentClientJson(id: number): Promise<{ json: Record<string, unknown> }> {
-  const res = await fetch(`/api/experiments/${id}/client-json`, { credentials: "include" });
-  return handle(res);
-}
-
-export async function deleteExperiment(id: number): Promise<void> {
-  const res = await fetch(`/api/experiments/${id}`, { method: "DELETE", credentials: "include" });
-  await handle(res);
-}
-
-export async function diagnoseExperiment(id: number): Promise<{
-  experiment: ExperimentDto;
-  logs: { status: string; has_accepted: boolean; has_handshake_fail: boolean; lines: string[]; highlights: string[][] };
-}> {
-  const res = await fetch(`/api/experiments/${id}/diagnose`, { method: "POST", credentials: "include" });
-  return handle(res);
-}
-
-export async function patchExperimentNote(
-  id: number,
-  user_note: "" | "works" | "fail" | "partial",
-): Promise<ExperimentDto> {
-  const res = await fetch(`/api/experiments/${id}/note`, {
-    method: "PATCH",
-    credentials: "include",
-    headers: jsonHeaders,
-    body: JSON.stringify({ user_note }),
   });
   return handle(res);
 }
@@ -3721,6 +3665,22 @@ export async function resetAllWhitelistPurchases(): Promise<{
   return handleVault(res);
 }
 
+export async function grantWhitelistAccessToUser(userId: number): Promise<{ ok: boolean; user_id: number }> {
+  const res = await fetch(`/api/whitelist-vault/users/${userId}/grant`, {
+    method: "POST",
+    credentials: "include",
+  });
+  return handleVault(res);
+}
+
+export async function revokeWhitelistAccessFromUser(userId: number): Promise<{ ok: boolean; user_id: number }> {
+  const res = await fetch(`/api/whitelist-vault/users/${userId}/revoke`, {
+    method: "POST",
+    credentials: "include",
+  });
+  return handleVault(res);
+}
+
 export async function patchWhitelistPurchaseSettings(
   patch: Partial<WhitelistVaultSettingsDto["purchase"]>,
 ): Promise<WhitelistVaultOverviewDto> {
@@ -4040,6 +4000,7 @@ export type DailyGiftAdminDto = {
     day_key: string;
     prize_title: string;
     prize_type: DailyGiftPrizeType;
+    prize_golden?: boolean;
     status: string;
     opened_at: string;
   }>;

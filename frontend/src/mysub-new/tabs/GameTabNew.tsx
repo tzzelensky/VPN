@@ -58,6 +58,7 @@ export default function GameTabNew({ ctrl }: Props) {
           }))}
           ticketsPerPurchase={data.roulette.tickets_per_purchase ?? data.tickets_per_purchase ?? 1}
           prizes={data.roulette.prizes ?? []}
+          uiMode={data.roulette.ui_mode === "case" ? "case" : "wheel"}
           ticketShop={data.roulette.ticket_shop}
           history={data.roulette.history ?? []}
           ticketPurchaseHistory={data.roulette.ticket_purchase_history ?? []}

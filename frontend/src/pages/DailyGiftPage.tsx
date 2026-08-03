@@ -158,9 +158,11 @@ export default function DailyGiftPage({ onLogout }: { onLogout: () => void }) {
   const [scheduleDay, setScheduleDay] = useState("");
   const [schedulePrizeId, setSchedulePrizeId] = useState("");
 
+  const [prizeFilterWeight, setPrizeFilterWeight] = useState("");
   const [claimFilterUser, setClaimFilterUser] = useState("");
   const [claimFilterType, setClaimFilterType] = useState<"" | DailyGiftPrizeType>("");
   const [claimFilterStatus, setClaimFilterStatus] = useState("");
+  const [claimFilterGolden, setClaimFilterGolden] = useState<"" | "golden" | "regular">("");
   const [claimPage, setClaimPage] = useState(1);
   const [resetUserId, setResetUserId] = useState("");
   const [resetBusy, setResetBusy] = useState(false);
@@ -212,6 +214,19 @@ export default function DailyGiftPage({ onLogout }: { onLogout: () => void }) {
 
   const activePrizes = useMemo(() => data?.prizes.filter((p) => p.active) ?? [], [data?.prizes]);
 
+  const prizeWeightOptions = useMemo(() => {
+    if (!data?.prizes.length) return [];
+    return [...new Set(data.prizes.map((p) => p.weight))].sort((a, b) => a - b);
+  }, [data?.prizes]);
+
+  const filteredPrizes = useMemo(() => {
+    if (!data) return [];
+    if (!prizeFilterWeight) return data.prizes;
+    const weight = Number(prizeFilterWeight);
+    if (!Number.isFinite(weight)) return data.prizes;
+    return data.prizes.filter((p) => p.weight === weight);
+  }, [data, prizeFilterWeight]);
+
   const filteredClaims = useMemo(() => {
     if (!data) return [];
     return data.claims.filter((c) => {
@@ -225,13 +240,15 @@ export default function DailyGiftPage({ onLogout }: { onLogout: () => void }) {
       }
       if (claimFilterType && c.prize_type !== claimFilterType) return false;
       if (claimFilterStatus && c.status !== claimFilterStatus) return false;
+      if (claimFilterGolden === "golden" && c.prize_golden !== true) return false;
+      if (claimFilterGolden === "regular" && c.prize_golden === true) return false;
       return true;
     });
-  }, [data, claimFilterUser, claimFilterType, claimFilterStatus]);
+  }, [data, claimFilterUser, claimFilterType, claimFilterStatus, claimFilterGolden]);
 
   useEffect(() => {
     setClaimPage(1);
-  }, [claimFilterUser, claimFilterType, claimFilterStatus]);
+  }, [claimFilterUser, claimFilterType, claimFilterStatus, claimFilterGolden]);
 
   const claimsTotalPages = Math.max(1, Math.ceil(filteredClaims.length / CLAIMS_PAGE_SIZE));
   const safeClaimPage = Math.min(claimPage, claimsTotalPages);
@@ -548,59 +565,86 @@ export default function DailyGiftPage({ onLogout }: { onLogout: () => void }) {
                   </button>
                 </div>
               ) : (
-                <div className="daily-gift-table-wrap">
-                  <table className="data-table daily-gift-table">
-                    <thead>
-                      <tr>
-                        <th>Название</th>
-                        <th>Тип</th>
-                        <th>Значение</th>
-                        <th>Вес</th>
-                        <th>Выдано</th>
-                        <th>Активен</th>
-                        <th>Действия</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {data.prizes.map((p) => (
-                        <tr key={p.id}>
-                          <td>
-                            {p.title}
-                            {p.golden ? (
-                              <span className="daily-gift-golden-badge" title="Золотой подарок">
-                                ✦ Золотой
-                              </span>
-                            ) : null}
-                          </td>
-                          <td>
-                            <span className={`daily-gift-type-badge daily-gift-type-badge--${p.type}`}>
-                              {TYPE_BADGE[p.type]}
-                            </span>
-                          </td>
-                          <td>{p.value}</td>
-                          <td>{p.weight}</td>
-                          <td>{p.claims_count}</td>
-                          <td>
-                            <button
-                              type="button"
-                              className={`toggle toggle-sm ${p.active ? "on" : ""}`}
-                              aria-label={p.active ? "Выключить" : "Включить"}
-                              onClick={() => void onTogglePrizeActive(p)}
-                            />
-                          </td>
-                          <td className="daily-gift-actions">
-                            <button type="button" className="ghost" onClick={() => openPrizeModal(p)}>
-                              Редактировать
-                            </button>
-                            <button type="button" className="ghost danger" onClick={() => void onDeletePrize(p.id)}>
-                              Удалить
-                            </button>
-                          </td>
-                        </tr>
+                <>
+                  <div className="daily-gift-filters">
+                    <select value={prizeFilterWeight} onChange={(e) => setPrizeFilterWeight(e.target.value)}>
+                      <option value="">Все веса</option>
+                      {prizeWeightOptions.map((w) => (
+                        <option key={w} value={String(w)}>
+                          {w}
+                        </option>
                       ))}
-                    </tbody>
-                  </table>
-                </div>
+                    </select>
+                    {prizeFilterWeight ? (
+                      <button type="button" className="ghost" onClick={() => setPrizeFilterWeight("")}>
+                        Сбросить фильтр
+                      </button>
+                    ) : null}
+                    <span className="field-hint">
+                      Показано {filteredPrizes.length} из {data.prizes.length}
+                    </span>
+                  </div>
+                  {filteredPrizes.length === 0 ? (
+                    <div className="daily-gift-empty daily-gift-empty--compact">
+                      <h3>Нет подарков с таким весом</h3>
+                      <p>Попробуйте выбрать другой вес или сбросить фильтр.</p>
+                    </div>
+                  ) : (
+                    <div className="daily-gift-table-wrap table-wrap">
+                      <table className="data-table daily-gift-table">
+                        <thead>
+                          <tr>
+                            <th>Название</th>
+                            <th>Тип</th>
+                            <th>Значение</th>
+                            <th>Вес</th>
+                            <th>Выдано</th>
+                            <th>Активен</th>
+                            <th>Действия</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {filteredPrizes.map((p) => (
+                            <tr key={p.id}>
+                              <td>
+                                {p.title}
+                                {p.golden ? (
+                                  <span className="daily-gift-golden-badge" title="Золотой подарок">
+                                    ✦ Золотой
+                                  </span>
+                                ) : null}
+                              </td>
+                              <td>
+                                <span className={`daily-gift-type-badge daily-gift-type-badge--${p.type}`}>
+                                  {TYPE_BADGE[p.type]}
+                                </span>
+                              </td>
+                              <td>{p.value}</td>
+                              <td>{p.weight}</td>
+                              <td>{p.claims_count}</td>
+                              <td>
+                                <button
+                                  type="button"
+                                  className={`toggle toggle-sm ${p.active ? "on" : ""}`}
+                                  aria-label={p.active ? "Выключить" : "Включить"}
+                                  onClick={() => void onTogglePrizeActive(p)}
+                                />
+                              </td>
+                              <td className="daily-gift-actions">
+                                <button type="button" className="ghost" onClick={() => openPrizeModal(p)}>
+                                  Редактировать
+                                </button>
+                                <button type="button" className="ghost danger" onClick={() => void onDeletePrize(p.id)}>
+                                  Удалить
+                                </button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </>
               )}
             </section>
 
@@ -790,6 +834,29 @@ export default function DailyGiftPage({ onLogout }: { onLogout: () => void }) {
                   <option value="failed">Ошибка</option>
                   <option value="pending">В обработке</option>
                 </select>
+                <div className="survey-segmented daily-gift-golden-filter" role="group" aria-label="Тип подарка">
+                  <button
+                    type="button"
+                    className={`survey-segmented-btn${claimFilterGolden === "" ? " active" : ""}`}
+                    onClick={() => setClaimFilterGolden("")}
+                  >
+                    Все
+                  </button>
+                  <button
+                    type="button"
+                    className={`survey-segmented-btn${claimFilterGolden === "regular" ? " active" : ""}`}
+                    onClick={() => setClaimFilterGolden("regular")}
+                  >
+                    Обычные
+                  </button>
+                  <button
+                    type="button"
+                    className={`survey-segmented-btn${claimFilterGolden === "golden" ? " active" : ""}`}
+                    onClick={() => setClaimFilterGolden("golden")}
+                  >
+                    ✦ Золотые
+                  </button>
+                </div>
                 <button
                   type="button"
                   className="ghost"
@@ -797,6 +864,7 @@ export default function DailyGiftPage({ onLogout }: { onLogout: () => void }) {
                     setClaimFilterUser("");
                     setClaimFilterType("");
                     setClaimFilterStatus("");
+                    setClaimFilterGolden("");
                     setClaimPage(1);
                   }}
                 >
@@ -806,11 +874,15 @@ export default function DailyGiftPage({ onLogout }: { onLogout: () => void }) {
 
               {filteredClaims.length === 0 ? (
                 <div className="daily-gift-empty daily-gift-empty--compact">
-                  <h3>Выдач пока нет</h3>
-                  <p>Когда пользователи начнут открывать ежедневные подарки, история появится здесь.</p>
+                  <h3>{data.claims.length === 0 ? "Выдач пока нет" : "Ничего не найдено"}</h3>
+                  <p>
+                    {data.claims.length === 0
+                      ? "Когда пользователи начнут открывать ежедневные подарки, история появится здесь."
+                      : "Попробуйте изменить фильтры или сбросить их."}
+                  </p>
                 </div>
               ) : (
-                <div className="daily-gift-table-wrap">
+                <div className="daily-gift-table-wrap table-wrap">
                   <table className="data-table daily-gift-table compact">
                     <thead>
                       <tr>
@@ -835,7 +907,14 @@ export default function DailyGiftPage({ onLogout }: { onLogout: () => void }) {
                               <span title={`Telegram ID ${c.tg_user_id}`}>ID {c.tg_user_id}</span>
                             )}
                           </td>
-                          <td>{c.prize_title}</td>
+                          <td>
+                            {c.prize_title}
+                            {c.prize_golden ? (
+                              <span className="daily-gift-golden-badge" title="Золотой подарок">
+                                ✦ Золотой
+                              </span>
+                            ) : null}
+                          </td>
                           <td>
                             <span className={`daily-gift-type-badge daily-gift-type-badge--${c.prize_type}`}>
                               {TYPE_BADGE[c.prize_type as DailyGiftPrizeType] ?? c.prize_type}

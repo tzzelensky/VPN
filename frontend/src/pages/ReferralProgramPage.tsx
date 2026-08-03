@@ -31,8 +31,9 @@ import {
 import { usePanelSettings } from "../panelSettingsContext";
 import { applyReferralInviteVars } from "../referralInvitePreview";
 import { subscriptionLabel } from "../subscriptionLabel";
+import { usePanelTabParam } from "../lib/panelTabRoute";
 
-type MainTab = "settings" | "report" | "history";
+const REFERRAL_TABS = ["settings", "report", "history"] as const;
 type EventFilter = "all" | "invitations" | "rewards" | "gifts" | "errors";
 
 function cfgEqual(a: ReferralProgramDto, b: ReferralProgramDto): boolean {
@@ -98,7 +99,7 @@ export default function ReferralProgramPage({ onLogout }: { onLogout: () => void
   const [inviterRewardGbEmpty, setInviterRewardGbEmpty] = useState(false);
   const [inviterRewardDaysEmpty, setInviterRewardDaysEmpty] = useState(false);
   const [invitedDiscountEmpty, setInvitedDiscountEmpty] = useState(false);
-  const [mainTab, setMainTab] = useState<MainTab>("settings");
+  const { tab: mainTab, setTab: setMainTab } = usePanelTabParam("/referral-program", REFERRAL_TABS);
   const [eventFilter, setEventFilter] = useState<EventFilter>("all");
   const [eventSearch, setEventSearch] = useState("");
   const [eventFrom, setEventFrom] = useState("");
@@ -593,7 +594,7 @@ export default function ReferralProgramPage({ onLogout }: { onLogout: () => void
                       className="comms-textarea"
                       value={cfg.invite_copy_text}
                       onChange={(e) => setCfg({ ...cfg, invite_copy_text: e.target.value })}
-                      placeholder="Я пользуюсь этим VPN, вот тебе скидка на первую покупку!"
+                      placeholder="Я пользуюсь {brand}, вот тебе скидка {discount} на первую покупку!"
                     />
                     <p className="field-hint">Этот текст пользователь сможет скопировать и отправить другу.</p>
                     <p className="field-hint">

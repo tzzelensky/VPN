@@ -1,6 +1,6 @@
 import { ReactNode, useCallback, useEffect, useRef, useState, type SVGProps } from "react";
 import { NavLink, useLocation, useNavigate } from "react-router-dom";
-import { createUser, listServers, logout, type CreateUserPayload, type ServerDto, type UserDto } from "../api";
+import { createUser, listServers, logout, renewUserSubscription, type CreateUserPayload, type ServerDto, type UserDto } from "../api";
 import { isAdminMobileShell, isAdminMobileScrollArea } from "../adminMobile";
 import { computeDashboardStats, isExpirySoon, isTrafficSoon, remainingTrafficGb, type DashboardStats } from "../dashboardStats";
 import { clearUsersListCache, readUsersListCache } from "../usersListCache";
@@ -261,6 +261,7 @@ export default function DashboardLayout({
   const [deployedServers, setDeployedServers] = useState<ServerDto[]>([]);
   const [createServersLoading, setCreateServersLoading] = useState(false);
   const [createFlash, setCreateFlash] = useState<{ type: "ok" | "err"; text: string } | null>(null);
+  const [renewingUserId, setRenewingUserId] = useState<number | null>(null);
   const shellRef = useRef<HTMLDivElement>(null);
   const drawerRef = useRef<HTMLElement>(null);
   const statsBarRef = useRef<HTMLDivElement>(null);
@@ -539,6 +540,39 @@ export default function DashboardLayout({
     return parts.join(" • ") || "скоро истекает";
   }
 
+  async function onRenewSubscription(u: UserDto) {
+    const trafficNote =
+      u.total_gb > 0
+        ? "Использованный трафик будет обнулён."
+        : "Трафик безлимитный — сброс трафика не нужен.";
+    const ok = panel.confirmDangerous(
+      `Продлить «${u.name}» на 30 дней?\n\nНовый срок стартует сейчас (не +30 к текущему).\n${trafficNote}`,
+    );
+    if (!ok) return;
+    setRenewingUserId(u.id);
+    try {
+      const r = await renewUserSubscription(u.id);
+      await prefetchUsersInBackground({ force: true });
+      notifyUsersChanged();
+      await refreshStats();
+      const until = r.user.expiry_time
+        ? new Date(r.user.expiry_time).toLocaleDateString("ru-RU", {
+            day: "2-digit",
+            month: "2-digit",
+            year: "numeric",
+          })
+        : "—";
+      setCreateFlash({
+        type: "ok",
+        text: `«${u.name}» продлена до ${until}${r.traffic_reset ? ", трафик обнулён" : ""}.`,
+      });
+    } catch (e) {
+      setCreateFlash({ type: "err", text: String(e) });
+    } finally {
+      setRenewingUserId(null);
+    }
+  }
+
   const drawerVisible = drawerOpen || drawerDragX !== null;
   const drawerBackdropOpacity =
     drawerDragX !== null && drawerWidth > 0 ? Math.min(1, drawerDragX / drawerWidth) : drawerOpen ? 1 : 0;
@@ -664,17 +698,47 @@ export default function DashboardLayout({
                         <div className="admin-stats-popover-empty">Таких подписок сейчас нет.</div>
                       ) : (
                         expiringSoonUsers.map((u) => (
-                          <div key={u.id} className="admin-stats-popover-row">
-                            <span className="admin-stats-popover-name">{u.name}</span>
-                            <span className="admin-stats-popover-meta">
-                              {u.expiry_auto_notify_status && isExpirySoon(u, now) ? (
-                                <ExpiryNotifyStatusIcon
-                                  status={u.expiry_auto_notify_status}
-                                  hint={u.expiry_auto_notify_hint}
-                                />
-                              ) : null}
-                              {formatSoonHint(u)}
-                            </span>
+                          <div key={u.id} className="admin-stats-popover-row admin-stats-popover-row--renew">
+                            <div className="admin-stats-popover-main">
+                              <span className="admin-stats-popover-name">{u.name}</span>
+                              <span className="admin-stats-popover-meta">
+                                {u.expiry_auto_notify_status && isExpirySoon(u, now) ? (
+                                  <ExpiryNotifyStatusIcon
+                                    status={u.expiry_auto_notify_status}
+                                    hint={u.expiry_auto_notify_hint}
+                                  />
+                                ) : null}
+                                {formatSoonHint(u)}
+                              </span>
+                            </div>
+                            <button
+                              type="button"
+                              className={`admin-renew-sub-btn${renewingUserId === u.id ? " is-busy" : ""}`}
+                              disabled={renewingUserId != null}
+                              title="Продлить подписку на 30 дней"
+                              aria-label={`Продлить подписку «${u.name}» на 30 дней`}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                void onRenewSubscription(u);
+                              }}
+                            >
+                              <svg
+                                className="admin-renew-sub-btn__icon"
+                                viewBox="0 0 24 24"
+                                width="15"
+                                height="15"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="2"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                aria-hidden
+                              >
+                                <path d="M21 12a9 9 0 1 1-2.6-6.3" />
+                                <path d="M21 3v6h-6" />
+                              </svg>
+                              <span className="admin-renew-sub-btn__label">+30</span>
+                            </button>
                           </div>
                         ))
                       )}

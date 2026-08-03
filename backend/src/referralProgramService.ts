@@ -85,7 +85,7 @@ function inviterRewardText(r: ReferralRewardRow, claimed: boolean): string {
 
 export function getReferralMeta(): ReferralMetaDto {
   const bot = (process.env.TELEGRAM_BOT_USERNAME ?? "").trim().replace(/^@/, "");
-  const brand = getPanelSettings().panel.brandName.trim() || "HSN";
+  const brand = getPanelSettings().panel.brandName.trim() || "HSN VPN";
   return {
     bot_username: bot,
     brand_name: brand,

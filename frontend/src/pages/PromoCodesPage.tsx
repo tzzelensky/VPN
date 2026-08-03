@@ -18,6 +18,9 @@ import {
   type PromoCodeUsageDto,
   type SubscriptionShopDto,
 } from "../api";
+import { usePanelTabParam } from "../lib/panelTabRoute";
+
+const PROMO_TABS = ["promos", "discounts"] as const;
 
 function toExpiryIsoFromMs(ms: number): string {
   if (!Number.isFinite(ms) || ms <= 0) return "";
@@ -28,7 +31,7 @@ function toExpiryIsoFromMs(ms: number): string {
 }
 
 export default function PromoCodesPage({ onLogout }: { onLogout: () => void }) {
-  const [tab, setTab] = useState<"promos" | "discounts">("promos");
+  const { tab, setTab } = usePanelTabParam("/promo-codes", PROMO_TABS);
   const [promos, setPromos] = useState<PromoCodeDto[]>([]);
   const [loading, setLoading] = useState(true);
   const [shop, setShop] = useState<SubscriptionShopDto | null>(null);

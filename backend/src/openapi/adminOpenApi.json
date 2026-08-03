@@ -31,12 +31,6 @@
       "name": "Dropper game"
     },
     {
-      "name": "Experiment subscription"
-    },
-    {
-      "name": "Experiments"
-    },
-    {
       "name": "MySub (WebApp)"
     },
     {
@@ -507,6 +501,139 @@
         ],
         "summary": "Журнал отправленных сообщений с фильтром по датам.",
         "description": "Журнал отправленных сообщений с фильтром по датам.\n\n**HTTP:** `GET /api/communications/history`\n\n**Файл:** `communications.ts`\n\n**Требуется сессия** (cookie `tzadmin.sid`)",
+        "responses": {
+          "200": {
+            "description": "Успех"
+          },
+          "400": {
+            "description": "Неверный запрос",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Не авторизован",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Не найдено"
+          },
+          "500": {
+            "description": "Ошибка сервера"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ]
+      }
+    },
+    "/api/communications/history/{id}": {
+      "delete": {
+        "tags": [
+          "Communications"
+        ],
+        "summary": "`DELETE /api/communications/history/{id}`",
+        "description": "**HTTP:** `DELETE /api/communications/history/{id}`\n\n**Файл:** `communications.ts`\n\n**Требуется сессия**",
+        "responses": {
+          "200": {
+            "description": "Успех"
+          },
+          "400": {
+            "description": "Неверный запрос",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Не авторизован",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Не найдено"
+          },
+          "500": {
+            "description": "Ошибка сервера"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ]
+      },
+      "get": {
+        "tags": [
+          "Communications"
+        ],
+        "summary": "`GET /api/communications/history/{id}`",
+        "description": "**HTTP:** `GET /api/communications/history/{id}`\n\n**Файл:** `communications.ts`\n\n**Требуется сессия**",
+        "responses": {
+          "200": {
+            "description": "Успех"
+          },
+          "400": {
+            "description": "Неверный запрос",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Не авторизован",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Не найдено"
+          },
+          "500": {
+            "description": "Ошибка сервера"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ]
+      }
+    },
+    "/api/communications/history/{id}/photo": {
+      "get": {
+        "tags": [
+          "Communications"
+        ],
+        "summary": "`GET /api/communications/history/{id}/photo`",
+        "description": "**HTTP:** `GET /api/communications/history/{id}/photo`\n\n**Файл:** `communications.ts`\n\n**Требуется сессия**",
         "responses": {
           "200": {
             "description": "Успех"
@@ -4019,8 +4146,8 @@
         "tags": [
           "Dropper game"
         ],
-        "summary": "Устанавливает пул билетов для клиента (по tg_id).",
-        "description": "Устанавливает пул билетов для клиента (по tg_id).\n\n**HTTP:** `POST /api/dropper-game/set-user-tickets`\n\n**Файл:** `dropperGame.ts`\n\n**Требуется сессия** (cookie `tzadmin.sid`)",
+        "summary": "Устанавливает число билетов для конкретной подписки.",
+        "description": "Устанавливает число билетов для конкретной подписки.\n\n**HTTP:** `POST /api/dropper-game/set-user-tickets`\n\n**Файл:** `dropperGame.ts`\n\n**Требуется сессия** (cookie `tzadmin.sid`)",
         "responses": {
           "200": {
             "description": "Успех"
@@ -4067,634 +4194,6 @@
             }
           }
         }
-      }
-    },
-    "/api/exp-sub/{token}": {
-      "get": {
-        "tags": [
-          "Experiment subscription"
-        ],
-        "summary": "Публичная выдача экспериментальной подписки по токену.",
-        "description": "Публичная выдача экспериментальной подписки по токену.\n\n**HTTP:** `GET /api/exp-sub/{token}`\n\n**Файл:** `experimentSubscription.ts`",
-        "responses": {
-          "200": {
-            "description": "Успех"
-          },
-          "400": {
-            "description": "Неверный запрос",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Не авторизован",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Не найдено"
-          },
-          "500": {
-            "description": "Ошибка сервера"
-          }
-        }
-      }
-    },
-    "/api/experiments/": {
-      "get": {
-        "tags": [
-          "Experiments"
-        ],
-        "summary": "Список активных VPN-экспериментов.",
-        "description": "Список активных VPN-экспериментов.\n\n**HTTP:** `GET /api/experiments/`\n\n**Файл:** `experiments.ts`\n\n**Требуется сессия** (cookie `tzadmin.sid`)",
-        "responses": {
-          "200": {
-            "description": "Успех"
-          },
-          "400": {
-            "description": "Неверный запрос",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Не авторизован",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Не найдено"
-          },
-          "500": {
-            "description": "Ошибка сервера"
-          }
-        },
-        "security": [
-          {
-            "sessionCookie": []
-          }
-        ]
-      },
-      "post": {
-        "tags": [
-          "Experiments"
-        ],
-        "summary": "Создаёт новый эксперимент с inbound на сервере.",
-        "description": "Создаёт новый эксперимент с inbound на сервере.\n\n**HTTP:** `POST /api/experiments/`\n\n**Файл:** `experiments.ts`\n\n**Требуется сессия** (cookie `tzadmin.sid`)",
-        "responses": {
-          "200": {
-            "description": "Успех"
-          },
-          "400": {
-            "description": "Неверный запрос",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Не авторизован",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Не найдено"
-          },
-          "500": {
-            "description": "Ошибка сервера"
-          }
-        },
-        "security": [
-          {
-            "sessionCookie": []
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "additionalProperties": true
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/experiments/{id}": {
-      "delete": {
-        "tags": [
-          "Experiments"
-        ],
-        "summary": "Удаляет эксперимент и inbound с сервера.",
-        "description": "Удаляет эксперимент и inbound с сервера.\n\n**HTTP:** `DELETE /api/experiments/{id}`\n\n**Файл:** `experiments.ts`\n\n**Требуется сессия** (cookie `tzadmin.sid`)",
-        "responses": {
-          "200": {
-            "description": "Успех"
-          },
-          "400": {
-            "description": "Неверный запрос",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Не авторизован",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Не найдено"
-          },
-          "500": {
-            "description": "Ошибка сервера"
-          }
-        },
-        "security": [
-          {
-            "sessionCookie": []
-          }
-        ]
-      }
-    },
-    "/api/experiments/{id}/client-json": {
-      "get": {
-        "tags": [
-          "Experiments"
-        ],
-        "summary": "Клиентский JSON для подключения к эксперименту.",
-        "description": "Клиентский JSON для подключения к эксперименту.\n\n**HTTP:** `GET /api/experiments/{id}/client-json`\n\n**Файл:** `experiments.ts`\n\n**Требуется сессия** (cookie `tzadmin.sid`)",
-        "responses": {
-          "200": {
-            "description": "Успех"
-          },
-          "400": {
-            "description": "Неверный запрос",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Не авторизован",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Не найдено"
-          },
-          "500": {
-            "description": "Ошибка сервера"
-          }
-        },
-        "security": [
-          {
-            "sessionCookie": []
-          }
-        ]
-      }
-    },
-    "/api/experiments/{id}/diagnose": {
-      "post": {
-        "tags": [
-          "Experiments"
-        ],
-        "summary": "Запускает диагностику конфигурации эксперимента.",
-        "description": "Запускает диагностику конфигурации эксперимента.\n\n**HTTP:** `POST /api/experiments/{id}/diagnose`\n\n**Файл:** `experiments.ts`\n\n**Требуется сессия** (cookie `tzadmin.sid`)",
-        "responses": {
-          "200": {
-            "description": "Успех"
-          },
-          "400": {
-            "description": "Неверный запрос",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Не авторизован",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Не найдено"
-          },
-          "500": {
-            "description": "Ошибка сервера"
-          }
-        },
-        "security": [
-          {
-            "sessionCookie": []
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "additionalProperties": true
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/experiments/{id}/diagnostic-report": {
-      "get": {
-        "tags": [
-          "Experiments"
-        ],
-        "summary": "Подробный отчёт диагностики эксперимента.",
-        "description": "Подробный отчёт диагностики эксперимента.\n\n**HTTP:** `GET /api/experiments/{id}/diagnostic-report`\n\n**Файл:** `experiments.ts`\n\n**Требуется сессия** (cookie `tzadmin.sid`)",
-        "responses": {
-          "200": {
-            "description": "Успех"
-          },
-          "400": {
-            "description": "Неверный запрос",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Не авторизован",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Не найдено"
-          },
-          "500": {
-            "description": "Ошибка сервера"
-          }
-        },
-        "security": [
-          {
-            "sessionCookie": []
-          }
-        ]
-      }
-    },
-    "/api/experiments/{id}/note": {
-      "patch": {
-        "tags": [
-          "Experiments"
-        ],
-        "summary": "Сохраняет заметку администратора о результате теста.",
-        "description": "Сохраняет заметку администратора о результате теста.\n\n**HTTP:** `PATCH /api/experiments/{id}/note`\n\n**Файл:** `experiments.ts`\n\n**Требуется сессия** (cookie `tzadmin.sid`)",
-        "responses": {
-          "200": {
-            "description": "Успех"
-          },
-          "400": {
-            "description": "Неверный запрос",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Не авторизован",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Не найдено"
-          },
-          "500": {
-            "description": "Ошибка сервера"
-          }
-        },
-        "security": [
-          {
-            "sessionCookie": []
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "additionalProperties": true
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/experiments/{id}/port-check": {
-      "post": {
-        "tags": [
-          "Experiments"
-        ],
-        "summary": "Проверяет доступность порта эксперимента снаружи.",
-        "description": "Проверяет доступность порта эксперимента снаружи.\n\n**HTTP:** `POST /api/experiments/{id}/port-check`\n\n**Файл:** `experiments.ts`\n\n**Требуется сессия** (cookie `tzadmin.sid`)",
-        "responses": {
-          "200": {
-            "description": "Успех"
-          },
-          "400": {
-            "description": "Неверный запрос",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Не авторизован",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Не найдено"
-          },
-          "500": {
-            "description": "Ошибка сервера"
-          }
-        },
-        "security": [
-          {
-            "sessionCookie": []
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "additionalProperties": true
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/experiments/activate-mobile": {
-      "post": {
-        "tags": [
-          "Experiments"
-        ],
-        "summary": "Быстро активирует мобильный пресет на сервере.",
-        "description": "Быстро активирует мобильный пресет на сервере.\n\n**HTTP:** `POST /api/experiments/activate-mobile`\n\n**Файл:** `experiments.ts`\n\n**Требуется сессия** (cookie `tzadmin.sid`)",
-        "responses": {
-          "200": {
-            "description": "Успех"
-          },
-          "400": {
-            "description": "Неверный запрос",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Не авторизован",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Не найдено"
-          },
-          "500": {
-            "description": "Ошибка сервера"
-          }
-        },
-        "security": [
-          {
-            "sessionCookie": []
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "additionalProperties": true
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/experiments/mobile-test-info": {
-      "get": {
-        "tags": [
-          "Experiments"
-        ],
-        "summary": "Подсказки для честного мобильного тестирования на порту 443.",
-        "description": "Подсказки для честного мобильного тестирования на порту 443.\n\n**HTTP:** `GET /api/experiments/mobile-test-info`\n\n**Файл:** `experiments.ts`\n\n**Требуется сессия** (cookie `tzadmin.sid`)",
-        "responses": {
-          "200": {
-            "description": "Успех"
-          },
-          "400": {
-            "description": "Неверный запрос",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Не авторизован",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Не найдено"
-          },
-          "500": {
-            "description": "Ошибка сервера"
-          }
-        },
-        "security": [
-          {
-            "sessionCookie": []
-          }
-        ]
-      }
-    },
-    "/api/experiments/port-plan": {
-      "get": {
-        "tags": [
-          "Experiments"
-        ],
-        "summary": "План занятости порта на сервере перед созданием эксперимента.",
-        "description": "План занятости порта на сервере перед созданием эксперимента.\n\n**HTTP:** `GET /api/experiments/port-plan`\n\n**Файл:** `experiments.ts`\n\n**Требуется сессия** (cookie `tzadmin.sid`)",
-        "responses": {
-          "200": {
-            "description": "Успех"
-          },
-          "400": {
-            "description": "Неверный запрос",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Не авторизован",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Не найдено"
-          },
-          "500": {
-            "description": "Ошибка сервера"
-          }
-        },
-        "security": [
-          {
-            "sessionCookie": []
-          }
-        ]
-      }
-    },
-    "/api/experiments/presets": {
-      "get": {
-        "tags": [
-          "Experiments"
-        ],
-        "summary": "Список пресетов для VPN-экспериментов и предупреждения.",
-        "description": "Список пресетов для VPN-экспериментов и предупреждения.\n\n**HTTP:** `GET /api/experiments/presets`\n\n**Файл:** `experiments.ts`\n\n**Требуется сессия** (cookie `tzadmin.sid`)",
-        "responses": {
-          "200": {
-            "description": "Успех"
-          },
-          "400": {
-            "description": "Неверный запрос",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Не авторизован",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Не найдено"
-          },
-          "500": {
-            "description": "Ошибка сервера"
-          }
-        },
-        "security": [
-          {
-            "sessionCookie": []
-          }
-        ]
       }
     },
     "/api/health": {
@@ -7773,6 +7272,61 @@
         }
       }
     },
+    "/api/servers/{id}/connect-hysteria2": {
+      "post": {
+        "tags": [
+          "Servers"
+        ],
+        "summary": "`POST /api/servers/{id}/connect-hysteria2`",
+        "description": "**HTTP:** `POST /api/servers/{id}/connect-hysteria2`\n\n**Файл:** `servers.ts`\n\n**Требуется сессия**",
+        "responses": {
+          "200": {
+            "description": "Успех"
+          },
+          "400": {
+            "description": "Неверный запрос",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Не авторизован",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Не найдено"
+          },
+          "500": {
+            "description": "Ошибка сервера"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/servers/{id}/deploy-vless": {
       "post": {
         "tags": [
@@ -7780,6 +7334,61 @@
         ],
         "summary": "Разворачивает или синхронизирует VLESS-конфигурацию на сервере.",
         "description": "Разворачивает или синхронизирует VLESS-конфигурацию на сервере.\n\n**HTTP:** `POST /api/servers/{id}/deploy-vless`\n\n**Файл:** `servers.ts`\n\n**Требуется сессия** (cookie `tzadmin.sid`)",
+        "responses": {
+          "200": {
+            "description": "Успех"
+          },
+          "400": {
+            "description": "Неверный запрос",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Не авторизован",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Не найдено"
+          },
+          "500": {
+            "description": "Ошибка сервера"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/servers/{id}/hysteria2-subscriptions": {
+      "post": {
+        "tags": [
+          "Servers"
+        ],
+        "summary": "`POST /api/servers/{id}/hysteria2-subscriptions`",
+        "description": "**HTTP:** `POST /api/servers/{id}/hysteria2-subscriptions`\n\n**Файл:** `servers.ts`\n\n**Требуется сессия**",
         "responses": {
           "200": {
             "description": "Успех"
@@ -8719,6 +8328,94 @@
         }
       }
     },
+    "/api/settings/ai-logs": {
+      "delete": {
+        "tags": [
+          "Settings"
+        ],
+        "summary": "`DELETE /api/settings/ai-logs`",
+        "description": "**HTTP:** `DELETE /api/settings/ai-logs`\n\n**Файл:** `settings.ts`\n\n**Требуется сессия**",
+        "responses": {
+          "200": {
+            "description": "Успех"
+          },
+          "400": {
+            "description": "Неверный запрос",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Не авторизован",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Не найдено"
+          },
+          "500": {
+            "description": "Ошибка сервера"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ]
+      },
+      "get": {
+        "tags": [
+          "Settings"
+        ],
+        "summary": "`GET /api/settings/ai-logs`",
+        "description": "**HTTP:** `GET /api/settings/ai-logs`\n\n**Файл:** `settings.ts`\n\n**Требуется сессия**",
+        "responses": {
+          "200": {
+            "description": "Успех"
+          },
+          "400": {
+            "description": "Неверный запрос",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Не авторизован",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Не найдено"
+          },
+          "500": {
+            "description": "Ошибка сервера"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ]
+      }
+    },
     "/api/settings/avatar": {
       "delete": {
         "tags": [
@@ -8867,6 +8564,51 @@
         ],
         "summary": "Скачивает настройки панели в JSON.",
         "description": "Скачивает настройки панели в JSON.\n\n**HTTP:** `GET /api/settings/export`\n\n**Файл:** `settings.ts`\n\n**Требуется сессия** (cookie `tzadmin.sid`)",
+        "responses": {
+          "200": {
+            "description": "Успех"
+          },
+          "400": {
+            "description": "Неверный запрос",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Не авторизован",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Не найдено"
+          },
+          "500": {
+            "description": "Ошибка сервера"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ]
+      }
+    },
+    "/api/settings/gemini-api-key": {
+      "get": {
+        "tags": [
+          "Settings"
+        ],
+        "summary": "`GET /api/settings/gemini-api-key`",
+        "description": "**HTTP:** `GET /api/settings/gemini-api-key`\n\n**Файл:** `settings.ts`\n\n**Требуется сессия**",
         "responses": {
           "200": {
             "description": "Успех"
@@ -9158,6 +8900,147 @@
             "sessionCookie": []
           }
         ]
+      }
+    },
+    "/api/settings/telegram-menu-image": {
+      "delete": {
+        "tags": [
+          "Settings"
+        ],
+        "summary": "`DELETE /api/settings/telegram-menu-image`",
+        "description": "**HTTP:** `DELETE /api/settings/telegram-menu-image`\n\n**Файл:** `settings.ts`\n\n**Требуется сессия**",
+        "responses": {
+          "200": {
+            "description": "Успех"
+          },
+          "400": {
+            "description": "Неверный запрос",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Не авторизован",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Не найдено"
+          },
+          "500": {
+            "description": "Ошибка сервера"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ]
+      },
+      "get": {
+        "tags": [
+          "Settings"
+        ],
+        "summary": "`GET /api/settings/telegram-menu-image`",
+        "description": "**HTTP:** `GET /api/settings/telegram-menu-image`\n\n**Файл:** `settings.ts`\n\n**Требуется сессия**",
+        "responses": {
+          "200": {
+            "description": "Успех"
+          },
+          "400": {
+            "description": "Неверный запрос",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Не авторизован",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Не найдено"
+          },
+          "500": {
+            "description": "Ошибка сервера"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "Settings"
+        ],
+        "summary": "`POST /api/settings/telegram-menu-image`",
+        "description": "**HTTP:** `POST /api/settings/telegram-menu-image`\n\n**Файл:** `settings.ts`\n\n**Требуется сессия**",
+        "responses": {
+          "200": {
+            "description": "Успех"
+          },
+          "400": {
+            "description": "Неверный запрос",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Не авторизован",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Не найдено"
+          },
+          "500": {
+            "description": "Ошибка сервера"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          }
+        }
       }
     },
     "/api/settings/telegram/test-bot": {
@@ -11569,6 +11452,51 @@
         }
       }
     },
+    "/api/users/{id}/config-vault-links": {
+      "get": {
+        "tags": [
+          "Users"
+        ],
+        "summary": "`GET /api/users/{id}/config-vault-links`",
+        "description": "**HTTP:** `GET /api/users/{id}/config-vault-links`\n\n**Файл:** `users.ts`\n\n**Требуется сессия**",
+        "responses": {
+          "200": {
+            "description": "Успех"
+          },
+          "400": {
+            "description": "Неверный запрос",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Не авторизован",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Не найдено"
+          },
+          "500": {
+            "description": "Ошибка сервера"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ]
+      }
+    },
     "/api/users/{id}/device-slots": {
       "post": {
         "tags": [
@@ -11822,6 +11750,61 @@
             "sessionCookie": []
           }
         ]
+      }
+    },
+    "/api/users/{id}/renew-subscription": {
+      "post": {
+        "tags": [
+          "Users"
+        ],
+        "summary": "`POST /api/users/{id}/renew-subscription`",
+        "description": "**HTTP:** `POST /api/users/{id}/renew-subscription`\n\n**Файл:** `users.ts`\n\n**Требуется сессия**",
+        "responses": {
+          "200": {
+            "description": "Успех"
+          },
+          "400": {
+            "description": "Неверный запрос",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Не авторизован",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Не найдено"
+          },
+          "500": {
+            "description": "Ошибка сервера"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          }
+        }
       }
     },
     "/api/users/{id}/reset-traffic": {
@@ -13735,13 +13718,13 @@
         }
       }
     },
-    "/comfort": {
-      "get": {
+    "/api/whitelist-vault/users/{userId}/grant": {
+      "post": {
         "tags": [
-          "System"
+          "Whitelist vault"
         ],
-        "summary": "Отдаёт decoy HTML-страницу вместо реальной подписки VPN.",
-        "description": "Отдаёт decoy HTML-страницу вместо реальной подписки VPN.\n\n**HTTP:** `GET /comfort`\n\n**Файл:** `index.ts`",
+        "summary": "`POST /api/whitelist-vault/users/{userId}/grant`",
+        "description": "**HTTP:** `POST /api/whitelist-vault/users/{userId}/grant`\n\n**Файл:** `whitelistVault.ts`\n\n**Требуется сессия**",
         "responses": {
           "200": {
             "description": "Успех"
@@ -13772,16 +13755,86 @@
           "500": {
             "description": "Ошибка сервера"
           }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          }
         }
       }
     },
-    "/exp-sub/{token}": {
+    "/api/whitelist-vault/users/{userId}/revoke": {
+      "post": {
+        "tags": [
+          "Whitelist vault"
+        ],
+        "summary": "`POST /api/whitelist-vault/users/{userId}/revoke`",
+        "description": "**HTTP:** `POST /api/whitelist-vault/users/{userId}/revoke`\n\n**Файл:** `whitelistVault.ts`\n\n**Требуется сессия**",
+        "responses": {
+          "200": {
+            "description": "Успех"
+          },
+          "400": {
+            "description": "Неверный запрос",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Не авторизован",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Не найдено"
+          },
+          "500": {
+            "description": "Ошибка сервера"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          }
+        }
+      }
+    },
+    "/comfort": {
       "get": {
         "tags": [
-          "Experiment subscription"
+          "System"
         ],
-        "summary": "Публичная выдача экспериментальной подписки по токену.",
-        "description": "Публичная выдача экспериментальной подписки по токену.\n\n**HTTP:** `GET /exp-sub/{token}`\n\n**Файл:** `index.ts`",
+        "summary": "Отдаёт decoy HTML-страницу вместо реальной подписки VPN.",
+        "description": "Отдаёт decoy HTML-страницу вместо реальной подписки VPN.\n\n**HTTP:** `GET /comfort`\n\n**Файл:** `index.ts`",
         "responses": {
           "200": {
             "description": "Успех"

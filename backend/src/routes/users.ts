@@ -11,8 +11,11 @@ import {
   getUser,
   listUsers,
   removeUserDeviceSlot,
+  serversForUserSubscription,
+  snapExpiryTimeToNoonLocal,
   updateUserRow,
   userAllowedOnServers,
+  userHasActiveSubscription,
   type CreateUserInput,
   type UserRow,
 } from "../db.js";
@@ -27,14 +30,21 @@ import { logCommunicationMessage } from "../communicationLog.js";
 import { sendTelegramMessage } from "../telegram/api.js";
 import { sendExpiredSubscriptionReminder, sendExpiryRenewalReminder } from "../telegram/expiryNotify.js";
 import { expiryAutoNotifyStatusForUser } from "../expiryAutoNotifyStatus.js";
-import { configVaultLinksForUser } from "../configVaultDb.js";
-import { subscriptionVlessLinksForUser } from "../subscriptionLinks.js";
+import { configVaultLinksCountForUser, configVaultLinksForUser } from "../configVaultDb.js";
+import {
+  getWhitelistAccessState,
+  subscriptionWhitelistUrisForUser,
+  sweepExpiredManualWhitelistGrants,
+  userHasPaidWhitelistProduct,
+} from "../whitelistVaultDb.js";
+import { HAPP_WHITELIST_SUBSCRIPTION_LINE } from "../happWhitelistLine.js";
 import { runAutoTrafficNotificationsOnce } from "../telegram/trafficNotify.js";
 import { pullTrafficFromAllDeployedServers } from "../xrayStatsPull.js";
+import { pullHysteria2TrafficFromAllServers } from "../hysteria2TrafficPull.js";
+import { pushHysteria2ClientsToAllDeployedServers } from "../hysteria2Deploy.js";
 import { refreshMissingSubscriptionHintsIfDue } from "../subscriptionHintsRefresh.js";
 import { resetUserTrafficCounters } from "../trafficReset.js";
 import { coerceExtraVlessLinksInput, isValidVlessUri } from "../extraVless.js";
-import { userHasPaidWhitelistProduct } from "../whitelistVaultDb.js";
 import { isDeviceLimitGloballyEnabled, isDeviceLimitActiveForUser } from "../deviceLimitEffective.js";
 import { activeDeviceSlots, userDeviceTotalLimit } from "../userDeviceSlots.js";
 import { migrateUserDeviceSlotsFromOnline } from "../deviceLimitMigration.js";
@@ -102,13 +112,35 @@ router.post("/sync-stats", async (_req, res) => {
         });
       }
     }
-    const updated = applyUsersTrafficSnapshot(rows, Date.now());
+    let updated = applyUsersTrafficSnapshot(rows, Date.now(), { source: "xray" });
+
+    try {
+      const hy2 = await pullHysteria2TrafficFromAllServers();
+      errors.push(...hy2.errors);
+      warns.push(...hy2.warns);
+      const hy2Rows: Array<{ vless_uuid: string; traffic_up: number; traffic_down: number }> = [];
+      for (const u of listUsers()) {
+        const k = u.vless_uuid.trim().toLowerCase();
+        const agg = hy2.byUuid.get(k) ?? hy2.byUuid.get(u.vless_uuid);
+        if (!agg) continue;
+        hy2Rows.push({
+          vless_uuid: u.vless_uuid,
+          traffic_up: Math.max(0, Math.floor(Number(agg.up) || 0)),
+          traffic_down: Math.max(0, Math.floor(Number(agg.down) || 0)),
+        });
+      }
+      updated += applyUsersTrafficSnapshot(hy2Rows, Date.now(), { source: "hysteria2" });
+    } catch (e) {
+      warns.push(`hysteria2-stats: ${e instanceof Error ? e.message : String(e)}`);
+    }
+
     const afterUsers = listUsers();
     const accessChanged = afterUsers.some((u) => (wasAllowed.get(u.id) ?? false) !== userAllowedOnServers(u));
     if (accessChanged) {
       try {
         // Если лимит исчерпан (или, наоборот, снова появился доступ), сразу синхронизируем UUID на узлы.
         await pushClientListToAllDeployedServers();
+        await pushHysteria2ClientsToAllDeployedServers();
       } catch (e) {
         warns.push(`push-after-sync: ${e instanceof Error ? e.message : String(e)}`);
       }
@@ -149,11 +181,25 @@ function deviceSlotDto(u: UserRow, slot: UserRow["device_slots"][number]) {
 
 function subscriptionNodesCount(u: UserRow): number {
   if (!userAllowedOnServers(u)) return 0;
-  return subscriptionVlessLinksForUser(u).length;
+  const serverN = serversForUserSubscription(u).length;
+  const extraN = (u.extra_vless_links ?? []).filter((x) => String(x.uri ?? "").trim()).length;
+  const vaultN = configVaultLinksCountForUser(u);
+  const wlN = subscriptionWhitelistUrisForUser(u).length;
+  let n = serverN + extraN + vaultN + wlN;
+  if (
+    u.whitelist_happ_enabled === 1 &&
+    userHasActiveSubscription(u) &&
+    getWhitelistAccessState(u).status === "active"
+  ) {
+    n += Math.min(4, serverN);
+    if (HAPP_WHITELIST_SUBSCRIPTION_LINE.trim()) n += 1;
+  }
+  return n;
 }
 
-function userDto(u: UserRow) {
+function userDto(u: UserRow, opts?: { includeVaultLinks?: boolean }) {
   const expiryAuto = expiryAutoNotifyStatusForUser(u);
+  const vaultCount = configVaultLinksCountForUser(u);
   return {
     id: u.id,
     name: u.name,
@@ -177,6 +223,7 @@ function userDto(u: UserRow) {
     reality_spx: u.reality_spx,
     subscription_server_count: u.subscription_server_count,
     subscription_server_ids: u.subscription_server_ids,
+    subscription_entry_order: u.subscription_entry_order ?? [],
     device_limit_enabled: u.device_limit_enabled === 1,
     device_limit_global_enabled: isDeviceLimitGloballyEnabled(),
     device_limit_active: isDeviceLimitActiveForUser(u),
@@ -194,7 +241,9 @@ function userDto(u: UserRow) {
     dropper_tickets: u.dropper_tickets,
     dropper_wins: dropperWinsForClientRow(u),
     extra_vless_links: u.extra_vless_links ?? [],
-    config_vault_links: configVaultLinksForUser(u),
+    /** Полные URI только по запросу (модалка); в списке — пусто + count. */
+    config_vault_links: opts?.includeVaultLinks ? configVaultLinksForUser(u) : [],
+    config_vault_links_count: vaultCount,
     subscription_nodes_count: subscriptionNodesCount(u),
     expiry_auto_notify_status: expiryAuto.status,
     expiry_auto_notify_hint: expiryAuto.hint,
@@ -204,7 +253,18 @@ function userDto(u: UserRow) {
 }
 
 router.get("/", (_req, res) => {
-  res.json(listUsers().filter((u) => u.is_test_subscription !== 1).map(userDto));
+  sweepExpiredManualWhitelistGrants();
+  res.json(listUsers().filter((u) => u.is_test_subscription !== 1).map((u) => userDto(u)));
+});
+
+router.get("/:id(\\d+)/config-vault-links", (req, res) => {
+  const id = Number(req.params.id);
+  const u = getUser(id);
+  if (!u) {
+    res.status(404).json({ error: "not_found" });
+    return;
+  }
+  res.json({ links: configVaultLinksForUser(u) });
 });
 
 function parseCreateBody(req: import("express").Request): CreateUserInput & { name?: string } {
@@ -241,6 +301,9 @@ function parseCreateBody(req: import("express").Request): CreateUserInput & { na
       b.subscription_server_count != null ? Number(b.subscription_server_count) : undefined,
     subscription_server_ids: Array.isArray(b.subscription_server_ids)
       ? (b.subscription_server_ids as unknown[]).map((x) => Math.floor(Number(x))).filter((n) => Number.isFinite(n) && n > 0)
+      : undefined,
+    subscription_entry_order: Array.isArray(b.subscription_entry_order)
+      ? (b.subscription_entry_order as unknown[]).map((x) => String(x)).filter(Boolean)
       : undefined,
     device_limit_enabled:
       typeof b.device_limit_enabled === "boolean"
@@ -422,6 +485,44 @@ router.post("/:id(\\d+)/reset-traffic", async (req, res) => {
     return;
   }
   res.json({ ok: true, user: userDto(next) });
+});
+
+/** Продление: срок = сейчас + 30 дней (не +30 к текущему). Трафик сбрасывается только если лимит не безлимит. */
+router.post("/:id(\\d+)/renew-subscription", async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const u = getUser(id);
+    if (!u) {
+      res.status(404).json({ error: "not_found" });
+      return;
+    }
+    const DAY_MS = 86_400_000;
+    const newExpiry = snapExpiryTimeToNoonLocal(Date.now() + 30 * DAY_MS);
+    let next = updateUserRow(id, {
+      expiry_time: newExpiry,
+      enable: 1,
+      expiry_warn_sent_day: "",
+      expiry_warn_last_error: "",
+      expiry_warn_error_day: "",
+      expiry_notify_state: "",
+      // Ручные БС не восстанавливаем при продлении — они оплачиваются отдельно.
+    });
+    if (!next) {
+      res.status(404).json({ error: "not_found" });
+      return;
+    }
+    const trafficReset = next.total_gb > 0;
+    if (trafficReset) {
+      next = (await resetUserTrafficCounters(next)) ?? next;
+    }
+    res.json({
+      ok: true,
+      traffic_reset: trafficReset,
+      user: userDto(next),
+    });
+  } catch (e) {
+    res.status(500).json({ error: e instanceof Error ? e.message : String(e) });
+  }
 });
 
 router.post("/bulk-delete-inactive", async (req, res) => {

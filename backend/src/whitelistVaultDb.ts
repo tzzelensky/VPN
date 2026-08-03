@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import type { VlessCheckStatus } from "./configVaultTypes.js";
 import type { UserRow } from "./db.js";
 import { listUsers, updateUserRow, userHasActiveSubscription } from "./db.js";
-import { defaultNameFromUri, maskProxyUri, parseProxyUri, setProxyUriRemark, applyUserRemarkToProxyUri } from "./configVaultUri.js";
+import { defaultNameFromUri, maskProxyUri, parseProxyUri, setProxyUriRemark, applyUserRemarkToProxyUri, isClientJsonProfileUri } from "./configVaultUri.js";
 import { isValidWhitelistVaultUri } from "./extraVless.js";
 import { formatSubscriptionNodeName } from "./subscriptionNodeName.js";
 import {
@@ -36,6 +36,12 @@ type VaultFile = {
   purchases: WhiteListPurchaseRow[];
   settings: WhitelistVaultSettings;
 };
+
+let vaultCache: { mtimeMs: number; vault: VaultFile } | null = null;
+
+function invalidateVaultCache(): void {
+  vaultCache = null;
+}
 
 function emptyVault(): VaultFile {
   return {
@@ -280,7 +286,12 @@ function normalizeCheck(raw: unknown): WhitelistKeyCheckRow | null {
 
 function readVault(): VaultFile {
   try {
-    if (!fs.existsSync(vaultPath)) return emptyVault();
+    if (!fs.existsSync(vaultPath)) {
+      invalidateVaultCache();
+      return emptyVault();
+    }
+    const mtimeMs = fs.statSync(vaultPath).mtimeMs;
+    if (vaultCache && vaultCache.mtimeMs === mtimeMs) return vaultCache.vault;
     const parsed = JSON.parse(fs.readFileSync(vaultPath, "utf8")) as Partial<VaultFile>;
     const keys = (Array.isArray(parsed.keys) ? parsed.keys : [])
       .map((x) => normalizeKey(x))
@@ -310,9 +321,11 @@ function readVault(): VaultFile {
     for (const k of vault.keys) {
       if (k.group_id != null && !groupIds.has(k.group_id)) k.group_id = null;
     }
+    vaultCache = { mtimeMs, vault };
     return vault;
   } catch (e) {
     console.error("[whitelist-vault] read failed:", e instanceof Error ? e.message : e);
+    invalidateVaultCache();
     return emptyVault();
   }
 }
@@ -322,6 +335,11 @@ function writeVault(vault: VaultFile): void {
   const tmp = `${vaultPath}.tmp`;
   fs.writeFileSync(tmp, JSON.stringify(vault, null, 2), "utf8");
   fs.renameSync(tmp, vaultPath);
+  try {
+    vaultCache = { mtimeMs: fs.statSync(vaultPath).mtimeMs, vault };
+  } catch {
+    invalidateVaultCache();
+  }
 }
 
 function mutateVault(fn: (v: VaultFile) => void): void {
@@ -786,11 +804,83 @@ function syncWhitelistHappForAssignment(
 function keyEligibleForSubscription(key: WhitelistKeyRow, user: UserRow): boolean {
   if (!key.active) return false;
   if (key.removed_from_subscriptions) return false;
+  // Ручное назначение: только при живой основной подписке (после истечения флаг снимается).
+  if (user.whitelist_happ_enabled === 1) {
+    if (userHasManualWhitelistGrant(user) && !userHasActiveSubscription(user)) return false;
+    return true;
+  }
   if (userReceivesWhitelistKey(user.id, key)) return true;
   const settings = getWhitelistVaultSettings();
   if (!settings.purchase.issue_unavailable_keys && key.last_check_status === "unavailable") return false;
   if (userHasActiveWhitelistAccess(user) && key.include_in_sale) return true;
   return false;
+}
+
+/** Ручное назначение БС (кнопка в админке), не оплаченный продукт. */
+export function userHasManualWhitelistGrant(user: UserRow): boolean {
+  return user.whitelist_happ_enabled === 1 && !userHasPaidWhitelistProduct(user);
+}
+
+/**
+ * Ручные БС действуют только до конца основной подписки.
+ * После истечения флаг снимается — при продлении БС сами не возвращаются.
+ */
+export function clearManualWhitelistGrantIfSubscriptionInactive(user: UserRow): boolean {
+  if (!userHasManualWhitelistGrant(user)) return false;
+  if (userHasActiveSubscription(user)) return false;
+  updateUserRow(user.id, { whitelist_happ_enabled: 0 });
+  return true;
+}
+
+export function sweepExpiredManualWhitelistGrants(): number {
+  let n = 0;
+  for (const u of listUsers()) {
+    if (clearManualWhitelistGrantIfSubscriptionInactive(u)) n += 1;
+  }
+  return n;
+}
+
+/** Включить БС пользователю: в подписку попадут все активные ключи. */
+export function grantWhitelistAccessToUser(userId: number): void {
+  const id = Math.floor(Number(userId));
+  if (!Number.isFinite(id) || id <= 0) throw new Error("Некорректный пользователь");
+  const user = listUsers().find((u) => u.id === id);
+  if (!user) throw new Error("Пользователь не найден");
+  if (!userHasActiveSubscription(user)) {
+    throw new Error("У пользователя нет активной подписки — ручные БС действуют только до её окончания");
+  }
+  updateUserRow(id, { whitelist_happ_enabled: 1 });
+}
+
+/** Снять БС у пользователя (ручное и покупка). */
+export function revokeWhitelistAccessFromUser(userId: number): void {
+  const id = Math.floor(Number(userId));
+  if (!Number.isFinite(id) || id <= 0) throw new Error("Некорректный пользователь");
+  const user = listUsers().find((u) => u.id === id);
+  if (!user) throw new Error("Пользователь не найден");
+  const now = new Date().toISOString();
+  mutateVault((v) => {
+    for (const p of v.purchases) {
+      if (p.user_id !== id) continue;
+      if (p.status === "paid" || p.status === "pending") {
+        p.status = "refunded";
+        p.updated_at = now;
+        p.activation_error = p.activation_error ?? "admin_revoke";
+      }
+    }
+    for (const k of v.keys) {
+      if (k.assignment_mode !== "selected") continue;
+      if (!k.assigned_user_ids.includes(id)) continue;
+      k.assigned_user_ids = k.assigned_user_ids.filter((x) => x !== id);
+      if (k.assigned_user_ids.length === 0) k.assignment_mode = "none";
+      k.updated_at = now;
+    }
+  });
+  updateUserRow(id, {
+    whitelist_happ_enabled: 0,
+    whitelist_active_until: 0,
+    whitelist_purchase_id: "",
+  });
 }
 
 function countActiveWhitelistPurchasers(): number {
@@ -839,10 +929,13 @@ export function userReceivesWhitelistKey(userId: number, key: WhitelistKeyRow): 
 }
 
 export function subscriptionWhitelistUrisForUser(user: UserRow): string[] {
-  return subscriptionWhitelistEntriesForUser(user).map((e) => e.uri);
+  return subscriptionWhitelistEntriesForUser(user)
+    .filter((e) => !isClientJsonProfileUri(e.uri))
+    .map((e) => e.uri);
 }
 
 export type WhitelistSubscriptionEntry = {
+  key_id: number;
   uri: string;
   name: string;
   /** Полный Happ/Xray JSON, если импортировали из JSON. */
@@ -862,11 +955,13 @@ function parseClientJsonObject(raw: string | null | undefined): Record<string, u
 
 export function subscriptionWhitelistEntriesForUser(user: UserRow): WhitelistSubscriptionEntry[] {
   if (!isWhitelistVaultEnabled()) return [];
-  if (!userHasActiveSubscription(user)) return [];
+  clearManualWhitelistGrantIfSubscriptionInactive(user);
+  const fresh = listUsers().find((u) => u.id === user.id) ?? user;
+  if (!userHasActiveSubscription(fresh)) return [];
   const hasManualAssignment = listWhitelistVaultKeys().some(
-    (k) => k.active && userReceivesWhitelistKey(user.id, k),
+    (k) => k.active && userReceivesWhitelistKey(fresh.id, k),
   );
-  if (user.whitelist_happ_enabled !== 1 && !hasManualAssignment) return [];
+  if (fresh.whitelist_happ_enabled !== 1 && !hasManualAssignment) return [];
   const seen = new Set<string>();
   const out: WhitelistSubscriptionEntry[] = [];
   // В Happ сверху раньше добавленные ключи (не по убыванию id как в админке).
@@ -877,12 +972,12 @@ export function subscriptionWhitelistEntriesForUser(user: UserRow): WhitelistSub
     return a.id - b.id;
   });
   for (const k of keysForSub) {
-    if (!keyEligibleForSubscription(k, user)) continue;
+    if (!keyEligibleForSubscription(k, fresh)) continue;
     const raw = k.raw_uri.trim();
     if (!raw) continue;
     const baseName = k.name || defaultNameFromUri(raw);
-    const displayName = formatSubscriptionNodeName(baseName, user.name);
-    const uri = applyUserRemarkToProxyUri(raw, baseName, user.name);
+    const displayName = formatSubscriptionNodeName(baseName, fresh.name);
+    const uri = applyUserRemarkToProxyUri(raw, baseName, fresh.name);
     const key = uri.toLowerCase();
     if (seen.has(key)) continue;
     seen.add(key);
@@ -891,6 +986,7 @@ export function subscriptionWhitelistEntriesForUser(user: UserRow): WhitelistSub
       client_json = { ...client_json, remarks: displayName };
     }
     out.push({
+      key_id: k.id,
       uri,
       name: displayName,
       client_json,
@@ -901,6 +997,17 @@ export function subscriptionWhitelistEntriesForUser(user: UserRow): WhitelistSub
 
 export function userHasWhitelistClientJsonProfiles(user: UserRow): boolean {
   return subscriptionWhitelistEntriesForUser(user).some((e) => e.client_json != null);
+}
+
+/** Уникальные пользователи, у которых реально подключены БС (не сумма назначений по ключам). */
+export function countUsersWithWhitelistConnected(): number {
+  const keys = listWhitelistVaultKeys();
+  return listUsers().filter((u) => {
+    if (u.is_test_subscription === 1) return false;
+    if (u.whitelist_happ_enabled === 1) return true;
+    if (userHasActiveWhitelistAccess(u) && getWhitelistAccessState(u).status === "active") return true;
+    return keys.some((k) => k.active && userReceivesWhitelistKey(u.id, k));
+  }).length;
 }
 
 export function whitelistVaultStats(): {
@@ -915,17 +1022,13 @@ export function whitelistVaultStats(): {
 } {
   const keys = listWhitelistVaultKeys();
   const settings = getWhitelistVaultSettings();
-  let assignedSum = 0;
-  for (const k of keys) {
-    assignedSum += assignedUsersCount(k);
-  }
   return {
     total: keys.length,
     available: keys.filter((k) => k.last_check_status === "available").length,
     unavailable: keys.filter((k) => k.last_check_status === "unavailable").length,
     unstable: keys.filter((k) => k.last_check_status === "unstable").length,
     never: keys.filter((k) => k.last_check_status === "never").length,
-    assigned_users: assignedSum,
+    assigned_users: countUsersWithWhitelistConnected(),
     last_auto_run_at: settings.last_auto_run_at,
     enabled: settings.enabled,
   };
@@ -1379,8 +1482,15 @@ export function importWhitelistVaultUris(
   return { added, skipped_duplicates, errors };
 }
 
-export function whitelistKeyForApi(k: WhitelistKeyRow, includeRaw = false): Record<string, unknown> {
-  const group = k.group_id != null ? getWhitelistVaultGroup(k.group_id) : null;
+export function whitelistKeyForApi(
+  k: WhitelistKeyRow,
+  includeRaw = false,
+  groupsById?: Map<number, WhitelistGroupRow>,
+): Record<string, unknown> {
+  const group =
+    k.group_id != null
+      ? groupsById?.get(k.group_id) ?? getWhitelistVaultGroup(k.group_id)
+      : null;
   const autoRemove = getWhitelistAutoRemoveSettings(k, group);
   const base: Record<string, unknown> = {
     ...k,
@@ -1396,6 +1506,8 @@ export function whitelistKeyForApi(k: WhitelistKeyRow, includeRaw = false): Reco
     delete base.parsed_public_key;
     delete base.parsed_short_id;
   }
+  // client_json тяжёлый — в списке не отдаём (нужен только при редактировании).
+  delete base.client_json;
   return base;
 }
 

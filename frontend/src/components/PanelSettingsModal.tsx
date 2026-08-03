@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   deletePanelAvatar,
+  deletePanelMenuImage,
+  fetchPanelGeminiApiKey,
   fetchPanelSystemInfo,
   fetchPanelTelegramBotToken,
   importPanelSettings,
@@ -9,23 +11,35 @@ import {
   testTelegramAdminMessage,
   testTelegramBot,
   uploadPanelAvatar,
+  uploadPanelMenuImage,
   type PanelSettingsPatchPayload,
 } from "../api";
 import { usePanelSettings } from "../panelSettingsContext";
 import { normalizeSectionOrder, orderSectionsMeta } from "../panelNavUtils";
 import type { PanelSectionKey, PanelSettings } from "../panelSettingsTypes";
 import { readFileAsDataUrl } from "../avatarCrop";
+import { compressImageForPanelUpload } from "../compressAvatar";
 import { PANEL_HINTS } from "../panelSettingsHints";
 import AdminModalBackdrop from "./AdminModalBackdrop";
 import AvatarCropModal from "./AvatarCropModal";
 import { FieldLabel, SettingHint } from "./SettingHint";
 import SettingsToggleRow from "./SettingsToggleRow";
+import VpnDisplaySettingsPanel from "./VpnDisplaySettingsPanel";
 
-type TabId = "main" | "sections" | "telegram" | "appearance" | "security" | "backup" | "about";
+type TabId =
+  | "main"
+  | "sections"
+  | "vpnDisplay"
+  | "telegram"
+  | "appearance"
+  | "security"
+  | "backup"
+  | "about";
 
 const TABS: Array<{ id: TabId; label: string }> = [
   { id: "main", label: "Основное" },
   { id: "sections", label: "Разделы" },
+  { id: "vpnDisplay", label: "Отображение VPN" },
   { id: "telegram", label: "Telegram" },
   { id: "appearance", label: "Внешний вид" },
   { id: "security", label: "Безопасность" },
@@ -38,7 +52,7 @@ function cloneSettings(s: PanelSettings): PanelSettings {
 }
 
 export default function PanelSettingsModal({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const { settings, meta, telegram, applyPatch, refresh, avatarUrl } = usePanelSettings();
+  const { settings, meta, telegram, applyPatch, refresh, avatarUrl, menuImageUrl } = usePanelSettings();
   const [tab, setTab] = useState<TabId>("main");
   const [draft, setDraft] = useState<PanelSettings | null>(null);
   const [dirty, setDirty] = useState(false);
@@ -48,14 +62,21 @@ export default function PanelSettingsModal({ open, onClose }: { open: boolean; o
   const [showToken, setShowToken] = useState(false);
   const [revealedToken, setRevealedToken] = useState<string | null>(null);
   const [tokenRevealBusy, setTokenRevealBusy] = useState(false);
+  const [geminiKeyEdit, setGeminiKeyEdit] = useState("");
+  const [showGeminiKey, setShowGeminiKey] = useState(false);
+  const [revealedGeminiKey, setRevealedGeminiKey] = useState<string | null>(null);
+  const [geminiRevealBusy, setGeminiRevealBusy] = useState(false);
+  const [clearGeminiKey, setClearGeminiKey] = useState(false);
   const [botTest, setBotTest] = useState<{ type: "ok" | "err"; text: string } | null>(null);
   const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
+  const [menuImagePreview, setMenuImagePreview] = useState<string | null>(null);
   const [avatarCropOpen, setAvatarCropOpen] = useState(false);
   const [avatarCropSrc, setAvatarCropSrc] = useState<string | null>(null);
   const [systemInfo, setSystemInfo] = useState<Record<string, unknown> | null>(null);
   const [dragSectionKey, setDragSectionKey] = useState<PanelSectionKey | null>(null);
   const [overSectionKey, setOverSectionKey] = useState<PanelSectionKey | null>(null);
   const avatarInputRef = useRef<HTMLInputElement>(null);
+  const menuImageInputRef = useRef<HTMLInputElement>(null);
   const wasOpenRef = useRef(false);
   const lastSyncedAtRef = useRef(0);
 
@@ -72,6 +93,14 @@ export default function PanelSettingsModal({ open, onClose }: { open: boolean; o
     lastSyncedAtRef.current = settings.updatedAt;
     const cloned = cloneSettings(settings);
     cloned.sectionOrder = normalizeSectionOrder(cloned.sectionOrder ?? settings.sectionOrder);
+    cloned.vpnDisplay = {
+      serverOrder: Array.isArray(cloned.vpnDisplay?.serverOrder)
+        ? [...cloned.vpnDisplay.serverOrder]
+        : [],
+      entryOrder: Array.isArray(cloned.vpnDisplay?.entryOrder)
+        ? [...cloned.vpnDisplay.entryOrder]
+        : [],
+    };
     cloned.panel.subscriptionBanner = {
       ...{
         enabled: false,
@@ -82,6 +111,12 @@ export default function PanelSettingsModal({ open, onClose }: { open: boolean; o
       },
       ...cloned.panel.subscriptionBanner,
     };
+    cloned.telegram = {
+      ...cloned.telegram,
+      menuImagePath: cloned.telegram.menuImagePath ?? null,
+      aiAssistantEnabled: cloned.telegram.aiAssistantEnabled !== false,
+      geminiModel: cloned.telegram.geminiModel || "gemini-2.5-flash-lite",
+    };
     setDraft(cloned);
     setDirty(false);
     setBotTokenEdit("");
@@ -89,6 +124,7 @@ export default function PanelSettingsModal({ open, onClose }: { open: boolean; o
     setRevealedToken(null);
     setBotTest(null);
     setAvatarPreview(null);
+    setMenuImagePreview(null);
     setTab("main");
     setMsg(null);
   }, [open, settings]);
@@ -174,10 +210,16 @@ export default function PanelSettingsModal({ open, onClose }: { open: boolean; o
         },
       };
       if (botTokenEdit.trim()) payload.botToken = botTokenEdit.trim();
+      if (clearGeminiKey) payload.clearGeminiApiKey = true;
+      else if (geminiKeyEdit.trim()) payload.geminiApiKey = geminiKeyEdit.trim();
       const r = await applyPatch(payload);
       lastSyncedAtRef.current = r.settings.updatedAt;
       setDirty(false);
       setBotTokenEdit("");
+      setGeminiKeyEdit("");
+      setClearGeminiKey(false);
+      setShowGeminiKey(false);
+      setRevealedGeminiKey(null);
       setMsg({ type: "ok", text: "Настройки сохранены." });
       if (closeAfter) onClose();
     } catch (e) {
@@ -231,6 +273,35 @@ export default function PanelSettingsModal({ open, onClose }: { open: boolean; o
     }
   }
 
+  async function onMenuImageFile(file: File | null) {
+    if (!file) return;
+    if (file.size > 5 * 1024 * 1024) {
+      setMsg({ type: "err", text: "Файл больше 5 МБ." });
+      return;
+    }
+    setBusy(true);
+    try {
+      const { dataUrl, mime } = await compressImageForPanelUpload(file, { maxSide: 1280, maxBytes: 500_000 });
+      setMenuImagePreview(dataUrl);
+      const uploaded = await uploadPanelMenuImage(dataUrl, mime);
+      setDraft((d) =>
+        d
+          ? {
+              ...d,
+              telegram: { ...d.telegram, menuImagePath: uploaded.settings.telegram.menuImagePath },
+              updatedAt: uploaded.settings.updatedAt,
+            }
+          : d,
+      );
+      await refresh();
+      setMsg({ type: "ok", text: "Изображение меню бота обновлено." });
+    } catch (e) {
+      setMsg({ type: "err", text: String(e) });
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function toggleShowBotToken() {
     if (showToken) {
       setShowToken(false);
@@ -254,9 +325,33 @@ export default function PanelSettingsModal({ open, onClose }: { open: boolean; o
     }
   }
 
+  async function toggleShowGeminiKey() {
+    if (showGeminiKey) {
+      setShowGeminiKey(false);
+      setRevealedGeminiKey(null);
+      return;
+    }
+    if (geminiKeyEdit.trim()) {
+      setShowGeminiKey(true);
+      return;
+    }
+    if (!telegram?.geminiApiKeyConfigured || clearGeminiKey) return;
+    setGeminiRevealBusy(true);
+    try {
+      const { geminiApiKey } = await fetchPanelGeminiApiKey();
+      setRevealedGeminiKey(geminiApiKey);
+      setShowGeminiKey(true);
+    } catch (e) {
+      setMsg({ type: "err", text: `Не удалось получить Gemini API key: ${String(e)}` });
+    } finally {
+      setGeminiRevealBusy(false);
+    }
+  }
+
   if (!open || !draft) return null;
 
   const avatarDisplaySrc = avatarPreview ?? avatarUrl ?? null;
+  const menuImageDisplaySrc = menuImagePreview ?? menuImageUrl ?? null;
 
   return (
     <>
@@ -595,6 +690,26 @@ export default function PanelSettingsModal({ open, onClose }: { open: boolean; o
             </div>
           ) : null}
 
+          {tab === "vpnDisplay" && draft ? (
+            <div className="panel-settings-tab-content">
+              <VpnDisplaySettingsPanel
+                entryOrder={draft.vpnDisplay?.entryOrder ?? []}
+                onEntryOrderChange={(keys) =>
+                  patchDraft((d) => ({
+                    ...d,
+                    vpnDisplay: {
+                      serverOrder: keys
+                        .map((k) => /^vless:(\d+)$/.exec(k))
+                        .filter(Boolean)
+                        .map((m) => Number(m![1])),
+                      entryOrder: keys,
+                    },
+                  }))
+                }
+              />
+            </div>
+          ) : null}
+
           {tab === "telegram" ? (
             <div className="panel-settings-tab-content">
               <div className="form-field">
@@ -649,6 +764,186 @@ export default function PanelSettingsModal({ open, onClose }: { open: boolean; o
                 </p>
               </div>
               <div className="form-field">
+                <FieldLabel label="Gemini API Key" hint={PANEL_HINTS.geminiApiKey} />
+                <div className="panel-token-row">
+                  <input
+                    type={showGeminiKey || (!telegram?.geminiApiKeyConfigured && !clearGeminiKey) ? "text" : "password"}
+                    value={
+                      clearGeminiKey
+                        ? ""
+                        : geminiKeyEdit
+                          ? geminiKeyEdit
+                          : telegram?.geminiApiKeyConfigured
+                            ? showGeminiKey
+                              ? (revealedGeminiKey ?? "")
+                              : "••••••••••••••••"
+                            : ""
+                    }
+                    placeholder={
+                      clearGeminiKey
+                        ? "Ключ будет удалён после сохранения"
+                        : telegram?.geminiApiKeyConfigured
+                          ? "Оставьте пустым, чтобы не менять"
+                          : "Вставьте API key Gemini"
+                    }
+                    disabled={clearGeminiKey}
+                    onChange={(e) => {
+                      setClearGeminiKey(false);
+                      setGeminiKeyEdit(e.target.value);
+                      setDirty(true);
+                    }}
+                  />
+                  <button
+                    type="button"
+                    className="ghost"
+                    disabled={
+                      clearGeminiKey ||
+                      ((!telegram?.geminiApiKeyConfigured || clearGeminiKey) && !geminiKeyEdit) ||
+                      geminiRevealBusy
+                    }
+                    onClick={() => void toggleShowGeminiKey()}
+                  >
+                    {geminiRevealBusy ? "…" : showGeminiKey ? "Скрыть" : "Показать"}
+                  </button>
+                  <button
+                    type="button"
+                    className="ghost"
+                    onClick={() => {
+                      const toCopy =
+                        geminiKeyEdit.trim() || (showGeminiKey ? (revealedGeminiKey ?? "").trim() : "");
+                      if (!toCopy) {
+                        setMsg({
+                          type: "err",
+                          text: "Нажмите «Показать», чтобы скопировать ключ, или введите новый.",
+                        });
+                        return;
+                      }
+                      void navigator.clipboard.writeText(toCopy);
+                      setMsg({ type: "ok", text: "Скопировано в буфер обмена." });
+                    }}
+                  >
+                    Копировать
+                  </button>
+                  {telegram?.geminiApiKeyConfigured && !clearGeminiKey ? (
+                    <button
+                      type="button"
+                      className="ghost"
+                      onClick={() => {
+                        setClearGeminiKey(true);
+                        setGeminiKeyEdit("");
+                        setShowGeminiKey(false);
+                        setRevealedGeminiKey(null);
+                        setDirty(true);
+                      }}
+                    >
+                      Очистить
+                    </button>
+                  ) : null}
+                </div>
+                <p className="field-hint">
+                  {clearGeminiKey
+                    ? "Ключ будет удалён после «Сохранить». Кнопка «Спросить AI» исчезнет из бота."
+                    : telegram?.geminiApiKeyConfigured
+                      ? "Ключ настроен — в боте доступна «Спросить AI». «Показать» загружает полный ключ с сервера."
+                      : "Ключ не задан — кнопка «Спросить AI» в боте скрыта."}
+                </p>
+              </div>
+              <div className="settings-toggle-list" style={{ marginBottom: "1rem" }}>
+                <SettingsToggleRow
+                  label="AI-помощник в боте"
+                  hint={PANEL_HINTS.aiAssistantEnabled}
+                  on={draft.telegram.aiAssistantEnabled !== false}
+                  onToggle={() =>
+                    patchDraft((d) => ({
+                      ...d,
+                      telegram: {
+                        ...d.telegram,
+                        aiAssistantEnabled: d.telegram.aiAssistantEnabled === false,
+                      },
+                    }))
+                  }
+                />
+              </div>
+              <div className="form-field">
+                <FieldLabel label="Модель Gemini" hint={PANEL_HINTS.geminiModel} />
+                <select
+                  value={draft.telegram.geminiModel || "gemini-2.5-flash-lite"}
+                  onChange={(e) =>
+                    patchDraft((d) => ({
+                      ...d,
+                      telegram: { ...d.telegram, geminiModel: e.target.value },
+                    }))
+                  }
+                >
+                  <option value="gemini-2.5-flash-lite">gemini-2.5-flash-lite (рекомендуется)</option>
+                  <option value="gemini-2.5-flash">gemini-2.5-flash</option>
+                  <option value="gemini-2.0-flash-lite">gemini-2.0-flash-lite</option>
+                  <option value="gemini-2.0-flash">gemini-2.0-flash</option>
+                  <option value="gemini-3.1-flash-lite">gemini-3.1-flash-lite</option>
+                  <option value="gemini-flash-latest">gemini-flash-latest</option>
+                </select>
+              </div>
+              <div className="form-field">
+                <FieldLabel label="Изображение меню бота" hint={PANEL_HINTS.menuImage} />
+                <div className="panel-avatar-row">
+                  <div className="panel-menu-image-hit">
+                    {menuImageDisplaySrc ? (
+                      <img src={menuImageDisplaySrc} alt="" className="panel-menu-image-preview" />
+                    ) : (
+                      <div className="panel-avatar-placeholder">Нет фото</div>
+                    )}
+                  </div>
+                  <div className="panel-avatar-actions">
+                    <input
+                      ref={menuImageInputRef}
+                      type="file"
+                      accept="image/png,image/jpeg,image/webp"
+                      className="panel-avatar-file-input"
+                      onChange={(e) => {
+                        void onMenuImageFile(e.target.files?.[0] ?? null);
+                        e.target.value = "";
+                      }}
+                    />
+                    <button type="button" className="ghost" disabled={busy} onClick={() => menuImageInputRef.current?.click()}>
+                      Загрузить
+                    </button>
+                    {draft.telegram.menuImagePath || menuImageDisplaySrc ? (
+                      <button
+                        type="button"
+                        className="ghost"
+                        disabled={busy}
+                        onClick={() => {
+                          void (async () => {
+                            setBusy(true);
+                            try {
+                              await deletePanelMenuImage();
+                              setMenuImagePreview(null);
+                              setDraft((d) =>
+                                d
+                                  ? {
+                                      ...d,
+                                      telegram: { ...d.telegram, menuImagePath: null },
+                                    }
+                                  : d,
+                              );
+                              await refresh();
+                              setMsg({ type: "ok", text: "Изображение меню удалено." });
+                            } catch (e) {
+                              setMsg({ type: "err", text: String(e) });
+                            } finally {
+                              setBusy(false);
+                            }
+                          })();
+                        }}
+                      >
+                        Удалить
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
+                <p className="field-hint">Без картинки меню уйдёт текстом с теми же inline-кнопками.</p>
+              </div>
+              <div className="form-field">
                 <FieldLabel label="Telegram Admin ID" hint={PANEL_HINTS.adminIds} />
                 <input
                   value={draft.telegram.adminIds.join(", ")}
@@ -661,6 +956,69 @@ export default function PanelSettingsModal({ open, onClose }: { open: boolean; o
                   }}
                   placeholder="404740026"
                 />
+              </div>
+              <div className="form-field">
+                <FieldLabel label="Цвета кнопок бота (HEX)" hint={PANEL_HINTS.telegramButtonColors} />
+                <div className="panel-tg-button-colors">
+                  {(
+                    [
+                      ["menuHome", "« В меню"],
+                      ["menuSubscription", "Подписка"],
+                      ["menuPay", "Оплата подписки"],
+                      ["menuBuyGb", "Докупить ГБ"],
+                      ["menuBuyDevice", "Купить устройство"],
+                      ["menuAdminClients", "Клиенты"],
+                      ["deleteSubscription", "Удалить подписку"],
+                      ["createNewSubscription", "Создать новую подписку"],
+                      ["pickSubscription", "Выбор готовой подписки"],
+                      ["comboOffer", "Спец-предложение (комбо)"],
+                      ["applyPromo", "Применить промокод"],
+                      ["buyWhitelist", "Купить белые списки"],
+                      ["sendAppeal", "Отправить обращение"],
+                      ["askAi", "Спросить AI"],
+                      ["inviteFriend", "Пригласить друга"],
+                    ] as const
+                  ).map(([key, label]) => (
+                    <label key={key} className="panel-tg-color-row">
+                      <span className="panel-tg-color-label">{label}</span>
+                      <input
+                        type="color"
+                        value={
+                          /^#[0-9a-fA-F]{6}$/.test(draft.telegram.buttonColors?.[key] ?? "")
+                            ? (draft.telegram.buttonColors[key] as string)
+                            : "#3390ec"
+                        }
+                        onChange={(e) => {
+                          const hex = e.target.value.toLowerCase();
+                          patchDraft((d) => ({
+                            ...d,
+                            telegram: {
+                              ...d.telegram,
+                              buttonColors: { ...d.telegram.buttonColors, [key]: hex },
+                            },
+                          }));
+                        }}
+                      />
+                      <input
+                        className="panel-tg-color-hex"
+                        value={draft.telegram.buttonColors?.[key] ?? ""}
+                        onChange={(e) => {
+                          let v = e.target.value.trim();
+                          if (v && !v.startsWith("#")) v = `#${v}`;
+                          patchDraft((d) => ({
+                            ...d,
+                            telegram: {
+                              ...d.telegram,
+                              buttonColors: { ...d.telegram.buttonColors, [key]: v },
+                            },
+                          }));
+                        }}
+                        placeholder="#3390ec"
+                        spellCheck={false}
+                      />
+                    </label>
+                  ))}
+                </div>
               </div>
               <div className="panel-settings-actions">
                 <button

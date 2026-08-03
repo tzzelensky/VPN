@@ -1,5 +1,6 @@
 import {
   clearExpiredPendingFeedback,
+  dismissSurveyPendingFeedback,
   findActivePendingFeedback,
   findRecipientBySurveyChat,
   getSurvey,
@@ -8,11 +9,11 @@ import {
   saveSurveyRating,
   surveyAcceptsRating,
 } from "./surveyDb.js";
-import { answerCallbackQuery, sendTelegramHtml } from "./telegram/api.js";
+import { answerCallbackQuery, editTelegramReplyMarkup, sendTelegramHtml } from "./telegram/api.js";
 
 type CallbackQuery = {
   id: string;
-  message?: { chat: { id: number } };
+  message?: { message_id?: number; chat: { id: number } };
 };
 
 export function surveyRatingKeyboard(surveyId: number) {
@@ -24,10 +25,23 @@ export function surveyRatingKeyboard(surveyId: number) {
   return { inline_keyboard: [row] };
 }
 
+export function surveySkipFeedbackKeyboard(surveyId: number) {
+  const id = Math.floor(surveyId);
+  return {
+    inline_keyboard: [[{ text: "Не оставлять комментарий", callback_data: `survey:${id}:nofb` }]],
+  };
+}
+
 export function parseSurveyRateCallback(data: string): { surveyId: number; rating: number } | null {
   const m = /^survey:(\d+):rate:([1-5])$/.exec(data.trim());
   if (!m) return null;
   return { surveyId: Number(m[1]), rating: Number(m[2]) };
+}
+
+export function parseSurveySkipFeedbackCallback(data: string): { surveyId: number } | null {
+  const m = /^survey:(\d+):nofb$/.exec(data.trim());
+  if (!m) return null;
+  return { surveyId: Number(m[1]) };
 }
 
 export async function handleSurveyRateCallback(q: CallbackQuery, surveyId: number, rating: number): Promise<boolean> {
@@ -77,7 +91,11 @@ export async function handleSurveyRateCallback(q: CallbackQuery, surveyId: numbe
     await answerCallbackQuery(q.id, { text: "Спасибо!" });
     console.log("[survey] rating survey=", surveyId, "user=", recipient.user_id, "rating=", rating);
     if (survey.allow_feedback) {
-      await sendTelegramHtml(chatId, "Спасибо! Можете оставить комментарий к оценке одним сообщением.");
+      await sendTelegramHtml(
+        chatId,
+        "Спасибо! Можете оставить комментарий к оценке одним сообщением.",
+        surveySkipFeedbackKeyboard(surveyId),
+      );
     } else {
       await sendTelegramHtml(chatId, "Спасибо за оценку!");
     }
@@ -89,12 +107,59 @@ export async function handleSurveyRateCallback(q: CallbackQuery, surveyId: numbe
   }
 }
 
+export async function handleSurveySkipFeedbackCallback(
+  q: CallbackQuery,
+  surveyId: number,
+): Promise<boolean> {
+  clearExpiredPendingFeedback();
+  const chatId = q.message?.chat.id;
+  if (chatId == null) {
+    await answerCallbackQuery(q.id, { text: "Нет чата", show_alert: true });
+    return true;
+  }
+  const pending = findActivePendingFeedback(chatId);
+  if (!pending || pending.survey_id !== surveyId) {
+    await answerCallbackQuery(q.id, { text: "Комментарий уже не принимается", show_alert: false });
+    const mid = q.message?.message_id;
+    if (mid != null) {
+      try {
+        await editTelegramReplyMarkup(chatId, mid, { inline_keyboard: [] });
+      } catch {
+        /* ignore */
+      }
+    }
+    return true;
+  }
+  dismissSurveyPendingFeedback(pending.id);
+  await answerCallbackQuery(q.id, { text: "Ок" });
+  const mid = q.message?.message_id;
+  if (mid != null) {
+    try {
+      await editTelegramReplyMarkup(chatId, mid, { inline_keyboard: [] });
+    } catch {
+      /* ignore */
+    }
+  }
+  await sendTelegramHtml(chatId, "Спасибо за оценку!");
+  console.log("[survey] skip feedback survey=", surveyId, "chat=", chatId);
+  return true;
+}
+
 export async function handleSurveyFeedbackText(chatId: number, text: string): Promise<boolean> {
   clearExpiredPendingFeedback();
   const pending = findActivePendingFeedback(chatId);
   if (!pending) return false;
   const trimmed = String(text ?? "").trim();
   if (!trimmed) return false;
+
+  const lower = trimmed.toLowerCase();
+  if (lower === "отмена" || lower === "/cancel" || lower === "cancel") {
+    dismissSurveyPendingFeedback(pending.id);
+    await sendTelegramHtml(chatId, "Спасибо за оценку!");
+    console.log("[survey] cancel feedback survey=", pending.survey_id, "chat=", chatId);
+    return true;
+  }
+
   const saved = saveSurveyFeedback(pending.id, trimmed.slice(0, 4000));
   if (!saved) return false;
   console.log("[survey] feedback survey=", pending.survey_id, "chat=", chatId);

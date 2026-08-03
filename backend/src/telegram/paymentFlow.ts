@@ -1,4 +1,5 @@
 import { isSupportAppealsEnabled } from "./supportAppealsFlow.js";
+import { isAiAssistantEnabled } from "./geminiAi.js";
 import { triggerOnPaymentReject, triggerOnPaymentSuccess, triggerOnPaymentSessionStart } from "../triggerMailingsService.js";
 import {
   applyPromoCodeForUser,
@@ -50,6 +51,7 @@ import { answerCallbackQuery, sendTelegramHtml } from "./api.js";
 import { notifyDropperTicketsAfterPurchase } from "./dropperTickets.js";
 import { escHtml, formatDaysRu, subscriptionPublicName } from "./format.js";
 import { backHomeRow, mainMenuInline, newUserKeyboard, publicSubscriptionUrl } from "./keyboards.js";
+import { inlineBtn } from "./inlineButtonStyles.js";
 import { getTelegramPaymentNotifyChatIds, getTelegramPaymentUrl } from "./env.js";
 import {
   createDeviceSlotPurchaseRecord,
@@ -234,8 +236,8 @@ export function vpnPlansKeyboard(targetUserId?: number) {
   const rows = shop.plans.map((p) => [
     { text: planPickerButtonLabel(p), callback_data: targetUserId ? `pplan:${p.id}:${targetUserId}` : `pplan:${p.id}` },
   ]);
-  rows.push([{ text: "🎟 Применить промокод", callback_data: "promoask" }]);
-  rows.push([{ text: "« Главное меню", callback_data: "home" }]);
+  rows.push([inlineBtn("🎟 Применить промокод", "promoask", "applyPromo")]);
+  rows.push([inlineBtn("« Главное меню", "home", "menuHome")]);
   return { inline_keyboard: rows };
 }
 
@@ -253,8 +255,8 @@ export function vpnPlansKeyboardDiscounted(
         : `pplan:${p.id}`;
     return [{ text: planPickerButtonLabelWithPrice(p, newPrice), callback_data }];
   });
-  rows.push([{ text: "🎟 Применить промокод", callback_data: "promoask" }]);
-  rows.push([{ text: "« Главное меню", callback_data: "home" }]);
+  rows.push([inlineBtn("🎟 Применить промокод", "promoask", "applyPromo")]);
+  rows.push([inlineBtn("« Главное меню", "home", "menuHome")]);
   return { inline_keyboard: rows };
 }
 
@@ -263,7 +265,7 @@ function referralRewardKeyboard(rewardId: string, gb: number, days: number) {
     inline_keyboard: [
       [{ text: `Получить +${gb} ГБ`, callback_data: `refreward:gb:${rewardId}` }],
       [{ text: `Получить +${days} дней`, callback_data: `refreward:days:${rewardId}` }],
-      [{ text: "« В меню", callback_data: "home" }],
+      [inlineBtn("« В меню", "home", "menuHome")],
     ],
   };
 }
@@ -271,12 +273,12 @@ function referralRewardKeyboard(rewardId: string, gb: number, days: number) {
 export function vpnPlansKeyboardForNew() {
   const shop = getSubscriptionShop();
   const rows = shop.plans.map((p) => [{ text: planPickerButtonLabel(p), callback_data: `pplannew:${p.id}` }]);
-  rows.push([{ text: "🎟 Применить промокод", callback_data: "promoask" }]);
-  rows.push([{ text: "« Главное меню", callback_data: "home" }]);
+  rows.push([inlineBtn("🎟 Применить промокод", "promoask", "applyPromo")]);
+  rows.push([inlineBtn("« Главное меню", "home", "menuHome")]);
   return { inline_keyboard: rows };
 }
 
-type InlineKb = { inline_keyboard: Array<Array<{ text: string; callback_data: string }>> };
+type InlineKb = { inline_keyboard: Array<Array<ReturnType<typeof inlineBtn>>> };
 
 function injectComboOfferKeyboardRows(
   kb: InlineKb,
@@ -300,7 +302,8 @@ function injectComboOfferKeyboardRows(
         ? `pcombo:${o.id}:${bindId}`
         : `pcombo:${o.id}`;
     const label = `🎁 ${o.title} — ${o.final_rub} ₽ (−${o.discount_percent}%)`;
-    return [{ text: label.length > 64 ? `${label.slice(0, 61)}…` : label, callback_data: cb }];
+    const text = label.length > 64 ? `${label.slice(0, 61)}…` : label;
+    return [inlineBtn(text, cb, "comboOffer")];
   });
   const homeIdx = kb.inline_keyboard.findIndex((r) => r[0]?.callback_data === "home");
   const insertAt = homeIdx >= 0 ? homeIdx : kb.inline_keyboard.length;
@@ -334,7 +337,7 @@ export function vpnPlansKeyboardPromo(code: string, tgUserId: number, targetUser
       },
     ];
   });
-  rows.push([{ text: "« Главное меню", callback_data: "home" }]);
+  rows.push([inlineBtn("« Главное меню", "home", "menuHome")]);
   return { inline_keyboard: rows };
 }
 
@@ -343,8 +346,8 @@ export function gbTopUpPlansKeyboard(targetUserId?: number) {
   const rows = shop.topup_plans.map((p) => [
     { text: topupPickerButtonLabel(p), callback_data: targetUserId ? `gplan:${p.id}:${targetUserId}` : `gplan:${p.id}` },
   ]);
-  rows.push([{ text: "🎟 Применить промокод", callback_data: "promoask" }]);
-  rows.push([{ text: "« Главное меню", callback_data: "home" }]);
+  rows.push([inlineBtn("🎟 Применить промокод", "promoask", "applyPromo")]);
+  rows.push([inlineBtn("« Главное меню", "home", "menuHome")]);
   return { inline_keyboard: rows };
 }
 
@@ -359,8 +362,8 @@ export function gbTopUpPlansKeyboardDiscounted(discountPercent: number, targetUs
       },
     ];
   });
-  rows.push([{ text: "🎟 Применить промокод", callback_data: "promoask" }]);
-  rows.push([{ text: "« Главное меню", callback_data: "home" }]);
+  rows.push([inlineBtn("🎟 Применить промокод", "promoask", "applyPromo")]);
+  rows.push([inlineBtn("« Главное меню", "home", "menuHome")]);
   return { inline_keyboard: rows };
 }
 
@@ -382,7 +385,7 @@ export function gbTopUpPlansKeyboardPromo(chatId: number, tgUserId: number, targ
     if (t.length > 58) t = `${t.slice(0, 55)}…`;
     return [{ text: t, callback_data: targetUserId ? `gplanpromo:${p.id}:${targetUserId}` : `gplanpromo:${p.id}` }];
   });
-  rows.push([{ text: "« Главное меню", callback_data: "home" }]);
+  rows.push([inlineBtn("« Главное меню", "home", "menuHome")]);
   return { inline_keyboard: rows };
 }
 
@@ -400,9 +403,15 @@ function replyKeyboardForPayer(tgUserId: number) {
       tgUserCanBuyGb(tgUserId),
       tgUserCanBuyWhitelist(tgUserId),
       tgUserCanBuyDeviceSlot(tgUserId),
+      false,
+      isAiAssistantEnabled(),
     );
   }
-  return newUserKeyboard(getSubscriptionShop().sales_disabled, isTestSubscriptionEligible(tgUserId));
+  return newUserKeyboard(
+    getSubscriptionShop().sales_disabled,
+    isTestSubscriptionEligible(tgUserId),
+    isAiAssistantEnabled(),
+  );
 }
 
 const DAY_MS = 86_400_000;
@@ -426,7 +435,7 @@ export async function sendVpnPlanPicker(
     await sendTelegramHtml(
       chatId,
       "<b>Новые подписки временно недоступны.</b>\n\nОформление для новых клиентов отключено в настройках. После того как администратор привяжет ваш Telegram к аккаунту в панели, здесь можно будет продлить подписку.",
-      newUserKeyboard(true, isTestSubscriptionEligible(tgUserId)),
+      newUserKeyboard(true, isTestSubscriptionEligible(tgUserId), isAiAssistantEnabled()),
     );
     return;
   }
@@ -516,7 +525,7 @@ export async function sendGbTopUpPlanPicker(chatId: number, tgUserId: number, ta
     await sendTelegramHtml(
       chatId,
       "<b>Докупка ГБ недоступна.</b>\n\nСначала нужна привязанная подписка в панели. После привязки появится это действие.",
-      newUserKeyboard(getSubscriptionShop().sales_disabled, isTestSubscriptionEligible(tgUserId)),
+      newUserKeyboard(getSubscriptionShop().sales_disabled, isTestSubscriptionEligible(tgUserId), isAiAssistantEnabled()),
     );
     return;
   }
@@ -542,7 +551,7 @@ export async function sendGbTopUpPlanPicker(chatId: number, tgUserId: number, ta
     return;
   }
   if (linked.length > 1 && !target) {
-    await sendTelegramHtml(chatId, "<b>Сначала выберите подписку для докупки ГБ.</b>", backHomeRow);
+    await sendTelegramHtml(chatId, "<b>Сначала выберите подписку для докупки ГБ.</b>", backHomeRow());
     return;
   }
   const planTargetId = target?.id ?? (linked.length === 1 ? linked[0]!.id : undefined);
@@ -605,14 +614,14 @@ export async function onVpnPlanChosen(
     await sendTelegramHtml(
       chatId,
       "<b>Покупка недоступна.</b> Продажи новых подписок отключены.",
-      newUserKeyboard(true, isTestSubscriptionEligible(tgUserId)),
+      newUserKeyboard(true, isTestSubscriptionEligible(tgUserId), isAiAssistantEnabled()),
     );
     return;
   }
   const target = resolveLinkedTarget(tgUserId, targetUserId);
   const newName = String(newSubscriptionName ?? "").trim();
   if (!newName && linked.length > 1 && !target) {
-    await sendTelegramHtml(chatId, "<b>Выберите подписку, которую нужно продлить.</b>", backHomeRow);
+    await sendTelegramHtml(chatId, "<b>Выберите подписку, которую нужно продлить.</b>", backHomeRow());
     return;
   }
   const meta = getPlanRuntimeMeta(planId);
@@ -665,7 +674,7 @@ export async function onVpnPlanChosen(
     `(как выбрали выше).\n\n` +
     `После оплаты пришлите в этот чат <b>скриншот или фото подтверждения перевода</b> — мы проверим и подключим или продлим доступ.`;
   logPaymentBotMessage(chatId, body);
-  await sendTelegramHtml(chatId, body, backHomeRow);
+  await sendTelegramHtml(chatId, body, backHomeRow());
 }
 
 export async function sendTestSubscriptionIntro(chatId: number, tgUserId: number): Promise<void> {
@@ -675,7 +684,7 @@ export async function sendTestSubscriptionIntro(chatId: number, tgUserId: number
     await sendTelegramHtml(
       chatId,
       "<b>Тестовая подписка недоступна.</b>\n\nВозможно, она отключена в настройках, у вас уже есть подписка или вы уже оформляли тест ранее.",
-      newUserKeyboard(shop.sales_disabled, false),
+      newUserKeyboard(shop.sales_disabled, false, isAiAssistantEnabled()),
     );
     return;
   }
@@ -690,7 +699,7 @@ export async function sendTestSubscriptionIntro(chatId: number, tgUserId: number
   await sendTelegramHtml(chatId, text, {
     inline_keyboard: [
       [{ text: "Получить тестовую подписку", callback_data: "test_get" }],
-      [{ text: "« Меню", callback_data: "home" }],
+      [inlineBtn("« Меню", "home", "menuHome")],
     ],
   });
 }
@@ -705,7 +714,7 @@ export async function onTestSubscriptionGet(
     await sendTelegramHtml(
       chatId,
       "<b>Тестовая подписка недоступна.</b>",
-      newUserKeyboard(shop.sales_disabled, false),
+      newUserKeyboard(shop.sales_disabled, false, isAiAssistantEnabled()),
     );
     return;
   }
@@ -727,7 +736,7 @@ export async function onTestSubscriptionGet(
     `Промокоды к тестовой подписке не применяются.\n\n` +
     `После оплаты пришлите в этот чат <b>скриншот или фото подтверждения перевода</b> — мы проверим и подключим доступ.`;
   logPaymentBotMessage(chatId, body);
-  await sendTelegramHtml(chatId, body, backHomeRow);
+  await sendTelegramHtml(chatId, body, backHomeRow());
 }
 
 export async function onGbTopUpPlanChosen(
@@ -743,7 +752,7 @@ export async function onGbTopUpPlanChosen(
     await sendTelegramHtml(
       chatId,
       "<b>Докупка ГБ недоступна.</b> Нет привязанной подписки.",
-      newUserKeyboard(getSubscriptionShop().sales_disabled, isTestSubscriptionEligible(tgUserId)),
+      newUserKeyboard(getSubscriptionShop().sales_disabled, isTestSubscriptionEligible(tgUserId), isAiAssistantEnabled()),
     );
     return;
   }
@@ -765,7 +774,7 @@ export async function onGbTopUpPlanChosen(
     return;
   }
   if (linked.length > 1 && !target) {
-    await sendTelegramHtml(chatId, "<b>Выберите подписку, к которой нужно докупить ГБ.</b>", backHomeRow);
+    await sendTelegramHtml(chatId, "<b>Выберите подписку, к которой нужно докупить ГБ.</b>", backHomeRow());
     return;
   }
   const meta = getTopUpPlanRuntimeMeta(planId);
@@ -814,13 +823,13 @@ export async function onGbTopUpPlanChosen(
     `В комментарии к переводу укажите <b>номер пакета докупки</b>: <code>1</code>, <code>2</code> или <code>3</code>.\n\n` +
     `После оплаты пришлите в этот чат <b>скриншот или фото подтверждения перевода</b> — администратор проверит и начислит ГБ.`;
   logPaymentBotMessage(chatId, body);
-  await sendTelegramHtml(chatId, body, backHomeRow);
+  await sendTelegramHtml(chatId, body, backHomeRow());
 }
 
 export async function sendWhitelistPurchaseMenu(chatId: number, tgUserId: number): Promise<void> {
   logWhitelistPurchaseOpened("bot", tgUserId);
   if (!isWhitelistPurchaseVisible()) {
-    await sendTelegramHtml(chatId, "Белые списки сейчас недоступны.", backHomeRow);
+    await sendTelegramHtml(chatId, "Белые списки сейчас недоступны.", backHomeRow());
     return;
   }
   const linked = findUsersByTelegramChatId(tgUserId);
@@ -842,7 +851,7 @@ export async function sendWhitelistPurchaseMenu(chatId: number, tgUserId: number
     }
     const check = checkWhitelistPurchaseAllowed(fallback);
     if (!check.ok) {
-      await sendTelegramHtml(chatId, check.message, backHomeRow);
+      await sendTelegramHtml(chatId, check.message, backHomeRow());
       return;
     }
   }
@@ -857,16 +866,11 @@ export async function sendWhitelistPurchaseMenu(chatId: number, tgUserId: number
   await sendWhitelistPurchaseMenuForTarget(chatId, tgUserId, targets[0]!.id);
 }
 
-export function whitelistPurchaseTargetKeyboard(
-  users: UserRow[],
-): { inline_keyboard: Array<Array<{ text: string; callback_data: string }>> } {
+export function whitelistPurchaseTargetKeyboard(users: UserRow[]) {
   const rows = users.map((u) => [
-    {
-      text: subscriptionPublicName(u).slice(0, 58),
-      callback_data: `wlsel:${u.id}`,
-    },
+    inlineBtn(subscriptionPublicName(u).slice(0, 58), `wlsel:${u.id}`, "pickSubscription"),
   ]);
-  rows.push([{ text: "« В меню", callback_data: "home" }]);
+  rows.push([inlineBtn("« В меню", "home", "menuHome")]);
   return { inline_keyboard: rows };
 }
 
@@ -877,12 +881,12 @@ export async function sendWhitelistPurchaseMenuForTarget(
 ): Promise<void> {
   const target = getUser(targetUserId);
   if (!target || String(target.tg_id ?? "").trim() !== String(tgUserId).trim()) {
-    await sendTelegramHtml(chatId, "Подписка не найдена.", backHomeRow);
+    await sendTelegramHtml(chatId, "Подписка не найдена.", backHomeRow());
     return;
   }
   const check = checkWhitelistPurchaseAllowed(target);
   if (!check.ok) {
-    await sendTelegramHtml(chatId, check.message, backHomeRow);
+    await sendTelegramHtml(chatId, check.message, backHomeRow());
     return;
   }
   const settings = getWhitelistPurchaseSettings();
@@ -898,9 +902,15 @@ export async function sendWhitelistPurchaseMenuForTarget(
       `После оплаты ключи будут добавлены в вашу подписку. Вам нужно будет обновить подписку в приложении.`,
     {
       inline_keyboard: [
-        [{ text: "Купить белые списки", callback_data: `wlbuy:${target.id}` }],
+        [inlineBtn("Купить белые списки", `wlbuy:${target.id}`, "buyWhitelist")],
         [{ text: "Инструкция по обновлению", callback_data: "wlinstr" }],
-        [{ text: canPickOther ? "« Назад" : "« В меню", callback_data: canPickOther ? "wlmenu" : "home" }],
+        [
+          inlineBtn(
+            canPickOther ? "« Назад" : "« В меню",
+            canPickOther ? "wlmenu" : "home",
+            "menuHome",
+          ),
+        ],
       ],
     },
   );
@@ -914,12 +924,12 @@ export async function onWhitelistPurchaseStart(
 ): Promise<void> {
   const target = getUser(targetUserId);
   if (!target || String(target.tg_id ?? "").trim() !== String(tgUserId).trim()) {
-    await sendTelegramHtml(chatId, "Подписка не найдена.", backHomeRow);
+    await sendTelegramHtml(chatId, "Подписка не найдена.", backHomeRow());
     return;
   }
   const check = checkWhitelistPurchaseAllowed(target);
   if (!check.ok) {
-    await sendTelegramHtml(chatId, check.message, backHomeRow);
+    await sendTelegramHtml(chatId, check.message, backHomeRow());
     return;
   }
   const price = getWhitelistPurchasePriceRub();
@@ -940,7 +950,7 @@ export async function onWhitelistPurchaseStart(
     `В комментарии к переводу укажите: <code>white_lists</code>\n\n` +
     `После оплаты пришлите в этот чат <b>скриншот или фото подтверждения перевода</b>.`;
   logPaymentBotMessage(chatId, body);
-  await sendTelegramHtml(chatId, body, backHomeRow);
+  await sendTelegramHtml(chatId, body, backHomeRow());
 }
 
 export async function onDeviceSlotPurchaseStart(
@@ -951,12 +961,12 @@ export async function onDeviceSlotPurchaseStart(
 ): Promise<void> {
   const target = getUser(targetUserId);
   if (!target || String(target.tg_id ?? "").trim() !== String(tgUserId).trim()) {
-    await sendTelegramHtml(chatId, "Подписка не найдена.", backHomeRow);
+    await sendTelegramHtml(chatId, "Подписка не найдена.", backHomeRow());
     return;
   }
   const check = checkDeviceSlotPurchaseAllowed(target);
   if (!check.ok) {
-    await sendTelegramHtml(chatId, check.message, backHomeRow);
+    await sendTelegramHtml(chatId, check.message, backHomeRow());
     return;
   }
   const dl = getDeviceLimitSettings();
@@ -992,7 +1002,7 @@ export async function onDeviceSlotPurchaseStart(
     `В комментарии к переводу укажите: <code>device_slot</code>\n\n` +
     `После оплаты пришлите в этот чат <b>скриншот или фото подтверждения перевода</b>.`;
   logPaymentBotMessage(chatId, body);
-  await sendTelegramHtml(chatId, body, backHomeRow);
+  await sendTelegramHtml(chatId, body, backHomeRow());
 }
 
 export async function onComboChosen(
@@ -1005,7 +1015,7 @@ export async function onComboChosen(
 ): Promise<void> {
   const offer = getComboOffer(offerId);
   if (!offer) {
-    await sendTelegramHtml(chatId, "Комбо-предложение не найдено.", backHomeRow);
+    await sendTelegramHtml(chatId, "Комбо-предложение не найдено.", backHomeRow());
     return;
   }
   const ctx = getPromoContext(chatId);
@@ -1035,7 +1045,7 @@ export async function onComboChosen(
         : undefined),
   });
   if (!check.ok) {
-    await sendTelegramHtml(chatId, check.message ?? "Комбо-предложение недоступно.", backHomeRow);
+    await sendTelegramHtml(chatId, check.message ?? "Комбо-предложение недоступно.", backHomeRow());
     return;
   }
   const pricing = resolveComboOfferPricing(offer);
@@ -1078,7 +1088,7 @@ export async function onComboChosen(
     `Промокоды к комбо не применяются.\n\n` +
     `После оплаты пришлите в этот чат <b>скриншот или фото подтверждения перевода</b>.`;
   logPaymentBotMessage(chatId, body);
-  await sendTelegramHtml(chatId, body, backHomeRow);
+  await sendTelegramHtml(chatId, body, backHomeRow());
 }
 
 export async function sendWhitelistInstructionMenu(chatId: number): Promise<void> {
@@ -1097,7 +1107,7 @@ export async function onPaymentProofText(chatId: number, text: string): Promise<
     logPaymentUserMessage(chatId, text);
     const pendingMsg = "<b>Заявка уже у администратора.</b> Дождитесь подтверждения или ответа.";
     logPaymentBotMessage(chatId, pendingMsg);
-    await sendTelegramHtml(chatId, pendingMsg, backHomeRow);
+    await sendTelegramHtml(chatId, pendingMsg, backHomeRow());
     return true;
   }
   const sess = findAwaitingProofSessionByChat(chatId);
@@ -1116,7 +1126,7 @@ export async function onPaymentProofText(chatId: number, text: string): Promise<
     const cancelBody =
       "<b>Оплата отменена.</b>\n\nЕсли передумали — снова выберите тариф в разделе «Оплата подписки» или «Докупить ГБ».";
     logPaymentBotMessage(chatId, cancelBody);
-    await sendTelegramHtml(chatId, cancelBody, backHomeRow);
+    await sendTelegramHtml(chatId, cancelBody, backHomeRow());
     return true;
   }
 
@@ -1136,7 +1146,7 @@ export async function onPaymentProofPhoto(msg: PhotoMsg): Promise<boolean> {
     logPaymentUserMessage(chatId, "", { hasPhoto: true });
     const pendingMsg = "<b>Заявка уже у администратора.</b> Дождитесь подтверждения или ответа.";
     logPaymentBotMessage(chatId, pendingMsg);
-    await sendTelegramHtml(chatId, pendingMsg, backHomeRow);
+    await sendTelegramHtml(chatId, pendingMsg, backHomeRow());
     return true;
   }
   const sess = findAwaitingProofSessionByChat(chatId);
@@ -1149,7 +1159,7 @@ export async function onPaymentProofPhoto(msg: PhotoMsg): Promise<boolean> {
     await sendTelegramHtml(
       chatId,
       "Не удалось передать чек администратору. Напишите администратору вручную или попробуйте позже.",
-      backHomeRow,
+      backHomeRow(),
     );
     return true;
   }
@@ -1159,7 +1169,7 @@ export async function onPaymentProofPhoto(msg: PhotoMsg): Promise<boolean> {
     await sendTelegramHtml(
       chatId,
       "Не удалось передать чек администратору. Напишите администратору вручную или попробуйте позже.",
-      backHomeRow,
+      backHomeRow(),
     );
     return true;
   }
@@ -1168,7 +1178,7 @@ export async function onPaymentProofPhoto(msg: PhotoMsg): Promise<boolean> {
   const receivedBody =
     "<b>Чек получен.</b> Администратор проверит оплату и примет решение. Обычно это занимает немного времени.";
   logPaymentBotMessage(chatId, receivedBody);
-  await sendTelegramHtml(chatId, receivedBody, backHomeRow);
+  await sendTelegramHtml(chatId, receivedBody, backHomeRow());
   return true;
 }
 
@@ -1255,7 +1265,7 @@ export async function onAdminPaymentConfirm(
     logPaymentBotMessage(sess.tg_chat_id, body);
     archiveAndDeletePaymentSession(sessionId, "confirmed");
     await finalizeAdminPaymentReceipt(adminMessage, "confirmed");
-    await sendTelegramHtml(sess.tg_chat_id, body, backHomeRow);
+    await sendTelegramHtml(sess.tg_chat_id, body, backHomeRow());
     const perPurchase = Math.max(0, Math.floor(getGameTicketsPerPurchase() || 0));
     const activeGame = getWebAppActiveGame();
     if (activeGame !== "none" && perPurchase > 0) {
@@ -1315,7 +1325,7 @@ export async function onAdminPaymentConfirm(
     logPaymentBotMessage(sess.tg_chat_id, deviceBody);
     archiveAndDeletePaymentSession(sessionId, "confirmed");
     await finalizeAdminPaymentReceipt(adminMessage, "confirmed");
-    await sendTelegramHtml(sess.tg_chat_id, deviceBody, backHomeRow);
+    await sendTelegramHtml(sess.tg_chat_id, deviceBody, backHomeRow());
     return;
   }
   if (isWhiteLists) {
@@ -1359,7 +1369,7 @@ export async function onAdminPaymentConfirm(
     logPaymentBotMessage(notifyChatId, clientBody);
     let clientNotified = false;
     try {
-      await sendTelegramHtml(notifyChatId, clientBody, backHomeRow);
+      await sendTelegramHtml(notifyChatId, clientBody, backHomeRow());
       clientNotified = true;
       if (result.purchase?.id) {
         markWhitelistPurchaseInstruction(result.purchase.id, true, null);
@@ -1661,7 +1671,7 @@ export async function onAdminPaymentConfirm(
       `Актуальные дата и трафик — в разделе «Статистика по подписке».`;
   logPaymentBotMessage(sess.tg_chat_id, body);
   archiveAndDeletePaymentSession(sessionId, "confirmed");
-  await sendTelegramHtml(sess.tg_chat_id, body, backHomeRow);
+  await sendTelegramHtml(sess.tg_chat_id, body, backHomeRow());
 
   const perPurchase = Math.max(0, Math.floor(getGameTicketsPerPurchase() || 0));
   const activeGame = getWebAppActiveGame();
@@ -1757,7 +1767,7 @@ export async function onReferralRewardChosen(
     claimReferralReward(reward.id, "gb");
     await answerCallbackQuery(callbackQueryId, { text: `Начислено +${reward.reward_gb} ГБ` });
     const refBody = `🎁 Начислено <b>+${reward.reward_gb} ГБ</b> на вашу текущую подписку.`;
-    await sendTelegramHtml(tgFromId, refBody, backHomeRow);
+    await sendTelegramHtml(tgFromId, refBody, backHomeRow());
     logCommunicationMessage({
       automatic: true,
       source_label: "Авто: реферальная награда (ГБ)",
@@ -1774,7 +1784,7 @@ export async function onReferralRewardChosen(
     claimReferralReward(reward.id, "days");
     await answerCallbackQuery(callbackQueryId, { text: `Добавлено +${reward.reward_days} дней` });
     const refBody = `🎁 Срок вашей подписки продлен на <b>${reward.reward_days} дней</b>.`;
-    await sendTelegramHtml(tgFromId, refBody, backHomeRow);
+    await sendTelegramHtml(tgFromId, refBody, backHomeRow());
     logCommunicationMessage({
       automatic: true,
       source_label: "Авто: реферальная награда (дни)",
@@ -1814,7 +1824,7 @@ export async function onAdminPaymentReject(
   logPaymentBotMessage(sess.tg_chat_id, rejectBody);
   archiveAndDeletePaymentSession(sessionId, "rejected");
   await finalizeAdminPaymentReceipt(adminMessage, "rejected");
-  await sendTelegramHtml(sess.tg_chat_id, rejectBody, backHomeRow);
+  await sendTelegramHtml(sess.tg_chat_id, rejectBody, backHomeRow());
   const targetUser =
     sess.target_user_id != null && sess.target_user_id > 0 ? getUser(sess.target_user_id) : findUsersByTelegramChatId(sess.tg_chat_id)[0];
   const rec = targetUser

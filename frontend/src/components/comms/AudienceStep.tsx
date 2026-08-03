@@ -1,12 +1,17 @@
+import { useMemo, useState, type ReactNode } from "react";
 import { subscriptionLabel } from "../../subscriptionLabel";
 import type { CommunicationSegmentDto, CommunicationTargetDto } from "../../api";
+import AdminModalBackdrop from "../AdminModalBackdrop";
 import type { AudienceCard } from "./commsTypes";
+
+export type SegmentPreviewUser = { id: number; name: string; tg_id: string };
 
 type Props = {
   audience: AudienceCard;
   onAudienceChange: (card: AudienceCard) => void;
   busy: boolean;
-  reachableCount: number;
+  /** Все получатели для режима «Всем пользователям». */
+  globalRecipients: CommunicationTargetDto[];
   selectedUsers: CommunicationTargetDto[];
   onOpenPicker: () => void;
   onClearSelected: () => void;
@@ -15,7 +20,7 @@ type Props = {
   segmentQuery: string;
   onSegmentQueryChange: (q: string) => void;
   onSegmentSelect: (id: string) => void;
-  segmentPreviewCount: number | null;
+  segmentPreviewUsers: SegmentPreviewUser[];
   segmentPreviewLoading: boolean;
 };
 
@@ -26,11 +31,109 @@ const CARDS: { id: AudienceCard; title: string; desc: string }[] = [
   { id: "new_segment", title: "Новому сегменту", desc: "Создать сегмент и затем отправить" },
 ];
 
+const PREVIEW_VISIBLE = 5;
+
+type PreviewUser = { id: number; name: string; tg_id?: string };
+
+function RecipientsPreview({
+  users,
+  emptyHint,
+  countLabel,
+  loading,
+}: {
+  users: PreviewUser[];
+  emptyHint: string;
+  countLabel: ReactNode;
+  loading?: boolean;
+}) {
+  const [modalOpen, setModalOpen] = useState(false);
+  const visible = users.slice(0, PREVIEW_VISIBLE);
+  const hasMore = users.length > PREVIEW_VISIBLE;
+
+  if (loading) {
+    return (
+      <>
+        <p className="comms-wiz-stat">Считаем получателей…</p>
+        <div className="comms-segment-loading-line" aria-hidden />
+      </>
+    );
+  }
+
+  return (
+    <>
+      <p className="comms-wiz-stat">{countLabel}</p>
+      <div className="comms-segment-preview-list">
+        {users.length === 0 ? (
+          <p className="field-hint">{emptyHint}</p>
+        ) : (
+          <>
+            {visible.map((u) => (
+              <span key={u.id} className="comms-chip">
+                #{u.id} {subscriptionLabel(u)}
+              </span>
+            ))}
+            {hasMore ? (
+              <button
+                type="button"
+                className="comms-chip comms-chip--more"
+                onClick={() => setModalOpen(true)}
+                aria-label="Показать всех получателей"
+              >
+                …
+              </button>
+            ) : null}
+          </>
+        )}
+      </div>
+
+      {modalOpen ? (
+        <AdminModalBackdrop onClick={() => setModalOpen(false)}>
+          <div
+            className="modal comms-recipients-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="comms-recipients-title"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="modal-head">
+              <h3 id="comms-recipients-title">
+                Получатели <span className="comms-recipients-modal-count">{users.length}</span>
+              </h3>
+              <button
+                type="button"
+                className="ghost modal-close"
+                aria-label="Закрыть"
+                onClick={() => setModalOpen(false)}
+              >
+                ×
+              </button>
+            </div>
+            <div className="modal-body">
+              <div className="comms-recipients-modal-list">
+                {users.map((u) => (
+                  <span key={u.id} className="comms-chip" title={u.tg_id ? String(u.tg_id) : undefined}>
+                    #{u.id} {subscriptionLabel(u)}
+                  </span>
+                ))}
+              </div>
+            </div>
+            <div className="modal-footer">
+              <button type="button" className="btn" onClick={() => setModalOpen(false)}>
+                Закрыть
+              </button>
+            </div>
+          </div>
+        </AdminModalBackdrop>
+      ) : null}
+    </>
+  );
+}
+
 export default function AudienceStep({
   audience,
   onAudienceChange,
   busy,
-  reachableCount,
+  globalRecipients,
   selectedUsers,
   onOpenPicker,
   onClearSelected,
@@ -39,13 +142,14 @@ export default function AudienceStep({
   segmentQuery,
   onSegmentQueryChange,
   onSegmentSelect,
-  segmentPreviewCount,
+  segmentPreviewUsers,
   segmentPreviewLoading,
 }: Props) {
   const q = segmentQuery.trim().toLowerCase();
-  const filteredSegments = q
-    ? segments.filter((s) => s.name.toLowerCase().includes(q))
-    : segments;
+  const filteredSegments = useMemo(
+    () => (q ? segments.filter((s) => s.name.toLowerCase().includes(q)) : segments),
+    [q, segments],
+  );
 
   return (
     <section className="comms-wiz-card">
@@ -72,9 +176,15 @@ export default function AudienceStep({
 
       {audience === "global" ? (
         <div className="comms-wiz-audience-detail">
-          <p className="comms-wiz-stat">
-            Будет отправлено по <strong>{reachableCount}</strong> Telegram chat id
-          </p>
+          <RecipientsPreview
+            users={globalRecipients}
+            emptyHint="Нет пользователей с Telegram chat id."
+            countLabel={
+              <>
+                Будет отправлено по <strong>{globalRecipients.length}</strong> Telegram chat id
+              </>
+            }
+          />
         </div>
       ) : null}
 
@@ -92,14 +202,15 @@ export default function AudienceStep({
             <span className="field-hint">Выбрано: {selectedUsers.length}</span>
           </div>
           {selectedUsers.length > 0 ? (
-            <div className="comms-selected-chips">
-              {selectedUsers.slice(0, 12).map((u) => (
-                <span key={u.id} className="comms-chip">
-                  {subscriptionLabel(u)}
-                </span>
-              ))}
-              {selectedUsers.length > 12 ? <span className="comms-chip">+{selectedUsers.length - 12}</span> : null}
-            </div>
+            <RecipientsPreview
+              users={selectedUsers}
+              emptyHint="Откройте поиск и отметьте нужных клиентов."
+              countLabel={
+                <>
+                  Выбрано получателей: <strong>{selectedUsers.length}</strong>
+                </>
+              }
+            />
           ) : (
             <p className="field-hint">Откройте поиск и отметьте нужных клиентов.</p>
           )}
@@ -139,17 +250,16 @@ export default function AudienceStep({
             )}
           </div>
           {segmentId ? (
-            <p className="comms-wiz-stat">
-              {segmentPreviewLoading
-                ? "Считаем получателей…"
-                : segmentPreviewCount == null
-                  ? null
-                  : (
-                      <>
-                        Получателей с чатом: <strong>{segmentPreviewCount}</strong>
-                      </>
-                    )}
-            </p>
+            <RecipientsPreview
+              users={segmentPreviewUsers}
+              loading={segmentPreviewLoading}
+              emptyHint="В сегменте нет пользователей с чатом."
+              countLabel={
+                <>
+                  Получателей с чатом: <strong>{segmentPreviewUsers.length}</strong>
+                </>
+              }
+            />
           ) : null}
         </div>
       ) : null}

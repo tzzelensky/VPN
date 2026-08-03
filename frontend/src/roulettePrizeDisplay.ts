@@ -9,24 +9,35 @@ export type PrizeDisplayInput = {
   chance_percent?: number;
 };
 
-export const PRIZE_ICON_BY_TYPE: Record<string, string> = {
-  subscription_days: "📅",
-  traffic_gb: "📶",
-  tariff_upgrade: "🚀",
-  promo_discount: "🏷️",
-  extra_ticket: "😔",
-  no_prize: "😔",
-  custom: "🎁",
+/** Спокойные цвета секторов по типу награды (колесо). */
+const WHEEL_TYPE_BASE: Record<string, string> = {
+  subscription_days: "#2f9e6a",
+  traffic_gb: "#3b7fd4",
+  tariff_upgrade: "#7c6bdf",
+  promo_discount: "#c2782a",
+  extra_ticket: "#8b95a8",
+  no_prize: "#a85555",
+  custom: "#5b6fd6",
 };
 
-const TYPE_COLOR_PALETTE: Record<string, string[]> = {
-  subscription_days: ["#22c55e", "#34d399", "#16a34a", "#15803d"],
-  traffic_gb: ["#3b82f6", "#2563eb", "#6366f1", "#1d4ed8"],
-  tariff_upgrade: ["#f59e0b", "#fbbf24", "#ea580c"],
-  promo_discount: ["#f43f5e", "#e11d48", "#fb7185"],
-  extra_ticket: ["#64748b", "#94a3b8", "#475569"],
-  no_prize: ["#64748b", "#94a3b8", "#475569"],
-  custom: ["#8b5cf6", "#6366f1"],
+const TYPE_SHADE_OFFSET: Record<string, number[]> = {
+  subscription_days: [0, 8, -6, 12],
+  traffic_gb: [0, 10, -8],
+  tariff_upgrade: [0, 6],
+  promo_discount: [0, 8],
+  extra_ticket: [0],
+  no_prize: [0],
+  custom: [0, 6, -4],
+};
+
+export const PRIZE_ICON_BY_TYPE: Record<string, string> = {
+  subscription_days: "📅",
+  traffic_gb: "💎",
+  tariff_upgrade: "🚀",
+  promo_discount: "🏷",
+  extra_ticket: "❌",
+  no_prize: "❌",
+  custom: "🎁",
 };
 
 function dayWord(n: number): string {
@@ -36,6 +47,16 @@ function dayWord(n: number): string {
   if (mod10 === 1) return "день";
   if (mod10 >= 2 && mod10 <= 4) return "дня";
   return "дней";
+}
+
+function shiftHex(hex: string, amount: number): string {
+  const h = hex.replace("#", "");
+  if (h.length !== 6) return hex;
+  const clamp = (n: number) => Math.max(0, Math.min(255, n));
+  const r = clamp(parseInt(h.slice(0, 2), 16) + amount);
+  const g = clamp(parseInt(h.slice(2, 4), 16) + amount);
+  const b = clamp(parseInt(h.slice(4, 6), 16) + amount);
+  return `#${r.toString(16).padStart(2, "0")}${g.toString(16).padStart(2, "0")}${b.toString(16).padStart(2, "0")}`;
 }
 
 export function isRarePrize(prize: PrizeDisplayInput): boolean {
@@ -49,28 +70,22 @@ export function isRarePrize(prize: PrizeDisplayInput): boolean {
   return false;
 }
 
-function defaultIconForType(type: string, value: number): string {
-  if (isRarePrize({ type, value })) return "💎";
-  return PRIZE_ICON_BY_TYPE[type] ?? "🎁";
-}
-
-/** Кастомная иконка админа имеет приоритет, иначе — по типу (и 💎 для редких). */
+/** Иконка для emoji-контекстов — тип, без кастомных стикеров (кроме custom). */
 export function getPrizeIcon(prize: PrizeDisplayInput): string {
   const custom = String(prize.icon ?? "").trim();
   const type = String(prize.type ?? "custom");
-  const value = Number(prize.value) || 0;
-  const typeIcon = defaultIconForType(type, value);
   if (type === "custom" && custom) return custom;
-  if (custom && custom !== typeIcon) return custom;
-  return typeIcon;
+  return PRIZE_ICON_BY_TYPE[type] ?? PRIZE_ICON_BY_TYPE.custom!;
 }
 
 export function getPrizeShortTitle(prize: PrizeDisplayInput): string {
   const type = String(prize.type ?? "custom");
   const value = Number(prize.value) || 0;
   switch (type) {
-    case "subscription_days":
-      return `+${Math.max(1, value)} ${dayWord(Math.max(1, value))}`;
+    case "subscription_days": {
+      const n = Math.max(1, value);
+      return `+${n} ${dayWord(n)}`;
+    }
     case "traffic_gb":
       return `+${Math.max(1, value)} ГБ`;
     case "tariff_upgrade":
@@ -91,22 +106,28 @@ export function getPrizeFullTitle(prize: PrizeDisplayInput): string {
   return getPrizeShortTitle(prize);
 }
 
+/** Цвет сектора на колесе — по типу награды. */
+export function getPrizeSectorColor(prize: PrizeDisplayInput, shadeIndex = 0): string {
+  const type = String(prize.type ?? "custom");
+  const base = WHEEL_TYPE_BASE[type] ?? WHEEL_TYPE_BASE.custom!;
+  const offsets = TYPE_SHADE_OFFSET[type] ?? [0];
+  const off = offsets[shadeIndex % offsets.length] ?? 0;
+  return shiftHex(base, off);
+}
+
 export function getPrizeColor(prize: PrizeDisplayInput, shadeIndex = 0): string {
   const fromAdmin = String(prize.color ?? "").trim();
   if (fromAdmin) return fromAdmin;
-  const type = String(prize.type ?? "custom");
-  const palette = TYPE_COLOR_PALETTE[type] ?? TYPE_COLOR_PALETTE.custom!;
-  return palette[shadeIndex % palette.length] ?? palette[0]!;
+  return getPrizeSectorColor(prize, shadeIndex);
 }
 
-export function getPrizeLabelTextClass(hex: string): "roulette-game__label--on-dark" | "roulette-game__label--on-light" {
-  const h = hex.replace("#", "");
-  if (h.length !== 6) return "roulette-game__label--on-dark";
-  const r = parseInt(h.slice(0, 2), 16);
-  const g = parseInt(h.slice(2, 4), 16);
-  const b = parseInt(h.slice(4, 6), 16);
-  const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
-  return luminance > 0.62 ? "roulette-game__label--on-light" : "roulette-game__label--on-dark";
+export function getPrizeAccentClass(prize: PrizeDisplayInput): string {
+  const type = String(prize.type ?? "custom");
+  return `roulette-prize-accent--${type.replace(/[^a-z0-9_]/gi, "_")}`;
+}
+
+export function getPrizeLabelTextClass(_hex: string): "roulette-game__label--on-dark" | "roulette-game__label--on-light" {
+  return "roulette-game__label--on-dark";
 }
 
 export function parsePrizeFromTitle(title: string): PrizeDisplayInput {

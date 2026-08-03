@@ -1,7 +1,8 @@
 import { Router } from "express";
 import {
-  buildProxyUrisFromClientJson,
+  isClientJsonProfileUri,
   parseProxyUri,
+  parseWhitelistJsonImport,
   validateWhitelistKeyInput,
 } from "../configVaultUri.js";
 import {
@@ -27,6 +28,8 @@ import {
   saveWhitelistPurchaseSettings,
   saveWhitelistVaultSettings,
   setWhitelistVaultKeyAssignment,
+  grantWhitelistAccessToUser,
+  revokeWhitelistAccessFromUser,
   updateWhitelistVaultGroup,
   updateWhitelistVaultKey,
   whitelistGroupForApi,
@@ -68,7 +71,9 @@ function includeRaw(): boolean {
 }
 
 function mapKeys(keys: ReturnType<typeof listWhitelistVaultKeys>) {
-  return keys.map((k) => whitelistKeyForApi(k, includeRaw()));
+  const groupsById = new Map(listWhitelistVaultGroups().map((g) => [g.id, g]));
+  // Список: без raw_uri/client_json — иначе мегабайты JSON на каждый refresh.
+  return keys.map((k) => whitelistKeyForApi(k, false, groupsById));
 }
 
 function mapGroups(keys: ReturnType<typeof listWhitelistVaultKeys>) {
@@ -171,6 +176,28 @@ router.post("/purchases/reset-all", (_req, res) => {
     res.json({ ok: true, ...result });
   } catch (e) {
     res.status(500).json({ error: e instanceof Error ? e.message : String(e) });
+  }
+});
+
+/** Включить БС пользователю (все активные ключи в подписке). */
+router.post("/users/:userId/grant", (req, res) => {
+  try {
+    const userId = Math.floor(Number(req.params.userId));
+    grantWhitelistAccessToUser(userId);
+    res.json({ ok: true, user_id: userId });
+  } catch (e) {
+    res.status(400).json({ error: e instanceof Error ? e.message : String(e) });
+  }
+});
+
+/** Снять БС у пользователя. */
+router.post("/users/:userId/revoke", (req, res) => {
+  try {
+    const userId = Math.floor(Number(req.params.userId));
+    revokeWhitelistAccessFromUser(userId);
+    res.json({ ok: true, user_id: userId });
+  } catch (e) {
+    res.status(400).json({ error: e instanceof Error ? e.message : String(e) });
   }
 });
 
@@ -311,15 +338,15 @@ router.post("/import-json", (req, res) => {
       res.status(400).json({ error: "Вставьте JSON-конфиг" });
       return;
     }
-    const built = buildProxyUrisFromClientJson(jsonText);
-    if ("error" in built) {
-      res.status(400).json({ error: built.error });
+    const parsed = parseWhitelistJsonImport(jsonText);
+    if ("error" in parsed) {
+      res.status(400).json({ error: parsed.error });
       return;
     }
     const assign = parseAssignment(b);
     const customName = String(b.name ?? "").trim();
     const importAll = b.import_all !== false && b.import_all !== 0 && b.import_all !== "0";
-    const items = built.uris.length > 1 && importAll ? built.uris : [built.uris[0]!];
+    const items = parsed.items.length > 1 && importAll ? parsed.items : [parsed.items[0]!];
     const created: ReturnType<typeof createWhitelistVaultKey>[] = [];
     const errors: string[] = [];
     for (const item of items) {
@@ -336,7 +363,7 @@ router.post("/import-json", (req, res) => {
             include_in_sale: b.include_in_sale === true || b.include_in_sale === 1 || b.include_in_sale === "1",
             notify_on_fail: !(b.notify_on_fail === false || b.notify_on_fail === 0 || b.notify_on_fail === "0"),
             source_type: "json_import",
-            client_json: jsonText,
+            client_json: item.client_json,
             assignment_mode: assign.assignment_mode,
             assigned_user_ids: assign.assigned_user_ids,
           }),
@@ -368,17 +395,18 @@ router.post("/parse-json", (req, res) => {
       res.status(400).json({ error: "Вставьте JSON-конфиг" });
       return;
     }
-    const built = buildProxyUrisFromClientJson(jsonText);
-    if ("error" in built) {
-      res.status(400).json({ error: built.error });
+    const parsed = parseWhitelistJsonImport(jsonText);
+    if ("error" in parsed) {
+      res.status(400).json({ error: parsed.error });
       return;
     }
-    const first = built.uris[0]!;
+    const first = parsed.items[0]!;
     res.json({
       uri: first.uri,
       name: first.name,
-      uris: built.uris,
+      uris: parsed.items.map((x) => ({ uri: x.uri, name: x.name })),
       parsed: parseProxyUri(first.uri),
+      client_json_only: isClientJsonProfileUri(first.uri),
     });
   } catch (e) {
     res.status(400).json({ error: e instanceof Error ? e.message : String(e) });

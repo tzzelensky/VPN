@@ -2,11 +2,13 @@ import { useCallback, useEffect, useState } from "react";
 import {
   addServerToAllSubscriptions,
   removeServerFromAllSubscriptions,
+  connectHysteria2Stream,
   deleteServer,
   deployVlessStream,
   installXrayStream,
   listServers,
   patchServer,
+  setServerHysteria2InSubscriptions,
   type NdjsonEvent,
   type ServerDto,
   testServerStream,
@@ -163,6 +165,38 @@ export default function ServersPage({ onLogout }: { onLogout: () => void }) {
                     await deployVlessStream(s.id, emit);
                   })
                 }
+                onConnectHysteria2={() =>
+                  void runServerStream(s.id, "hysteria2", `Hysteria2: ${s.host}`, async (emit) => {
+                    await connectHysteria2Stream(s.id, emit);
+                  })
+                }
+                onToggleHysteria2Subscriptions={() => {
+                  const enable = !s.hysteria2_in_subscriptions;
+                  const msgText = enable
+                    ? `Добавить Hysteria2 «${s.name || s.host}» в подписки клиентов, у которых выбран этот сервер?`
+                    : `Убрать Hysteria2 «${s.name || s.host}» из подписок? VLESS останется.`;
+                  if (!window.confirm(msgText)) return;
+                  void (async () => {
+                    setBusyId(s.id);
+                    setBusyAction("hy2Subs");
+                    setMsg(null);
+                    try {
+                      await setServerHysteria2InSubscriptions(s.id, enable);
+                      await refresh();
+                      setMsg({
+                        type: "ok",
+                        text: enable
+                          ? "Hysteria2 добавлен в подписки. Клиентам обновите подписку."
+                          : "Hysteria2 убран из подписок.",
+                      });
+                    } catch (e) {
+                      setMsg({ type: "err", text: String(e) });
+                    } finally {
+                      setBusyId(null);
+                      setBusyAction(null);
+                    }
+                  })();
+                }}
                 onAddToAllSubscriptions={() => {
                   const n = s.subscription_users_missing ?? 0;
                   if (

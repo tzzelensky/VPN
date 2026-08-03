@@ -392,7 +392,7 @@ export function saveSurveyRating(input: {
         recipient_id: input.recipient_id,
         response_id: response.id,
         telegram_chat_id: input.telegram_chat_id,
-        expires_at: now + 24 * 60 * 60 * 1000,
+        expires_at: now + 15 * 60 * 1000,
         created_at: now,
       });
     }
@@ -412,22 +412,42 @@ export function saveSurveyFeedback(pendingId: number, text: string): SurveyRespo
     response.feedback_answered_at = now;
     response.updated_at = now;
     store.pending_feedback = store.pending_feedback.filter((p) => p.id !== pendingId);
-    const recipient = store.recipients.find((r) => r.id === pending.recipient_id);
-    if (recipient) recipient.status = "answered";
-    const survey = store.surveys.find((s) => s.id === pending.survey_id);
-    if (survey) {
-      survey.answered_count = store.recipients.filter((r) => r.survey_id === pending.survey_id && r.status === "answered").length;
-      if (survey.answered_count > 0 && survey.status !== "archived" && survey.status !== "draft") {
-        survey.status = "completed";
-      }
-    }
+    finalizeRecipientAnswered(store, pending.recipient_id, pending.survey_id);
     return response;
   });
 }
 
+/** Закрыть ожидание комментария без текста (кнопка / отмена / истечение). */
+export function dismissSurveyPendingFeedback(pendingId: number): boolean {
+  return mutate((store) => {
+    const pending = store.pending_feedback.find((p) => p.id === pendingId);
+    if (!pending) return false;
+    store.pending_feedback = store.pending_feedback.filter((p) => p.id !== pendingId);
+    finalizeRecipientAnswered(store, pending.recipient_id, pending.survey_id);
+    return true;
+  });
+}
+
+function finalizeRecipientAnswered(store: Store, recipientId: number, surveyId: number): void {
+  const recipient = store.recipients.find((r) => r.id === recipientId);
+  if (recipient) recipient.status = "answered";
+  const survey = store.surveys.find((s) => s.id === surveyId);
+  if (survey) {
+    survey.answered_count = store.recipients.filter((r) => r.survey_id === surveyId && r.status === "answered").length;
+    if (survey.answered_count > 0 && survey.status !== "archived" && survey.status !== "draft") {
+      survey.status = "completed";
+    }
+  }
+}
+
 export function clearExpiredPendingFeedback(now = Date.now()): void {
   mutate((store) => {
+    const expired = store.pending_feedback.filter((p) => p.expires_at <= now);
+    if (expired.length === 0) return;
     store.pending_feedback = store.pending_feedback.filter((p) => p.expires_at > now);
+    for (const p of expired) {
+      finalizeRecipientAnswered(store, p.recipient_id, p.survey_id);
+    }
   });
 }
 

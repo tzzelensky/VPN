@@ -10,10 +10,12 @@ import {
   listRouletteTicketPurchaseTransactions,
   normalizeRoulettePrizeChances,
   normalizeRouletteTicketShop,
+  normalizeRouletteUiMode,
   readRouletteConfig,
   saveRoulettePrizes,
   setGameTicketsPerPurchase,
   setRouletteTicketShop,
+  setRouletteUiMode,
   setWebAppActiveGame,
   validateRouletteTicketShop,
   type RoulettePrizeRow,
@@ -50,10 +52,14 @@ router.put("/settings", (req, res) => {
     const body = (req.body ?? {}) as {
       active_game?: WebAppActiveGame;
       tickets_per_purchase?: unknown;
+      ui_mode?: unknown;
       ticket_shop?: Partial<RouletteTicketShopConfig>;
     };
     if (body.active_game === "none" || body.active_game === "dropper" || body.active_game === "roulette") {
       setWebAppActiveGame(body.active_game);
+    }
+    if (body.ui_mode != null) {
+      setRouletteUiMode(normalizeRouletteUiMode(body.ui_mode));
     }
     if (body.tickets_per_purchase != null) {
       setGameTicketsPerPurchase(Math.floor(Number(body.tickets_per_purchase) || 0));
