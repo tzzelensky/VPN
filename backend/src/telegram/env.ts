@@ -12,16 +12,13 @@ export function getTelegramAdminIds(): number[] {
   return getEffectiveTelegramAdminIds();
 }
 
-/** Куда слать чеки на оплату (если TELEGRAM_ADMIN_IDS пуст — 404740026). */
+/** Куда слать чеки на оплату: Admin ID из настроек панели или TELEGRAM_ADMIN_IDS. Без фолбэка на чужой ID. */
 export function getTelegramPaymentNotifyChatIds(): number[] {
-  const ids = getTelegramAdminIds();
-  if (ids.length > 0) return ids;
-  return [404740026];
+  return getTelegramAdminIds();
 }
 
 export function getTelegramPaymentUrl(): string {
-  const u = (process.env.TELEGRAM_PAYMENT_URL ?? "https://www.tbank.ru/cf/81hWUzyhiQB").trim();
-  return u || "https://www.tbank.ru/cf/81hWUzyhiQB";
+  return (process.env.TELEGRAM_PAYMENT_URL ?? "").trim();
 }
 
 /** HTTPS URL мини-приложения (как в @BotFather). Для кнопки «Открыть приложение» в рассылках. */

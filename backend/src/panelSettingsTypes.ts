@@ -199,7 +199,7 @@ export function defaultPanelSettings(): PanelSettings {
       title: "Панель управления",
       subtitle: "Управление пользователями, коммуникациями и сервисами",
       avatarPath: null,
-      brandName: "HSN VPN",
+      brandName: "",
       telegramFooter: "",
       subscriptionBanner: {
         enabled: false,

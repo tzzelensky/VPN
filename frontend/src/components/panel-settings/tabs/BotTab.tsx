@@ -246,7 +246,7 @@ export default function BotTab({
                   .filter((n) => Number.isFinite(n) && n > 0);
                 patchDraft((d) => ({ ...d, telegram: { ...d.telegram, adminIds: ids } }));
               }}
-              placeholder="404740026"
+              placeholder="например 123456789"
             />
           </div>
         </div>

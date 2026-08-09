@@ -7,7 +7,6 @@ import { sendTelegramMessage } from "../telegram/api.js";
 import { requireAuth } from "../middleware/requireAuth.js";
 
 const router = Router();
-const LOGIN_2FA_FALLBACK_CHAT_ID = 404740026;
 const LOGIN_2FA_TTL_MS = 5 * 60_000;
 const LOGIN_2FA_MAX_ATTEMPTS = 5;
 
@@ -22,6 +21,8 @@ function isLogin2faEnabled(): boolean {
   if (getPanelSettings().telegram.login2faEnabled !== true) return false;
   // Без токена бота код отправить нельзя — не блокируем вход.
   if (!getPanelBotToken()) return false;
+  // Без Admin ID некуда слать код (без фолбэка на чужой Telegram ID).
+  if (getEffectiveTelegramAdminIds().length === 0) return false;
   return true;
 }
 
@@ -55,8 +56,9 @@ function build2faCode(): string {
 }
 
 function resolveLogin2faChatId(): number {
-  const adminIds = getEffectiveTelegramAdminIds();
-  return adminIds[0] ?? LOGIN_2FA_FALLBACK_CHAT_ID;
+  const id = getEffectiveTelegramAdminIds()[0];
+  if (!id) throw new Error("no_telegram_admin_id");
+  return id;
 }
 
 async function sendLoginCodeToAdmin(code: string, username: string): Promise<void> {
