@@ -40,6 +40,25 @@ need_root() {
   fi
 }
 
+# Защита рабочей панели (devspace5 и аналоги): код в /home/vpnadm/vpn-admin-app, данные в /opt/vpn-admin/data.
+# One-liner install/uninstall для таких хостов запрещён по умолчанию.
+refuse_managed_staging_panel() {
+  if [[ "${ALLOW_EXISTING_PANEL:-0}" == "1" ]]; then
+    warn "ALLOW_EXISTING_PANEL=1 — защита staging-раскладки отключена."
+    return 0
+  fi
+  local wd=""
+  wd="$(systemctl show -p WorkingDirectory --value vpn-admin-api 2>/dev/null || true)"
+  if [[ "$wd" == /home/*/vpn-admin-app/backend || "$wd" == /home/*/vpn-admin-app ]]; then
+    die "Обнаружена рабочая панель (${wd}). install/uninstall one-liner для неё запрещён (чтобы не снести prod/staging). Используйте отдельный чистый VPS. Обход только: ALLOW_EXISTING_PANEL=1"
+  fi
+  if [[ -d /home/${APP_USER}/vpn-admin-app/backend && -d /opt/vpn-admin/data ]]; then
+    if systemctl is-active --quiet vpn-admin-api 2>/dev/null; then
+      die "На сервере уже крутится панель из /home/${APP_USER}/vpn-admin-app + данные /opt/vpn-admin/data. Не запускайте install/uninstall здесь. Обход: ALLOW_EXISTING_PANEL=1"
+    fi
+  fi
+}
+
 parse_args() {
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -219,6 +238,7 @@ remove_user() {
 main() {
   need_root
   parse_args "$@"
+  refuse_managed_staging_panel
   confirm
   # Уходим из /opt/vpn-admin до удаления каталога, иначе shell «ломает» cwd
   ensure_safe_cwd

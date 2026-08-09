@@ -74,6 +74,8 @@ bash <(curl -fsSL https://raw.githubusercontent.com/tzzelensky/VPN/main/scripts/
 
 Удаляются сервис, Nginx-сайт, `/opt/vpn-admin` (и связанные пути), пользователь `vpnadm` и сертификат панели. Node.js / Nginx / UFW как пакеты **не** снимаются.
 
+**Не запускайте** install/uninstall на уже рабочей панели в раскладке `/home/vpnadm/vpn-admin-app` (staging/prod «катай») — скрипт сам откажется. Только чистый VPS.
+
 ---
 
 ## Что делать после входа

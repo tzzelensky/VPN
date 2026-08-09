@@ -43,6 +43,24 @@ need_root() {
   fi
 }
 
+# Не трогаем рабочую панель (код в /home/vpnadm/vpn-admin-app). One-liner только для чистых VPS.
+refuse_managed_staging_panel() {
+  if [[ "${ALLOW_EXISTING_PANEL:-0}" == "1" ]]; then
+    warn "ALLOW_EXISTING_PANEL=1 — защита staging-раскладки отключена."
+    return 0
+  fi
+  local wd=""
+  wd="$(systemctl show -p WorkingDirectory --value vpn-admin-api 2>/dev/null || true)"
+  if [[ "$wd" == /home/*/vpn-admin-app/backend || "$wd" == /home/*/vpn-admin-app ]]; then
+    die "Обнаружена рабочая панель (${wd}). Не ставьте one-liner поверх неё. Используйте чистый VPS. Обход: ALLOW_EXISTING_PANEL=1"
+  fi
+  if [[ -d /home/${APP_USER}/vpn-admin-app/backend && -d /opt/vpn-admin/data ]]; then
+    if systemctl is-active --quiet vpn-admin-api 2>/dev/null; then
+      die "Уже есть панель /home/${APP_USER}/vpn-admin-app + /opt/vpn-admin/data. One-liner сюда нельзя. Обход: ALLOW_EXISTING_PANEL=1"
+    fi
+  fi
+}
+
 detect_os() {
   if [[ ! -f /etc/os-release ]]; then
     die "Не удалось определить ОС. Нужен Ubuntu 22.04/24.04 или Debian 12."
@@ -603,6 +621,7 @@ main() {
   ensure_safe_cwd
   parse_args "$@"
   need_root
+  refuse_managed_staging_panel
   detect_os
   ask_domain
   confirm_install
