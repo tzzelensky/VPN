@@ -1,4 +1,5 @@
 import type { SVGProps } from "react";
+import { usePanelUpdates } from "../panelUpdatesContext";
 
 function IconGear(p: SVGProps<SVGSVGElement>) {
   return (
@@ -28,6 +29,11 @@ type Props = {
 };
 
 export default function AdminSettingsButton({ onClick, variant = "full", className }: Props) {
+  const { updateAvailable } = usePanelUpdates();
+  const badge = updateAvailable ? (
+    <span className="admin-notify-dot" aria-label="Есть обновление панели" title="Есть обновление" />
+  ) : null;
+
   if (variant === "icon") {
     return (
       <button
@@ -38,6 +44,7 @@ export default function AdminSettingsButton({ onClick, variant = "full", classNa
         onClick={onClick}
       >
         <IconGear />
+        {badge}
       </button>
     );
   }
@@ -50,7 +57,10 @@ export default function AdminSettingsButton({ onClick, variant = "full", classNa
       title="Настройки панели"
       onClick={onClick}
     >
-      <IconGear />
+      <span className="admin-settings-btn__icon-wrap">
+        <IconGear />
+        {badge}
+      </span>
       <span>Настройки</span>
     </button>
   );

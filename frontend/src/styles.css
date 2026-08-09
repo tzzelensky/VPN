@@ -12244,6 +12244,7 @@ html[data-theme="light"] .appeals-photo-viewer-close {
 }
 
 .admin-settings-btn {
+  position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -12257,6 +12258,47 @@ html[data-theme="light"] .appeals-photo-viewer-close {
   font-size: 0.82rem;
   font-weight: 500;
   white-space: nowrap;
+}
+
+.admin-settings-btn__icon-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.admin-notify-dot {
+  position: absolute;
+  top: -0.15rem;
+  right: -0.15rem;
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 50%;
+  background: #e23b3b;
+  box-shadow: 0 0 0 2px var(--surface, #111);
+  animation: admin-notify-pulse 1.6s ease-in-out infinite;
+  pointer-events: none;
+}
+
+.admin-notify-dot--inline {
+  position: static;
+  display: inline-block;
+  margin-left: 0.4rem;
+  vertical-align: middle;
+  box-shadow: 0 0 0 2px transparent;
+  flex-shrink: 0;
+}
+
+@keyframes admin-notify-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.15);
+    opacity: 0.85;
+  }
 }
 
 .admin-settings-btn--full {
@@ -12396,7 +12438,10 @@ html.admin-no-hints .setting-hint {
 }
 
 .panel-settings-nav__item {
-  display: block;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.35rem;
   width: 100%;
   text-align: left;
   padding: 0.55rem 0.75rem;
@@ -12568,10 +12613,100 @@ html.admin-no-hints .setting-hint {
 
 .panel-updates-block {
   margin: 0.85rem 0 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+.panel-updates-head {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.panel-updates-status-card {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0.75rem 0.85rem;
+  background: color-mix(in srgb, var(--surface-inset) 70%, transparent);
+}
+
+.panel-updates-status-card--available {
+  border-color: color-mix(in srgb, #e23b3b 55%, var(--border));
+  background: color-mix(in srgb, #e23b3b 10%, var(--surface));
+}
+
+.panel-updates-status-card--checking,
+.panel-updates-status-card--pulling,
+.panel-updates-status-card--building,
+.panel-updates-status-card--restarting {
+  border-color: color-mix(in srgb, var(--accent) 50%, var(--border));
+}
+
+.panel-updates-status-card--done {
+  border-color: color-mix(in srgb, #2f9e6b 55%, var(--border));
+  background: color-mix(in srgb, #2f9e6b 10%, var(--surface));
+}
+
+.panel-updates-status-card--error {
+  border-color: color-mix(in srgb, #e23b3b 55%, var(--border));
+  background: color-mix(in srgb, #e23b3b 12%, var(--surface));
+}
+
+.panel-updates-status-card__title {
+  margin: 0;
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.panel-updates-status-card__msg {
+  margin: 0.35rem 0 0;
+  font-size: 0.8rem;
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+.panel-updates-steps {
+  list-style: none;
+  margin: 0.7rem 0 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.35rem;
+}
+
+.panel-updates-steps__item {
+  text-align: center;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--muted);
+  padding: 0.35rem 0.2rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: transparent;
+}
+
+.panel-updates-steps__item.is-current {
+  color: var(--text);
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  animation: admin-notify-pulse 1.4s ease-in-out infinite;
+}
+
+.panel-updates-steps__item.is-done {
+  color: #2f9e6b;
+  border-color: color-mix(in srgb, #2f9e6b 50%, var(--border));
 }
 
 .panel-updates-status {
   margin-top: 0.5rem;
+}
+
+.panel-settings-nav-mobile .survey-segmented-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
 }
 
 @keyframes password-match-pulse {

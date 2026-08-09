@@ -3,6 +3,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { authMe } from "./api";
 import GlobalAmbientBackdrop from "./components/GlobalAmbientBackdrop";
 import { PanelSettingsProvider } from "./panelSettingsContext";
+import { PanelUpdatesProvider } from "./panelUpdatesContext";
 import { prefetchUsersInBackground } from "./usersPrefetch";
 import { clearUsersListCache } from "./usersListCache";
 import SectionGuard from "./components/SectionGuard";
@@ -133,6 +134,7 @@ export default function App() {
 
   return (
     <PanelSettingsProvider enabled={loggedIn}>
+      <PanelUpdatesProvider enabled={loggedIn}>
       <GlobalAmbientBackdrop />
       <Routes>
         <Route path="/login" element={<LoginPage onSuccess={() => setLoggedIn(true)} />} />
@@ -192,6 +194,7 @@ export default function App() {
         <Route path="/" element={<HomeRedirect loggedIn={loggedIn} />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
+      </PanelUpdatesProvider>
     </PanelSettingsProvider>
   );
 }

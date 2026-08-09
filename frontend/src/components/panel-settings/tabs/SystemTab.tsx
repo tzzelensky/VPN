@@ -1,13 +1,8 @@
 import { useMemo, useState } from "react";
 import type { PanelSettings } from "../../../panelSettingsTypes";
 import { PANEL_HINTS } from "../../../panelSettingsHints";
-import {
-  applyPanelUpdates,
-  changeAdminPassword,
-  checkPanelUpdates,
-  panelSettingsExportUrl,
-  type PanelUpdateCheckDto,
-} from "../../../api";
+import { changeAdminPassword, panelSettingsExportUrl } from "../../../api";
+import { usePanelUpdates } from "../../../panelUpdatesContext";
 import { FieldLabel } from "../../SettingHint";
 import SettingsToggleRow from "../../SettingsToggleRow";
 import SettingsCard from "../SettingsCard";
@@ -41,8 +36,16 @@ export default function SystemTab({
   const [newPassword2, setNewPassword2] = useState("");
   const [pwdBusy, setPwdBusy] = useState(false);
 
-  const [updateInfo, setUpdateInfo] = useState<PanelUpdateCheckDto | null>(null);
-  const [updateBusy, setUpdateBusy] = useState(false);
+  const {
+    info: updateInfo,
+    lastCheckedAt,
+    checking,
+    applyPhase,
+    applyMessage,
+    updateAvailable,
+    refresh,
+    apply,
+  } = usePanelUpdates();
 
   const matchState = useMemo(() => {
     if (!newPassword2) return "idle" as const;
@@ -53,6 +56,9 @@ export default function SystemTab({
 
   const canSubmitPassword =
     Boolean(oldPassword) && matchState === "match" && !pwdBusy && !busy;
+
+  const applying = applyPhase !== "idle" && applyPhase !== "error";
+  const updateBusy = checking || applying;
 
   async function submitPassword() {
     if (!canSubmitPassword) return;
@@ -77,40 +83,26 @@ export default function SystemTab({
   }
 
   async function onCheckUpdates() {
-    setUpdateBusy(true);
     setMsg(null);
-    try {
-      const info = await checkPanelUpdates();
-      setUpdateInfo(info);
-      setMsg({
-        type: info.updateAvailable ? "ok" : info.gitAvailable === false ? "err" : "ok",
-        text: info.message ?? (info.updateAvailable ? "Есть обновления." : "Актуально."),
-      });
-    } catch (e) {
-      setUpdateInfo(null);
-      setMsg({ type: "err", text: String(e) });
-    } finally {
-      setUpdateBusy(false);
+    const info = await refresh();
+    if (!info) {
+      setMsg({ type: "err", text: "Не удалось проверить обновления." });
+      return;
     }
+    setMsg({
+      type: info.updateAvailable ? "ok" : info.gitAvailable === false ? "err" : "ok",
+      text: info.message ?? (info.updateAvailable ? "Есть обновления." : "Актуально."),
+    });
   }
 
-  async function onApplyUpdates() {
-    if (!window.confirm("Скачать обновления, пересобрать панель и перезапустить API?")) return;
-    setUpdateBusy(true);
-    setMsg({ type: "ok", text: "Обновление… это может занять несколько минут." });
-    try {
-      const r = await applyPanelUpdates();
-      setMsg({ type: "ok", text: r.message || "Готово. Перезагрузка…" });
-      // После рестарта API сессия пропадёт — выкидываем на логин
-      window.setTimeout(() => {
-        onPasswordChanged();
-        window.location.assign("/login");
-      }, 3500);
-    } catch (e) {
-      setMsg({ type: "err", text: String(e) });
-      setUpdateBusy(false);
-    }
-  }
+  const phaseSteps = [
+    { id: "pulling" as const, label: "Загрузка" },
+    { id: "building" as const, label: "Сборка" },
+    { id: "restarting" as const, label: "Перезапуск" },
+    { id: "done" as const, label: "Готово" },
+  ];
+  const phaseOrder = ["pulling", "building", "restarting", "done"] as const;
+  const activeIdx = phaseOrder.indexOf(applyPhase as (typeof phaseOrder)[number]);
 
   return (
     <div className="panel-settings-tab-content panel-settings-tab-content--animate">
@@ -279,7 +271,7 @@ export default function SystemTab({
         </div>
       </SettingsCard>
 
-      <SettingsCard title="О системе">
+      <SettingsCard title="О системе" sub={updateAvailable ? "Доступно обновление панели" : undefined}>
         {systemInfo ? (
           <ul className="panel-about-list">
             <li>Версия панели: {String(systemInfo.panelVersion ?? "—")}</li>
@@ -312,7 +304,82 @@ export default function SystemTab({
         ) : (
           <p className="sub">Загрузка…</p>
         )}
-        <div className="panel-updates-block">
+
+        <div className={`panel-updates-block ${updateAvailable ? "panel-updates-block--available" : ""}`}>
+          <div className="panel-updates-head">
+            <strong>Обновления</strong>
+            <span className="field-hint">
+              Автопроверка каждые 30 мин
+              {lastCheckedAt
+                ? ` · последний раз ${new Date(lastCheckedAt).toLocaleTimeString("ru-RU", {
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  })}`
+                : ""}
+            </span>
+          </div>
+
+          <div
+            className={`panel-updates-status-card panel-updates-status-card--${
+              applyPhase !== "idle" ? applyPhase : updateAvailable ? "available" : checking ? "checking" : "ok"
+            }`}
+            aria-live="polite"
+          >
+            {applyPhase !== "idle" ? (
+              <>
+                <p className="panel-updates-status-card__title">
+                  {applyPhase === "done"
+                    ? "Обновление завершено"
+                    : applyPhase === "error"
+                      ? "Ошибка обновления"
+                      : "Идёт обновление…"}
+                </p>
+                <p className="panel-updates-status-card__msg">{applyMessage}</p>
+                {applyPhase !== "error" ? (
+                  <ol className="panel-updates-steps">
+                    {phaseSteps.map((step, idx) => {
+                      const done = activeIdx > idx || applyPhase === "done";
+                      const current = phaseOrder[idx] === applyPhase;
+                      return (
+                        <li
+                          key={step.id}
+                          className={`panel-updates-steps__item${done ? " is-done" : ""}${
+                            current ? " is-current" : ""
+                          }`}
+                        >
+                          {step.label}
+                        </li>
+                      );
+                    })}
+                  </ol>
+                ) : null}
+              </>
+            ) : (
+              <>
+                <p className="panel-updates-status-card__title">
+                  {checking
+                    ? "Проверяем обновления…"
+                    : updateAvailable
+                      ? `Доступно обновлений: ${updateInfo?.behindCount ?? "—"}`
+                      : updateInfo?.gitAvailable === false
+                        ? "Git-обновления недоступны"
+                        : "Панель актуальна"}
+                </p>
+                <p className="panel-updates-status-card__msg">
+                  {updateInfo?.message ??
+                    (checking ? "Запрос к репозиторию…" : "Нажмите «Проверить», чтобы обновить статус.")}
+                  {updateInfo?.gitAvailable && updateInfo.localSha
+                    ? ` (${updateInfo.localSha}${
+                        updateInfo.remoteSha && updateInfo.updateAvailable
+                          ? ` → ${updateInfo.remoteSha}`
+                          : ""
+                      })`
+                    : ""}
+                </p>
+              </>
+            )}
+          </div>
+
           <div className="row-actions">
             <button
               type="button"
@@ -320,32 +387,16 @@ export default function SystemTab({
               disabled={updateBusy}
               onClick={() => void onCheckUpdates()}
             >
-              {updateBusy ? "Проверка…" : "Проверить наличие обновлений"}
+              {checking ? "Проверка…" : "Проверить наличие обновлений"}
             </button>
-            {updateInfo?.updateAvailable ? (
-              <button
-                type="button"
-                className="primary"
-                disabled={updateBusy}
-                onClick={() => void onApplyUpdates()}
-              >
+            {updateAvailable && applyPhase === "idle" ? (
+              <button type="button" className="primary" disabled={updateBusy} onClick={() => void apply()}>
                 Обновить сейчас
               </button>
             ) : null}
           </div>
-          {updateInfo ? (
-            <p className="field-hint panel-updates-status">
-              {updateInfo.message}
-              {updateInfo.gitAvailable && updateInfo.localSha
-                ? ` (${updateInfo.localSha}${
-                    updateInfo.remoteSha && updateInfo.updateAvailable
-                      ? ` → ${updateInfo.remoteSha}`
-                      : ""
-                  })`
-                : ""}
-            </p>
-          ) : null}
         </div>
+
         <button
           type="button"
           className="ghost"
