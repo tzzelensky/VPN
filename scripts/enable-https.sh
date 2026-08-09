@@ -159,27 +159,95 @@ EOF
 
 clear_443_conflicts
 
-# Если :443 уже держит не nginx (часто xray) — HTTPS панели не заработает.
-assert_443_free_or_nginx() {
-  local holders
+# Xray часто занимает 443 — уводим inbound на 8443, чтобы nginx взял HTTPS.
+free_443_for_nginx() {
+  local holders new_port=8443
   holders="$(ss -tlnp 2>/dev/null | grep -E ':443\b' || true)"
   if [[ -z "$holders" ]]; then
     return 0
   fi
   if echo "$holders" | grep -qi 'nginx'; then
-    # nginx уже слушает — ок (перезапишем конфиг и reload)
     return 0
   fi
+
+  warn "Порт 443 занят не nginx:"
   echo "$holders"
-  die "Порт 443 занят НЕ nginx (см. строку выше). Обычно это Xray/Reality.
-Освободите 443 для панели, например:
-  1) В конфиге Xray смените inbound port 443 → 8443 (или другой)
-  2) systemctl restart xray   # или ваш unit (xray / tzadmin-xray)
-  3) bash $0 --domain ${DOMAIN}
-Либо уберите Xray с этого VPS — панель и VPN-нода лучше на разных машинах."
+
+  if ! echo "$holders" | grep -qiE 'xray|x-ui'; then
+    die "Не умею автоматически освободить этот процесс. Остановите его вручную и повторите."
+  fi
+
+  log "Уводим Xray с 443 → ${new_port}…"
+  local configs=(
+    /etc/tzadmin-xray/config.json
+    /usr/local/etc/xray/config.json
+    /etc/xray/config.json
+    /etc/x-ui/xray/config.json
+    /usr/local/x-ui/bin/config.json
+  )
+  local changed=0 f
+  for f in "${configs[@]}"; do
+    [[ -f "$f" ]] || continue
+    if grep -qE '"port"[[:space:]]*:[[:space:]]*443\b' "$f" 2>/dev/null; then
+      cp -a "$f" "${f}.bak-https-$(date +%Y%m%d%H%M%S)"
+      # Меняем только port: 443 → 8443 в JSON (типичный inbound)
+      sed -i -E 's/("port"[[:space:]]*:[[:space:]]*)443\b/\1'"${new_port}"'/g' "$f"
+      ok "Правка порта в ${f}"
+      changed=1
+    fi
+  done
+
+  # Иногда порт только в unit ExecStart / env
+  if [[ "$changed" -eq 0 ]]; then
+    # Попробуем найти конфиг из cmdline процесса
+    local pid conf
+    pid="$(echo "$holders" | sed -n 's/.*pid=\([0-9]\+\).*/\1/p' | head -1)"
+    if [[ -n "$pid" && -r "/proc/${pid}/cmdline" ]]; then
+      conf="$(tr '\0' ' ' <"/proc/${pid}/cmdline" | grep -oE '/[^ ]+\.json' | head -1 || true)"
+      if [[ -n "$conf" && -f "$conf" ]] && grep -qE '"port"[[:space:]]*:[[:space:]]*443\b' "$conf"; then
+        cp -a "$conf" "${conf}.bak-https-$(date +%Y%m%d%H%M%S)"
+        sed -i -E 's/("port"[[:space:]]*:[[:space:]]*)443\b/\1'"${new_port}"'/g' "$conf"
+        ok "Правка порта в ${conf} (из cmdline)"
+        changed=1
+      fi
+    fi
+  fi
+
+  [[ "$changed" -eq 1 ]] || die "Xray на 443, но конфиг с port:443 не найден. Смените порт вручную на ${new_port}."
+
+  # Рестарт известных unit'ов
+  for svc in tzadmin-xray xray xray.service x-ui; do
+    if systemctl list-unit-files "${svc}.service" &>/dev/null || systemctl status "$svc" &>/dev/null; then
+      systemctl restart "$svc" 2>/dev/null || true
+    fi
+  done
+  # На всякий — kill старого, systemd поднимет / или ручной бинарь
+  if ss -tlnp 2>/dev/null | grep -E ':443\b' | grep -qiE 'xray|x-ui'; then
+    local pid2
+    pid2="$(ss -tlnp 2>/dev/null | grep -E ':443\b' | sed -n 's/.*pid=\([0-9]\+\).*/\1/p' | head -1)"
+    if [[ -n "$pid2" ]]; then
+      warn "Принудительно останавливаем pid ${pid2} на 443…"
+      kill "$pid2" 2>/dev/null || true
+      sleep 1
+      kill -9 "$pid2" 2>/dev/null || true
+    fi
+    for svc in tzadmin-xray xray x-ui; do
+      systemctl restart "$svc" 2>/dev/null || true
+    done
+  fi
+
+  sleep 1
+  if ss -tlnp 2>/dev/null | grep -E ':443\b' | grep -qiE 'xray|x-ui'; then
+    ss -tlnp | grep ':443' || true
+    die "Не удалось убрать Xray с 443. Остановите его вручную и повторите."
+  fi
+  ok "443 свободен для nginx (Xray → ${new_port})"
+  if command -v ufw >/dev/null 2>&1; then
+    ufw allow "${new_port}/tcp" >/dev/null 2>&1 || true
+  fi
 }
 
-assert_443_free_or_nginx
+free_443_for_nginx
 
 log "Готовим HTTP для ACME (${DOMAIN})…"
 cat >/etc/nginx/sites-available/${NGINX_SITE} <<EOF
