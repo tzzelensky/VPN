@@ -1,6 +1,13 @@
+import { useMemo, useState } from "react";
 import type { PanelSettings } from "../../../panelSettingsTypes";
 import { PANEL_HINTS } from "../../../panelSettingsHints";
-import { panelSettingsExportUrl } from "../../../api";
+import {
+  applyPanelUpdates,
+  changeAdminPassword,
+  checkPanelUpdates,
+  panelSettingsExportUrl,
+  type PanelUpdateCheckDto,
+} from "../../../api";
 import { FieldLabel } from "../../SettingHint";
 import SettingsToggleRow from "../../SettingsToggleRow";
 import SettingsCard from "../SettingsCard";
@@ -16,6 +23,7 @@ export default function SystemTab({
   setBusy,
   onImport,
   onReset,
+  onPasswordChanged,
 }: {
   draft: PanelSettings;
   patchDraft: PatchDraft;
@@ -26,7 +34,84 @@ export default function SystemTab({
   setBusy: (v: boolean) => void;
   onImport: (settings: PanelSettings) => Promise<void>;
   onReset: () => Promise<void>;
+  onPasswordChanged: () => void;
 }) {
+  const [oldPassword, setOldPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [newPassword2, setNewPassword2] = useState("");
+  const [pwdBusy, setPwdBusy] = useState(false);
+
+  const [updateInfo, setUpdateInfo] = useState<PanelUpdateCheckDto | null>(null);
+  const [updateBusy, setUpdateBusy] = useState(false);
+
+  const matchState = useMemo(() => {
+    if (!newPassword2) return "idle" as const;
+    if (newPassword === newPassword2 && newPassword.length >= 8) return "match" as const;
+    if (newPassword === newPassword2) return "match-short" as const;
+    return "mismatch" as const;
+  }, [newPassword, newPassword2]);
+
+  const canSubmitPassword =
+    Boolean(oldPassword) && matchState === "match" && !pwdBusy && !busy;
+
+  async function submitPassword() {
+    if (!canSubmitPassword) return;
+    setPwdBusy(true);
+    try {
+      await changeAdminPassword(oldPassword, newPassword);
+      setMsg({ type: "ok", text: "Пароль изменён. Выполняется выход…" });
+      setOldPassword("");
+      setNewPassword("");
+      setNewPassword2("");
+      onPasswordChanged();
+    } catch (e) {
+      const raw = String(e);
+      let text = raw;
+      if (raw.includes("invalid_old_password")) text = "Неверный текущий пароль.";
+      else if (raw.includes("password_too_short")) text = "Новый пароль должен быть не короче 8 символов.";
+      else if (raw.includes("password_unchanged")) text = "Новый пароль совпадает со старым.";
+      setMsg({ type: "err", text });
+    } finally {
+      setPwdBusy(false);
+    }
+  }
+
+  async function onCheckUpdates() {
+    setUpdateBusy(true);
+    setMsg(null);
+    try {
+      const info = await checkPanelUpdates();
+      setUpdateInfo(info);
+      setMsg({
+        type: info.updateAvailable ? "ok" : info.gitAvailable === false ? "err" : "ok",
+        text: info.message ?? (info.updateAvailable ? "Есть обновления." : "Актуально."),
+      });
+    } catch (e) {
+      setUpdateInfo(null);
+      setMsg({ type: "err", text: String(e) });
+    } finally {
+      setUpdateBusy(false);
+    }
+  }
+
+  async function onApplyUpdates() {
+    if (!window.confirm("Скачать обновления, пересобрать панель и перезапустить API?")) return;
+    setUpdateBusy(true);
+    setMsg({ type: "ok", text: "Обновление… это может занять несколько минут." });
+    try {
+      const r = await applyPanelUpdates();
+      setMsg({ type: "ok", text: r.message || "Готово. Перезагрузка…" });
+      // После рестарта API сессия пропадёт — выкидываем на логин
+      window.setTimeout(() => {
+        onPasswordChanged();
+        window.location.assign("/login");
+      }, 3500);
+    } catch (e) {
+      setMsg({ type: "err", text: String(e) });
+      setUpdateBusy(false);
+    }
+  }
+
   return (
     <div className="panel-settings-tab-content panel-settings-tab-content--animate">
       <SettingsCard title="Безопасность">
@@ -82,6 +167,61 @@ export default function SystemTab({
             <option value="60">1 час бездействия</option>
             <option value="720">12 часов бездействия</option>
           </select>
+        </div>
+      </SettingsCard>
+
+      <SettingsCard title="Смена пароля" sub="Логин остаётся прежним">
+        <div className="form-field form-field--spaced">
+          <FieldLabel label="Текущий пароль" hint="Пароль, которым вы сейчас входите в панель." />
+          <input
+            type="password"
+            autoComplete="current-password"
+            value={oldPassword}
+            disabled={pwdBusy}
+            onChange={(e) => setOldPassword(e.target.value)}
+          />
+        </div>
+        <div className="form-field form-field--spaced">
+          <FieldLabel label="Новый пароль" hint="Не меньше 8 символов." />
+          <input
+            type="password"
+            autoComplete="new-password"
+            value={newPassword}
+            disabled={pwdBusy}
+            onChange={(e) => setNewPassword(e.target.value)}
+          />
+        </div>
+        <div
+          className={`form-field form-field--spaced password-confirm-field password-confirm-field--${matchState}`}
+        >
+          <FieldLabel label="Повтор нового пароля" hint="Должен совпадать с новым паролем." />
+          <input
+            type="password"
+            autoComplete="new-password"
+            value={newPassword2}
+            disabled={pwdBusy}
+            onChange={(e) => setNewPassword2(e.target.value)}
+          />
+          {matchState === "match" || matchState === "match-short" ? (
+            <p className="password-confirm-hint password-confirm-hint--ok" aria-live="polite">
+              {matchState === "match" ? "Пароли совпадают" : "Совпадают, но короче 8 символов"}
+            </p>
+          ) : null}
+          {matchState === "mismatch" ? (
+            <p className="password-confirm-hint password-confirm-hint--err" aria-live="polite">
+              Пароли не совпадают
+            </p>
+          ) : null}
+        </div>
+        <div className="row-actions">
+          <button
+            type="button"
+            className="primary"
+            disabled={!canSubmitPassword}
+            onClick={() => void submitPassword()}
+          >
+            {pwdBusy ? "Сохранение…" : "Сменить пароль"}
+          </button>
         </div>
       </SettingsCard>
 
@@ -172,6 +312,40 @@ export default function SystemTab({
         ) : (
           <p className="sub">Загрузка…</p>
         )}
+        <div className="panel-updates-block">
+          <div className="row-actions">
+            <button
+              type="button"
+              className="ghost"
+              disabled={updateBusy}
+              onClick={() => void onCheckUpdates()}
+            >
+              {updateBusy ? "Проверка…" : "Проверить наличие обновлений"}
+            </button>
+            {updateInfo?.updateAvailable ? (
+              <button
+                type="button"
+                className="primary"
+                disabled={updateBusy}
+                onClick={() => void onApplyUpdates()}
+              >
+                Обновить сейчас
+              </button>
+            ) : null}
+          </div>
+          {updateInfo ? (
+            <p className="field-hint panel-updates-status">
+              {updateInfo.message}
+              {updateInfo.gitAvailable && updateInfo.localSha
+                ? ` (${updateInfo.localSha}${
+                    updateInfo.remoteSha && updateInfo.updateAvailable
+                      ? ` → ${updateInfo.remoteSha}`
+                      : ""
+                  })`
+                : ""}
+            </p>
+          ) : null}
+        </div>
         <button
           type="button"
           className="ghost"

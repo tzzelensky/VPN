@@ -1,6 +1,7 @@
 # Развёртывание с нуля на пустом VPS (Ubuntu)
 
 > Краткая установка «для чайников» и команда в одну строку — в **[README.md](README.md)**.  
+> Удаление панели: `bash <(curl -fsSL https://raw.githubusercontent.com/tzzelensky/VPN/main/scripts/uninstall.sh)`  
 > Ниже — подробная ручная инструкция по шагам.
 
 Пошаговая инструкция для **нового VPS** с **Ubuntu 22.04 или 24.04 LTS**: обновление системы, firewall, Node.js, Nginx, SSL, клонирование проекта, сборка, systemd, проверка.

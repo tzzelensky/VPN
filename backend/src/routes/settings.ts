@@ -1,5 +1,7 @@
 import { Router } from "express";
+import fs from "node:fs";
 import os from "node:os";
+import path from "node:path";
 import { requireAuth } from "../middleware/requireAuth.js";
 import {
   deletePanelAvatarFiles,
@@ -135,8 +137,24 @@ router.get("/export", (_req, res) => {
 router.get("/system", (_req, res) => {
   const s = getPanelSettings();
   const tokenInfo = getPanelBotTokenMasked();
+  const appRoot = (() => {
+    const fromEnv = (process.env.APP_ROOT ?? "").trim();
+    if (fromEnv) return fromEnv;
+    const cwd = process.cwd();
+    const parent = path.dirname(cwd);
+    return parent;
+  })();
+  let panelVersion = process.env.npm_package_version ?? "1.0.0";
+  try {
+    const text = fs.readFileSync(path.join(appRoot, "frontend", "src", "panelVersion.ts"), "utf8");
+    const major = /PANEL_VERSION_MAJOR\s*=\s*(\d+)/.exec(text)?.[1];
+    const minor = /PANEL_VERSION_MINOR\s*=\s*(\d+)/.exec(text)?.[1];
+    if (major && minor) panelVersion = `${major}.${minor}`;
+  } catch {
+    /* keep npm version */
+  }
   res.json({
-    panelVersion: process.env.npm_package_version ?? "1.0.0",
+    panelVersion,
     nodeVersion: process.version,
     environment: process.env.NODE_ENV === "production" ? "production" : "development",
     uptimeSec: Math.floor((Date.now() - startTime) / 1000),

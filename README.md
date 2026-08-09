@@ -47,7 +47,25 @@ bash <(curl -fsSL https://raw.githubusercontent.com/tzzelensky/VPN/main/scripts/
 
 Сохраните пароль — он также лежит в файле `/opt/vpn-admin/backend/.env`.
 
-После установки откройте в браузере адрес, который вывел скрипт, и войдите в панель.
+После установки откройте в браузере адрес, который вывел скрипт, и войдите **логином и паролем** (двухфакторка через Telegram по умолчанию **выключена**).
+
+---
+
+## Полное удаление
+
+С сервера от root:
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/tzzelensky/VPN/main/scripts/uninstall.sh)
+```
+
+Без подтверждения:
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/tzzelensky/VPN/main/scripts/uninstall.sh) -- --force
+```
+
+Удаляются сервис, Nginx-сайт, `/opt/vpn-admin` (и связанные пути), пользователь `vpnadm` и сертификат панели. Node.js / Nginx / UFW как пакеты **не** снимаются.
 
 ---
 
@@ -60,9 +78,17 @@ bash <(curl -fsSL https://raw.githubusercontent.com/tzzelensky/VPN/main/scripts/
 
 Панель **не** ставит Xray на сам «панельный» VPS автоматически при установке — Xray ставится на **рабочие VPN-ноды**, которые вы добавляете в UI.
 
+В **Настройки → Система** можно сменить пароль админа. В **Настройки → Бот** — включить 2FA через Telegram после настройки бота.
+
 ---
 
 ## Обновление панели
+
+### Из интерфейса
+
+**Настройки → Система → «Проверить наличие обновлений».** Если есть новые коммиты — **«Обновить сейчас»** (git pull + сборка + рестарт API).
+
+### Вручную
 
 На сервере от root (или через `sudo`):
 
@@ -105,14 +131,15 @@ curl -s http://127.0.0.1:4000/api/health
 | Сайт не открывается | DNS A-запись = IP VPS; `ufw status`; `systemctl status nginx` |
 | 502 Bad Gateway | `systemctl status vpn-admin-api`; `journalctl -u vpn-admin-api -n 80 --no-pager` |
 | Certbot не выдал сертификат | Домен ещё не указывает на этот IP — подождите DNS и повторите `certbot --nginx -d ДОМЕН` |
-| Забыли пароль | Смотрите `ADMIN_PASSWORD=` в `/opt/vpn-admin/backend/.env`, затем `systemctl restart vpn-admin-api` |
+| Забыли пароль | Смотрите `ADMIN_PASSWORD=` в `/opt/vpn-admin/backend/.env`, затем `systemctl restart vpn-admin-api`. Или смените в **Настройки → Система** |
+| Код в Telegram / 2FA | По умолчанию 2FA выключена. Включается в **Настройки → Бот** после токена бота |
 | После клона нет папки `backend` | Клонировали без точки в конце — см. раздел в [DEPLOY.md](DEPLOY.md) |
 
 ---
 
 ## Безопасность (обязательно)
 
-- Смените пароль админа после первого входа (или сразу в `.env`).
+- Смените пароль админа после первого входа (в UI или в `.env`).
 - Не публикуйте файл `/opt/vpn-admin/backend/.env`.
 - Делайте бэкап каталога `/opt/vpn-admin/data/` (там вся база панели).
 - Не открывайте в firewall лишние порты; API слушает `4000` только на localhost за Nginx.

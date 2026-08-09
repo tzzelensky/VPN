@@ -42,6 +42,51 @@ export async function logout(): Promise<void> {
   await fetch("/api/auth/logout", { method: "POST", credentials: "include" });
 }
 
+export async function changeAdminPassword(
+  oldPassword: string,
+  newPassword: string,
+): Promise<{ ok: true }> {
+  const res = await fetch("/api/auth/change-password", {
+    method: "POST",
+    credentials: "include",
+    headers: jsonHeaders,
+    body: JSON.stringify({ oldPassword, newPassword }),
+  });
+  return handle(res);
+}
+
+export type PanelUpdateCheckDto = {
+  ok: boolean;
+  gitAvailable: boolean;
+  updateAvailable: boolean;
+  localSha: string | null;
+  remoteSha: string | null;
+  behindCount: number;
+  branch: string | null;
+  currentVersion: string;
+  message?: string;
+  error?: string;
+};
+
+export async function checkPanelUpdates(): Promise<PanelUpdateCheckDto> {
+  const res = await fetch("/api/settings/updates/check", { credentials: "include" });
+  return handle(res);
+}
+
+export async function applyPanelUpdates(): Promise<{
+  ok: true;
+  behindApplied: number;
+  currentVersion: string;
+  message: string;
+  restarting?: boolean;
+}> {
+  const res = await fetch("/api/settings/updates/apply", {
+    method: "POST",
+    credentials: "include",
+  });
+  return handle(res);
+}
+
 export type ServerDto = {
   id: number;
   name: string;

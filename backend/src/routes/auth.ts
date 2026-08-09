@@ -1,7 +1,10 @@
 import { Router, type Request } from "express";
 import { randomInt } from "node:crypto";
-import { getEffectiveTelegramAdminIds, getPanelSettings } from "../panelSettings.js";
+import fs from "node:fs";
+import path from "node:path";
+import { getEffectiveTelegramAdminIds, getPanelBotToken, getPanelSettings } from "../panelSettings.js";
 import { sendTelegramMessage } from "../telegram/api.js";
+import { requireAuth } from "../middleware/requireAuth.js";
 
 const router = Router();
 const LOGIN_2FA_FALLBACK_CHAT_ID = 404740026;
@@ -15,7 +18,31 @@ function isLogin2faDisabledByEnv(): boolean {
 
 function isLogin2faEnabled(): boolean {
   if (isLogin2faDisabledByEnv()) return false;
-  return getPanelSettings().telegram.login2faEnabled !== false;
+  // По умолчанию выключено: включается только явным true в настройках.
+  if (getPanelSettings().telegram.login2faEnabled !== true) return false;
+  // Без токена бота код отправить нельзя — не блокируем вход.
+  if (!getPanelBotToken()) return false;
+  return true;
+}
+
+function resolveEnvFilePath(): string {
+  const fromEnv = (process.env.DOTENV_CONFIG_PATH ?? "").trim();
+  if (fromEnv) return fromEnv;
+  return path.join(process.cwd(), ".env");
+}
+
+function upsertEnvKey(filePath: string, key: string, value: string): void {
+  const line = `${key}=${value}`;
+  let raw = "";
+  try {
+    raw = fs.readFileSync(filePath, "utf8");
+  } catch {
+    fs.writeFileSync(filePath, `${line}\n`, { mode: 0o600 });
+    return;
+  }
+  const re = new RegExp(`^${key}=.*$`, "m");
+  const next = re.test(raw) ? raw.replace(re, line) : `${raw.replace(/\s*$/, "")}\n${line}\n`;
+  fs.writeFileSync(filePath, next, { mode: 0o600 });
 }
 
 function completeLogin(req: Request): void {
@@ -109,6 +136,47 @@ router.post("/logout", (req, res) => {
 
 router.get("/me", (req, res) => {
   res.json({ ok: Boolean(req.session.user?.ok) });
+});
+
+router.post("/change-password", requireAuth, (req, res) => {
+  const adminPass = process.env.ADMIN_PASSWORD ?? "8mayjkjk";
+  const { oldPassword, newPassword } = req.body as {
+    oldPassword?: string;
+    newPassword?: string;
+  };
+  const oldPw = String(oldPassword ?? "");
+  const newPw = String(newPassword ?? "");
+  if (!oldPw || oldPw !== adminPass) {
+    res.status(401).json({ error: "invalid_old_password" });
+    return;
+  }
+  if (newPw.length < 8) {
+    res.status(400).json({ error: "password_too_short", min: 8 });
+    return;
+  }
+  if (newPw === oldPw) {
+    res.status(400).json({ error: "password_unchanged" });
+    return;
+  }
+  // Не допускаем переносы строк — иначе .env сломается
+  if (/[\r\n]/.test(newPw)) {
+    res.status(400).json({ error: "password_invalid_chars" });
+    return;
+  }
+  try {
+    const envPath = resolveEnvFilePath();
+    upsertEnvKey(envPath, "ADMIN_PASSWORD", newPw);
+    process.env.ADMIN_PASSWORD = newPw;
+  } catch (e) {
+    res.status(500).json({
+      error: "env_write_failed",
+      detail: e instanceof Error ? e.message : String(e),
+    });
+    return;
+  }
+  req.session.destroy(() => {
+    res.json({ ok: true });
+  });
 });
 
 export default router;

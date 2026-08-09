@@ -272,13 +272,13 @@ export default function BotTab({
           <SettingsToggleRow
             label="Двухфакторная аутентификация"
             hint={PANEL_HINTS.login2faEnabled}
-            on={draft.telegram.login2faEnabled !== false}
+            on={draft.telegram.login2faEnabled === true}
             onToggle={() =>
               patchDraft((d) => ({
                 ...d,
                 telegram: {
                   ...d.telegram,
-                  login2faEnabled: d.telegram.login2faEnabled === false,
+                  login2faEnabled: d.telegram.login2faEnabled !== true,
                 },
               }))
             }

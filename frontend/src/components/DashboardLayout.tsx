@@ -910,7 +910,11 @@ export default function DashboardLayout({
         </aside>
       ) : null}
 
-      <PanelSettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+      <PanelSettingsModal
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        onLogout={onLogout}
+      />
     </div>
   );
 }

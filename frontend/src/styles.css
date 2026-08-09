@@ -12529,6 +12529,87 @@ html.admin-no-hints .setting-hint {
   padding-top: 0.25rem;
 }
 
+.password-confirm-field input {
+  transition: border-color 0.25s ease, box-shadow 0.25s ease, background-color 0.25s ease;
+}
+
+.password-confirm-field--match input {
+  border-color: #2f9e6b !important;
+  box-shadow: 0 0 0 3px rgba(47, 158, 107, 0.22);
+  animation: password-match-pulse 0.55s ease;
+}
+
+.password-confirm-field--match-short input {
+  border-color: #c9a227 !important;
+  box-shadow: 0 0 0 3px rgba(201, 162, 39, 0.2);
+}
+
+.password-confirm-field--mismatch input {
+  border-color: #d64545 !important;
+  box-shadow: 0 0 0 3px rgba(214, 69, 69, 0.2);
+  animation: password-mismatch-shake 0.4s ease;
+}
+
+.password-confirm-hint {
+  margin: 0.35rem 0 0;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.password-confirm-hint--ok {
+  color: #2f9e6b;
+  animation: password-hint-fade 0.35s ease;
+}
+
+.password-confirm-hint--err {
+  color: #d64545;
+  animation: password-hint-fade 0.35s ease;
+}
+
+.panel-updates-block {
+  margin: 0.85rem 0 0.75rem;
+}
+
+.panel-updates-status {
+  margin-top: 0.5rem;
+}
+
+@keyframes password-match-pulse {
+  0% {
+    transform: scale(1);
+  }
+  40% {
+    transform: scale(1.01);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+@keyframes password-mismatch-shake {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  25% {
+    transform: translateX(-4px);
+  }
+  75% {
+    transform: translateX(4px);
+  }
+}
+
+@keyframes password-hint-fade {
+  from {
+    opacity: 0;
+    transform: translateY(-2px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 .panel-settings-modal .form-label-with-hint {
   display: flex;
   align-items: center;

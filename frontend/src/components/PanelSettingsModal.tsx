@@ -29,7 +29,15 @@ function cloneSettings(s: PanelSettings): PanelSettings {
   return JSON.parse(JSON.stringify(s)) as PanelSettings;
 }
 
-export default function PanelSettingsModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+export default function PanelSettingsModal({
+  open,
+  onClose,
+  onLogout,
+}: {
+  open: boolean;
+  onClose: () => void;
+  onLogout: () => void;
+}) {
   const { settings, meta, telegram, applyPatch, refresh, avatarUrl } = usePanelSettings();
   const [tab, setTab] = useState<SettingsTabId>("brand");
   const [draft, setDraft] = useState<PanelSettings | null>(null);
@@ -487,6 +495,11 @@ export default function PanelSettingsModal({ open, onClose }: { open: boolean; o
                   onReset={async () => {
                     await resetPanelSettings();
                     await refresh();
+                  }}
+                  onPasswordChanged={() => {
+                    onClose();
+                    onLogout();
+                    window.location.assign("/login");
                   }}
                 />
               ) : null}

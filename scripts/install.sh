@@ -334,6 +334,11 @@ EOF
   systemctl daemon-reload
   systemctl enable vpn-admin-api
   systemctl restart vpn-admin-api
+  # Self-update из панели: vpnadm может перезапустить только этот сервис
+  cat >/etc/sudoers.d/vpn-admin-panel <<EOF
+${APP_USER} ALL=(root) NOPASSWD: /bin/systemctl restart vpn-admin-api, /bin/systemctl reload vpn-admin-api, /bin/systemctl status vpn-admin-api, /usr/bin/systemctl restart vpn-admin-api, /usr/bin/systemctl reload vpn-admin-api, /usr/bin/systemctl status vpn-admin-api
+EOF
+  chmod 440 /etc/sudoers.d/vpn-admin-panel
   ok "Сервис vpn-admin-api запущен"
 }
 

@@ -228,7 +228,7 @@ export function defaultPanelSettings(): PanelSettings {
       notifyBroadcastErrors: true,
       notifyServerErrors: true,
       testMode: false,
-      login2faEnabled: true,
+      login2faEnabled: false,
       buttonColors: { ...DEFAULT_TELEGRAM_BUTTON_COLORS },
       aiAssistantEnabled: true,
       geminiModel: "gemini-2.5-flash-lite",

@@ -28,6 +28,7 @@ import { initSurveyDb } from "./surveyDb.js";
 import { initPanelSettings } from "./panelSettings.js";
 import { getDeviceLimitSettings, setDeviceLimitSettings } from "./deviceLimitStore.js";
 import settingsRouter from "./routes/settings.js";
+import panelUpdatesRouter from "./routes/panelUpdates.js";
 import {
   getTelegramBotToken,
   getTelegramWebhookSecret,
@@ -151,6 +152,7 @@ app.use("/api/servers", serversRouter);
 app.use("/api/users", usersRouter);
 app.use("/api/communications", communicationsRouter);
 app.use("/api/settings", settingsRouter);
+app.use("/api/settings/updates", panelUpdatesRouter);
 app.use("/api/subscription-shop", subscriptionShopRouter);
 app.use("/api/referral-program", referralProgramRouter);
 app.use("/api/promo-codes", promoCodesRouter);
