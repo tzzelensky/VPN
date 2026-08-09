@@ -93,17 +93,35 @@ initTriggerMailingsHistoryStore();
 const app = express();
 const PORT = Number(process.env.PORT) || 4000;
 const FRONTEND_ORIGIN = process.env.FRONTEND_ORIGIN ?? "http://localhost:5173";
-const COOKIE_SECURE = process.env.COOKIE_SECURE === "1";
+
+function expandFrontendOrigins(origin: string): string[] {
+  const o = String(origin ?? "")
+    .trim()
+    .replace(/\/$/, "");
+  if (!o) return [];
+  const out = new Set<string>([o]);
+  if (o.startsWith("https://")) out.add(`http://${o.slice("https://".length)}`);
+  if (o.startsWith("http://")) out.add(`https://${o.slice("http://".length)}`);
+  return [...out];
+}
+
 const FRONTEND_ORIGINS = new Set([
-  FRONTEND_ORIGIN,
+  ...expandFrontendOrigins(FRONTEND_ORIGIN),
   "http://localhost:5173",
   "http://127.0.0.1:5173",
 ]);
 
-// За Nginx/Traefik secure-cookie без trust proxy не будет устанавливаться.
-if (COOKIE_SECURE) {
-  app.set("trust proxy", 1);
-}
+const cookieSecureEnv = (process.env.COOKIE_SECURE ?? "").trim().toLowerCase();
+/** true/false по env; иначе auto — Secure только когда запрос реально HTTPS (через Nginx X-Forwarded-Proto). */
+const cookieSecure: boolean | "auto" =
+  cookieSecureEnv === "1" || cookieSecureEnv === "true" || cookieSecureEnv === "yes"
+    ? true
+    : cookieSecureEnv === "0" || cookieSecureEnv === "false" || cookieSecureEnv === "no"
+      ? false
+      : "auto";
+
+// За Nginx нужен trust proxy, иначе Secure-cookie и req.secure ломаются.
+app.set("trust proxy", 1);
 
 app.use(
   cors({
@@ -128,7 +146,7 @@ app.use(
     cookie: {
       httpOnly: true,
       sameSite: "lax",
-      secure: COOKIE_SECURE,
+      secure: cookieSecure,
       maxAge: 30 * 24 * 60 * 60 * 1000,
     },
   }),

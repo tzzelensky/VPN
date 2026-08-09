@@ -159,6 +159,7 @@ ask_domain() {
   fi
   DOMAIN="$(echo "${DOMAIN:-}" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')"
   PUBLIC_IP="${ip}"
+  WANT_HTTPS=0
   if [[ -z "$DOMAIN" ]]; then
     USE_HTTPS=0
     if [[ -z "$PUBLIC_IP" ]]; then
@@ -168,10 +169,12 @@ ask_domain() {
     SERVER_NAME="_"
     ok "Режим без домена: ${PUBLIC_BASE}"
   else
-    USE_HTTPS=1
-    PUBLIC_BASE="https://${DOMAIN}"
+    # До certbot — HTTP. HTTPS и COOKIE_SECURE включаем только после успешного сертификата.
+    USE_HTTPS=0
+    PUBLIC_BASE="http://${DOMAIN}"
     SERVER_NAME="$DOMAIN"
-    ok "Домен: ${DOMAIN} → ${PUBLIC_BASE}"
+    WANT_HTTPS=1
+    ok "Домен: ${DOMAIN} → сначала ${PUBLIC_BASE} (HTTPS после certbot)"
   fi
 }
 
@@ -281,8 +284,9 @@ write_env() {
     upsert_env "DATA_PATH" "${DATA_DIR}/data.json"
     upsert_env "PUBLIC_API_URL" "$PUBLIC_BASE"
     upsert_env "FRONTEND_ORIGIN" "$PUBLIC_BASE"
+    # Secure-cookie только когда HTTPS реально работает (после certbot)
     if [[ "$USE_HTTPS" -eq 1 ]]; then
-      upsert_env "COOKIE_SECURE" "1"
+      upsert_env "COOKIE_SECURE" "auto"
     else
       upsert_env "COOKIE_SECURE" "0"
     fi
@@ -293,7 +297,7 @@ write_env() {
     ADMIN_USER_PRINT="$ADMIN_USER_DEFAULT"
     local cookie_secure="0"
     if [[ "$USE_HTTPS" -eq 1 ]]; then
-      cookie_secure="1"
+      cookie_secure="auto"
     fi
     cat >"$env_file" <<EOF
 PORT=4000
@@ -355,21 +359,17 @@ EOF
   ok "Сервис vpn-admin-api запущен"
 }
 
-write_nginx() {
-  log "Nginx…"
-  # Убираем дефолтный сайт, чтобы не перехватывал /
-  rm -f /etc/nginx/sites-enabled/default
-
-  cat >/etc/nginx/sites-available/vpn-admin <<EOF
-server {
-    listen 80;
-    listen [::]:80;
-    server_name ${SERVER_NAME};
-
+nginx_location_blocks() {
+  # Общие location'ы для HTTP и HTTPS server
+  cat <<EOF
     root ${APP_ROOT}/frontend/dist;
     index index.html;
-
     client_max_body_size 12m;
+
+    location ^~ /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+        default_type text/plain;
+    }
 
     location /api/ {
         proxy_pass http://127.0.0.1:4000;
@@ -417,6 +417,22 @@ server {
     location / {
         try_files \$uri \$uri/ /index.html;
     }
+EOF
+}
+
+write_nginx() {
+  log "Nginx…"
+  rm -f /etc/nginx/sites-enabled/default
+  mkdir -p /var/www/certbot
+
+  # Чистый HTTP (HTTPS допишем после certbot своим конфигом — без сломанного TLS на :443)
+  cat >/etc/nginx/sites-available/vpn-admin <<EOF
+server {
+    listen 80;
+    listen [::]:80;
+    server_name ${SERVER_NAME};
+
+$(nginx_location_blocks)
 }
 EOF
 
@@ -424,7 +440,73 @@ EOF
   nginx -t
   systemctl enable --now nginx
   systemctl reload nginx
-  ok "Nginx настроен"
+  ok "Nginx настроен (HTTP)"
+}
+
+write_nginx_ssl() {
+  local domain="$1"
+  local cert="/etc/letsencrypt/live/${domain}/fullchain.pem"
+  local key="/etc/letsencrypt/live/${domain}/privkey.pem"
+  [[ -f "$cert" && -f "$key" ]] || die "Нет сертификата: ${cert}"
+
+  cat >/etc/nginx/sites-available/vpn-admin <<EOF
+server {
+    listen 80;
+    listen [::]:80;
+    server_name ${domain};
+
+    location ^~ /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+        default_type text/plain;
+    }
+
+    location / {
+        return 301 https://\$host\$request_uri;
+    }
+}
+
+server {
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
+    server_name ${domain};
+
+    ssl_certificate ${cert};
+    ssl_certificate_key ${key};
+    ssl_session_timeout 1d;
+    ssl_session_cache shared:SSL:10m;
+    ssl_protocols TLSv1.2 TLSv1.3;
+
+$(nginx_location_blocks)
+}
+EOF
+
+  nginx -t
+  systemctl reload nginx
+}
+
+enable_https_env() {
+  local domain="$1"
+  local env_file="${APP_ROOT}/backend/.env"
+  PUBLIC_BASE="https://${domain}"
+  USE_HTTPS=1
+  if [[ -f "$env_file" ]]; then
+    if grep -q '^PUBLIC_API_URL=' "$env_file"; then
+      sed -i "s|^PUBLIC_API_URL=.*|PUBLIC_API_URL=${PUBLIC_BASE}|" "$env_file"
+    else
+      echo "PUBLIC_API_URL=${PUBLIC_BASE}" >>"$env_file"
+    fi
+    if grep -q '^FRONTEND_ORIGIN=' "$env_file"; then
+      sed -i "s|^FRONTEND_ORIGIN=.*|FRONTEND_ORIGIN=${PUBLIC_BASE}|" "$env_file"
+    else
+      echo "FRONTEND_ORIGIN=${PUBLIC_BASE}" >>"$env_file"
+    fi
+    if grep -q '^COOKIE_SECURE=' "$env_file"; then
+      sed -i 's|^COOKIE_SECURE=.*|COOKIE_SECURE=auto|' "$env_file"
+    else
+      echo "COOKIE_SECURE=auto" >>"$env_file"
+    fi
+  fi
+  systemctl restart vpn-admin-api
 }
 
 setup_ufw() {
@@ -436,7 +518,6 @@ setup_ufw() {
   ufw allow OpenSSH >/dev/null 2>&1 || ufw allow 22/tcp >/dev/null 2>&1 || true
   ufw allow 80/tcp >/dev/null 2>&1 || true
   ufw allow 443/tcp >/dev/null 2>&1 || true
-  # Не блокируем SSH: включаем только если ещё не active, с --force
   if ufw status 2>/dev/null | grep -qi "Status: inactive"; then
     ufw --force enable
   fi
@@ -448,21 +529,38 @@ try_certbot() {
     warn "Certbot пропущен (SKIP_CERTBOT=1)"
     return
   fi
-  if [[ "$USE_HTTPS" -ne 1 || -z "${DOMAIN:-}" ]]; then
+  if [[ "${WANT_HTTPS:-0}" -ne 1 || -z "${DOMAIN:-}" ]]; then
     warn "HTTPS пропущен (нет домена). Позже: укажите домен и выполните certbot."
     return
   fi
 
-  log "Пробуем получить HTTPS-сертификат для ${DOMAIN}…"
-  if certbot --nginx -d "$DOMAIN" --non-interactive --agree-tos --register-unsafely-without-email --redirect; then
-    ok "HTTPS готов: https://${DOMAIN}"
-    # убедимся что COOKIE_SECURE=1
-    sed -i 's|^COOKIE_SECURE=.*|COOKIE_SECURE=1|' "${APP_ROOT}/backend/.env" || true
-    systemctl restart vpn-admin-api
-  else
-    warn "Certbot не смог выдать сертификат (часто DNS ещё не указывает на этот IP)."
+  log "Получаем HTTPS-сертификат для ${DOMAIN}…"
+  mkdir -p /var/www/certbot
+
+  # webroot — предсказуемее, чем certbot --nginx (тот часто ломает конфиг после uninstall)
+  if ! certbot certonly --webroot -w /var/www/certbot -d "$DOMAIN" \
+      --non-interactive --agree-tos --register-unsafely-without-email --keep-until-expiring; then
+    warn "Certbot не смог выдать сертификат (часто DNS ещё не указывает на этот IP или порт 80 закрыт)."
     warn "Когда A-запись домена = IP сервера, выполните:"
-    echo "  certbot --nginx -d ${DOMAIN} --agree-tos -m you@example.com"
+    echo "  certbot certonly --webroot -w /var/www/certbot -d ${DOMAIN} --agree-tos -m you@example.com"
+    echo "  # затем обновите панель / переустановите, либо напишите SSL-server вручную"
+    return
+  fi
+
+  if [[ ! -f "/etc/letsencrypt/live/${DOMAIN}/fullchain.pem" ]]; then
+    warn "Certbot отработал, но файл сертификата не найден."
+    return
+  fi
+
+  write_nginx_ssl "$DOMAIN"
+  enable_https_env "$DOMAIN"
+
+  sleep 1
+  if curl -fsS --max-time 8 "https://${DOMAIN}/api/health" >/dev/null 2>&1; then
+    ok "HTTPS готов: https://${DOMAIN}"
+  else
+    warn "Сертификат установлен, но https://${DOMAIN}/api/health пока не ответил — проверьте DNS/firewall."
+    ok "Конфиг SSL записан: https://${DOMAIN}"
   fi
 }
 
