@@ -8,7 +8,7 @@
 
 ## Что нужно заранее
 
-1. **VPS** с **Ubuntu 22.04 или 24.04**
+1. **VPS** с **Ubuntu 22.04 / 24.04** или **Debian 12**
 2. Доступ по **SSH** (логин `root` или пользователь с `sudo`)
 3. Желательно **домен** (например `vpn.example.com`), у которого A-запись указывает на IP VPS  
    Без домена тоже можно — панель откроется по `http://IP`, но без нормального HTTPS (для Telegram-бота HTTPS почти обязателен)
@@ -87,7 +87,7 @@ curl -s http://127.0.0.1:4000/api/health
 
 Краткие шаги:
 
-1. Ubuntu → пользователь `vpnadm`, UFW (22/80/443), Node 20, Nginx, Certbot.
+1. Ubuntu/Debian → пользователь `vpnadm`, UFW (22/80/443), Node 20, Nginx, Certbot.
 2. Клон репозитория в `/opt/vpn-admin` (важно: в конец `git clone … .` — с точкой).
 3. Скопировать `backend/.env.example` → `backend/.env`, заполнить секреты и URL.
 4. `npm ci && npm run build` в `backend` и `frontend`.

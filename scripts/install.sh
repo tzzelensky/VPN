@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Установка панели HSN VPN Admin на чистый Ubuntu 22.04 / 24.04.
+# Установка панели HSN VPN Admin на чистый Ubuntu 22.04/24.04 или Debian 12.
 # Запуск от root:
 #   bash <(curl -fsSL https://raw.githubusercontent.com/tzzelensky/VPN/main/scripts/install.sh)
 #   bash <(curl -fsSL https://raw.githubusercontent.com/tzzelensky/VPN/main/scripts/install.sh) -- vpn.example.com
@@ -32,17 +32,38 @@ need_root() {
 
 detect_os() {
   if [[ ! -f /etc/os-release ]]; then
-    die "Не удалось определить ОС. Нужен Ubuntu 22.04 или 24.04."
+    die "Не удалось определить ОС. Нужен Ubuntu 22.04/24.04 или Debian 12."
   fi
   # shellcheck disable=SC1091
   . /etc/os-release
-  if [[ "${ID:-}" != "ubuntu" ]]; then
-    die "Скрипт рассчитан на Ubuntu. Сейчас: ${PRETTY_NAME:-unknown}"
-  fi
-  case "${VERSION_ID:-}" in
-    22.04|24.04) ok "ОС: ${PRETTY_NAME}" ;;
+  local id_like="${ID_LIKE:-}"
+  case "${ID:-}" in
+    ubuntu)
+      case "${VERSION_ID:-}" in
+        22.04|24.04) ok "ОС: ${PRETTY_NAME}" ;;
+        *)
+          warn "Официально поддерживаются Ubuntu 22.04/24.04. У вас: ${PRETTY_NAME}. Продолжаем."
+          ;;
+      esac
+      ;;
+    debian)
+      case "${VERSION_ID:-}" in
+        12|13) ok "ОС: ${PRETTY_NAME}" ;;
+        11)
+          warn "Debian 11 не в основном списке поддержки, но установка обычно проходит. Продолжаем."
+          ;;
+        *)
+          warn "Ожидался Debian 12+. У вас: ${PRETTY_NAME}. Продолжаем на свой страх и риск."
+          ;;
+      esac
+      ;;
     *)
-      warn "Официально поддерживаются Ubuntu 22.04/24.04. У вас: ${PRETTY_NAME}. Продолжаем на свой страх и риск."
+      # Некоторые образы ставят ID=linuxmint и т.п. с ID_LIKE=debian/ubuntu
+      if [[ " ${id_like} " == *" debian "* ]] || [[ " ${id_like} " == *" ubuntu "* ]]; then
+        warn "Дистрибутив ${PRETTY_NAME} (на базе Debian/Ubuntu). Продолжаем."
+      else
+        die "Скрипт рассчитан на Ubuntu или Debian. Сейчас: ${PRETTY_NAME:-unknown}"
+      fi
       ;;
   esac
 }
