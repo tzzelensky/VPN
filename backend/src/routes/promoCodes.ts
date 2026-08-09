@@ -47,7 +47,6 @@ router.post("/", (req, res) => {
       one_time_per_user?: unknown;
       max_uses_total?: unknown;
       max_uses_per_user?: unknown;
-      min_purchase_rub?: unknown;
       first_purchase_only?: unknown;
       new_users_only?: unknown;
       apply_plan_ids?: unknown;
@@ -58,7 +57,7 @@ router.post("/", (req, res) => {
     const created = createPromoCode({
       name: String(body.name ?? "").trim(),
       code: String(body.code ?? "").trim(),
-      type: String(body.type ?? "").trim().toLowerCase() as "percent" | "rub" | "gb" | "days" | "combo",
+      type: String(body.type ?? "").trim().toLowerCase() as "percent" | "rub" | "gb" | "days",
       discount_percent: Math.floor(Number(body.discount_percent) || 0),
       discount_rub: Math.floor(Number(body.discount_rub) || 0),
       gift_gb: Math.floor(Number(body.gift_gb) || 0),
@@ -66,7 +65,6 @@ router.post("/", (req, res) => {
       one_time_per_user: body.one_time_per_user === true || body.one_time_per_user === 1 || body.one_time_per_user === "1",
       max_uses_total: Number.isFinite(Number(body.max_uses_total)) ? Math.floor(Number(body.max_uses_total)) : undefined,
       max_uses_per_user: Number.isFinite(Number(body.max_uses_per_user)) ? Math.floor(Number(body.max_uses_per_user)) : undefined,
-      min_purchase_rub: Number.isFinite(Number(body.min_purchase_rub)) ? Math.floor(Number(body.min_purchase_rub)) : undefined,
       first_purchase_only: body.first_purchase_only === true || body.first_purchase_only === 1 || body.first_purchase_only === "1",
       new_users_only: body.new_users_only === true || body.new_users_only === 1 || body.new_users_only === "1",
       apply_plan_ids: Array.isArray(body.apply_plan_ids) ? body.apply_plan_ids.map((x) => Math.floor(Number(x) || 0)) : undefined,
@@ -98,7 +96,6 @@ router.patch("/:id", (req, res) => {
       one_time_per_user?: unknown;
       max_uses_total?: unknown;
       max_uses_per_user?: unknown;
-      min_purchase_rub?: unknown;
       first_purchase_only?: unknown;
       new_users_only?: unknown;
       apply_plan_ids?: unknown;
@@ -109,7 +106,7 @@ router.patch("/:id", (req, res) => {
     const updated = updatePromoCode(id, {
       ...(body.name !== undefined ? { name: String(body.name ?? "").trim() } : {}),
       ...(body.code !== undefined ? { code: String(body.code ?? "").trim() } : {}),
-      ...(body.type !== undefined ? { type: String(body.type ?? "").trim().toLowerCase() as "percent" | "rub" | "gb" | "days" | "combo" } : {}),
+      ...(body.type !== undefined ? { type: String(body.type ?? "").trim().toLowerCase() as "percent" | "rub" | "gb" | "days" } : {}),
       ...(body.discount_percent !== undefined ? { discount_percent: Math.floor(Number(body.discount_percent) || 0) } : {}),
       ...(body.discount_rub !== undefined ? { discount_rub: Math.floor(Number(body.discount_rub) || 0) } : {}),
       ...(body.gift_gb !== undefined ? { gift_gb: Math.floor(Number(body.gift_gb) || 0) } : {}),
@@ -119,7 +116,6 @@ router.patch("/:id", (req, res) => {
         : {}),
       ...(body.max_uses_total !== undefined ? { max_uses_total: Math.floor(Number(body.max_uses_total) || 0) } : {}),
       ...(body.max_uses_per_user !== undefined ? { max_uses_per_user: Math.floor(Number(body.max_uses_per_user) || 0) } : {}),
-      ...(body.min_purchase_rub !== undefined ? { min_purchase_rub: Math.floor(Number(body.min_purchase_rub) || 0) } : {}),
       ...(body.first_purchase_only !== undefined
         ? { first_purchase_only: body.first_purchase_only === true || body.first_purchase_only === 1 || body.first_purchase_only === "1" }
         : {}),
@@ -173,7 +169,7 @@ router.post("/preview", (req, res) => {
       res.status(409).json({ error: msg });
       return;
     }
-    if (msg === "promo_inactive" || msg === "promo_expired" || msg === "promo_min_purchase_not_met" || msg === "promo_plan_not_allowed") {
+    if (msg === "promo_inactive" || msg === "promo_expired" || msg === "promo_plan_not_allowed") {
       res.status(409).json({ error: msg });
       return;
     }
@@ -246,7 +242,6 @@ router.post("/:id/duplicate", (req, res) => {
       one_time_per_user: source.one_time_per_user,
       max_uses_total: source.max_uses_total,
       max_uses_per_user: source.max_uses_per_user,
-      min_purchase_rub: source.min_purchase_rub,
       first_purchase_only: source.first_purchase_only,
       new_users_only: source.new_users_only,
       apply_plan_ids: source.apply_plan_ids,

@@ -2,6 +2,7 @@ import { createPortal } from "react-dom";
 import PrimaryButton from "./PrimaryButton";
 import SecondaryButton from "./SecondaryButton";
 import type { MySubTheme } from "../types";
+import { useMySubPortalRoot } from "../portalContext";
 
 type Props = {
   open: boolean;
@@ -12,6 +13,7 @@ type Props = {
 };
 
 export default function InstructionModal({ open, onClose, onCopyLink, copyUrl, theme }: Props) {
+  const portalRoot = useMySubPortalRoot();
   if (!open) return null;
 
   const light = theme === "light";
@@ -50,6 +52,6 @@ export default function InstructionModal({ open, onClose, onCopyLink, copyUrl, t
         </div>
       </div>
     </div>,
-    document.body,
+    portalRoot,
   );
 }

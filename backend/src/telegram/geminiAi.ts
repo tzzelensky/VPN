@@ -110,8 +110,28 @@ function shouldTryNextModel(status: number, error: string): boolean {
 const SYSTEM_INSTRUCTION =
   "Ты — помощник поддержки VPN-сервиса HSN в Telegram-боте. Отвечай кратко и по делу на русском языке. " +
   "Помогай с подключением приложения Happ/v2ray, обновлением подписки, оплатой и типичными ошибками. " +
+  "Белые списки (БС) — это платная опция: дополнительные ключи для обхода блокировок, их можно купить. " +
+  "Не говори, что белые списки бесплатные или входят в стандартную подписку. " +
+  "Цену белых списков не выдумывай — направь пользователя в раздел «Белые списки» (БС) в меню бота, там актуальная стоимость и покупка. " +
+  "Можешь назвать разделы обычным текстом в кавычках («Подписка», «Белые списки», «Оплата подписки», «Сообщить о проблеме») — кнопки под сообщением добавит бот сам. " +
+  "Никогда не пиши кнопки, меню или ссылки в квадратных скобках вроде [Подписка] или [Белые списки] — это выглядит как мусор. " +
   "Не выдумывай баланс, срок подписки и статусы оплаты — если нужны данные аккаунта, предложи открыть «Подписка» в меню или написать в «Сообщить о проблеме». " +
   "Не проси и не обрабатывай пароли, токены и полные ссылки подписки. Без воды и без Markdown-таблиц.";
+
+/** Убрать фейковые «кнопки» вида [Подписка] [Белые списки], которые модель иногда дописывает. */
+export function stripFakeMenuButtons(text: string): string {
+  let s = String(text ?? "");
+  // Строка целиком из [Кнопка] [Кнопка2] …
+  s = s.replace(/(?:^|\n)\s*(?:\[[^\]\n]{1,40}\]\s*){1,8}\s*(?=\n|$)/g, "\n");
+  // Хвост сообщения: перевод строки + ряд [Кнопка]
+  s = s.replace(/\n(?:\s*\[[^\]\n]{1,40}\])+\s*$/g, "");
+  // Одиночные известные ярлыки меню в []
+  s = s.replace(
+    /\[\s*(?:Подписка|Белые списки|Оплата подписки|Сообщить о проблеме|Докупить ГБ|Купить устройство|В меню|Главное меню)\s*\]/gi,
+    "",
+  );
+  return s.replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
+}
 
 export function isGeminiConfigured(): boolean {
   return Boolean(getPanelGeminiApiKey());
@@ -215,19 +235,20 @@ export async function generateGeminiReply(
       if (tried.length > 1 || model !== preferred) {
         console.info(`[gemini] using model ${model} (tried: ${tried.join(" → ")})`);
       }
+      const cleaned = stripFakeMenuButtons(result.text) || result.text.trim();
       if (meta) {
         appendAiLog({
           chatId: meta.chatId,
           tgUserId: meta.tgUserId,
           username: meta.username,
           prompt: userText,
-          reply: result.text,
+          reply: cleaned,
           ok: true,
           model,
           latencyMs: Date.now() - started,
         });
       }
-      return result.text;
+      return cleaned;
     }
     lastError = result.error;
     console.error("[gemini] generateContent failed:", model, result.status, result.error);

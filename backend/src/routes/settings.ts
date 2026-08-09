@@ -3,11 +3,9 @@ import os from "node:os";
 import { requireAuth } from "../middleware/requireAuth.js";
 import {
   deletePanelAvatarFiles,
-  deletePanelMenuImageFiles,
   readPanelAvatar,
-  readPanelMenuImage,
   savePanelAvatar,
-  savePanelMenuImage,
+  deletePanelMenuImageFiles,
 } from "../panelSettingsFiles.js";
 import {
   defaultPanelSettings,
@@ -90,23 +88,6 @@ router.get("/avatar", (_req, res) => {
   const file = readPanelAvatar(s.panel.avatarPath);
   if (!file) {
     savePanelSettings({ ...s, panel: { ...s.panel, avatarPath: null } });
-    res.status(404).end();
-    return;
-  }
-  res.setHeader("Content-Type", file.mime);
-  res.setHeader("Cache-Control", "private, no-cache");
-  res.send(file.bytes);
-});
-
-router.get("/telegram-menu-image", (_req, res) => {
-  const s = getPanelSettings();
-  if (!s.telegram.menuImagePath) {
-    res.status(404).end();
-    return;
-  }
-  const file = readPanelMenuImage(s.telegram.menuImagePath);
-  if (!file) {
-    savePanelSettings({ ...s, telegram: { ...s.telegram, menuImagePath: null } });
     res.status(404).end();
     return;
   }
@@ -247,8 +228,6 @@ router.patch("/", (req, res) => {
   if (body.settings?.telegram?.buttonColors) {
     next.telegram.buttonColors = normalizeTelegramButtonColors(body.settings.telegram.buttonColors);
   }
-  // Путь картинки меню меняется только через upload/delete endpoints.
-  next.telegram.menuImagePath = prev.telegram.menuImagePath ?? null;
   if (body.settings?.telegram && "aiAssistantEnabled" in body.settings.telegram) {
     next.telegram.aiAssistantEnabled = body.settings.telegram.aiAssistantEnabled === true;
   }
@@ -260,6 +239,9 @@ router.patch("/", (req, res) => {
   }
   if (body.settings?.ui && "webAppNewDesign" in body.settings.ui) {
     next.ui.webAppNewDesign = body.settings.ui.webAppNewDesign === true;
+  }
+  if (body.settings?.ui && "webAppPreviewEnabled" in body.settings.ui) {
+    next.ui.webAppPreviewEnabled = body.settings.ui.webAppPreviewEnabled === true;
   }
   if (body.botToken != null && String(body.botToken).trim()) {
     const token = String(body.botToken).trim();
@@ -329,39 +311,6 @@ router.delete("/avatar", (_req, res) => {
   const prev = getPanelSettings();
   const saved = savePanelSettings({ ...prev, panel: { ...prev.panel, avatarPath: null } });
   logSettingsAction("Panel avatar removed");
-  res.json(exportSettingsForClient(saved));
-});
-
-router.post("/telegram-menu-image", (req, res) => {
-  const body = req.body as { photo_base64?: unknown; photo_mime?: unknown };
-  const parsed = body.photo_base64 != null ? parseDataUrl(String(body.photo_base64)) : null;
-  if (!parsed) {
-    res.status(400).json({ error: "invalid_menu_image" });
-    return;
-  }
-  try {
-    const rel = savePanelMenuImage(parsed.bytes, String(body.photo_mime ?? parsed.mime));
-    const prev = getPanelSettings();
-    const saved = savePanelSettings({
-      ...prev,
-      telegram: { ...prev.telegram, menuImagePath: rel },
-    });
-    logSettingsAction("Telegram menu image updated");
-    res.json(exportSettingsForClient(saved));
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    res.status(400).json({ error: msg });
-  }
-});
-
-router.delete("/telegram-menu-image", (_req, res) => {
-  deletePanelMenuImageFiles();
-  const prev = getPanelSettings();
-  const saved = savePanelSettings({
-    ...prev,
-    telegram: { ...prev.telegram, menuImagePath: null },
-  });
-  logSettingsAction("Telegram menu image removed");
   res.json(exportSettingsForClient(saved));
 });
 

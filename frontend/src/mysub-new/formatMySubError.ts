@@ -8,6 +8,7 @@ const ERROR_MAP: Record<string, string> = {
   promo_inactive: "Промокод сейчас неактивен.",
   promo_expired: "Срок действия промокода истёк.",
   promo_new_users_only: "Промокод только для новых пользователей.",
+  promo_plan_not_allowed: "Промокод нельзя применить к выбранному тарифу.",
   support_disabled: "Поддержка временно недоступна.",
   game_disabled: "Игра сейчас недоступна.",
   no_tickets: "Нет билетов для игры.",

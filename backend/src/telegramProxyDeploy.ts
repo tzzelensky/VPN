@@ -24,8 +24,16 @@ export function sshCfgFromServer(row: ServerRow): SshConfig {
 
 const MTG_FAKETLS_FIRST_BYTE = 0xee;
 const MTG_SECRET_KEY_BYTES = 16;
-/** Пул SNI для FakeTLS (случайный «отпечаток» вместо устаревшего dd/randomized). */
-const MTG_FRONTING_HOST_POOL = ["google.com"] as const;
+/** Пул SNI для FakeTLS ee (случайный fronting-домен в secret). */
+const MTG_FRONTING_HOST_POOL = [
+  "google.com",
+  "www.google.com",
+  "www.microsoft.com",
+  "www.cloudflare.com",
+  "www.apple.com",
+  "www.amazon.com",
+  "www.bing.com",
+] as const;
 
 /** Домен для FakeTLS в secret (mtg v2: ee + key + hostname). Всегда из пула CDN — не hostname сервера. */
 export function mtgFrontingHostname(_serverHost?: string): string {
@@ -572,9 +580,10 @@ export async function inspectMtprotoService(
   }
 
   const unit = await sshExecCommand(cfg, `systemctl cat ${svc} 2>/dev/null || true`);
-  const legacy_unit = unit.stdout.includes("simple-run") || unit.stdout.includes(" mtg ");
+  // mtg — актуальный путь для FakeTLS ee; legacy только старый CLI `simple-run`.
+  const legacy_unit = /\bsimple-run\b/.test(unit.stdout);
   if (legacy_unit) {
-    warnings.push("Устаревший unit (mtg) — пересохраните/переразверните прокси");
+    warnings.push("Устаревший unit (mtg simple-run) — пересохраните/переразверните прокси");
   }
 
   const portQ = String(port);

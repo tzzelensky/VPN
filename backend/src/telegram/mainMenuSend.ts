@@ -1,6 +1,5 @@
-import { getPanelSettings } from "../panelSettings.js";
-import { readPanelMenuImage } from "../panelSettingsFiles.js";
 import { isAiAssistantEnabled } from "./geminiAi.js";
+import { renderMenuBannerForUser, type MenuBannerKind, type MenuBannerUser } from "./menuBannerImage.js";
 import {
   deleteTelegramMessage,
   forgetBotScreenMessage,
@@ -49,21 +48,26 @@ export async function sendBotMenuMessage(
   chatId: number,
   captionHtml: string,
   replyMarkup: unknown,
+  from?: MenuBannerUser | null,
+  bannerKind: MenuBannerKind = "profile",
 ): Promise<void> {
   await ensureReplyKeyboardRemoved(chatId);
   const caption = truncateCaption(captionHtml);
-  const settings = getPanelSettings();
-  const rel = settings.telegram.menuImagePath;
-  const img = rel ? readPanelMenuImage(rel) : null;
-  if (img) {
-    await sendTelegramPhotoBinary(chatId, img.bytes, {
+  try {
+    const png = await renderMenuBannerForUser(from, bannerKind);
+    await sendTelegramPhotoBinary(chatId, png, {
       caption,
-      mimeType: img.mime,
-      filename: rel ?? "menu.jpg",
+      mimeType: "image/png",
+      filename: "menu-banner.png",
       parse_mode: "HTML",
       reply_markup: replyMarkup,
     });
     return;
+  } catch (e) {
+    console.error(
+      "[telegram] menu banner failed, fallback to text:",
+      e instanceof Error ? e.message : e,
+    );
   }
   await sendTelegramHtml(chatId, caption, replyMarkup);
 }

@@ -202,7 +202,7 @@
   "POST /api/telegram-proxies/{id}/restart": "Перезапускает сервис прокси на сервере.",
   "POST /api/telegram-proxies/check-all": "Запускает фоновую проверку всех активных прокси.",
   "GET /api/telegram-proxies/events": "Журнал событий Telegram-прокси.",
-  "GET /api/telegram-proxies/generate-secret": "Генерирует секрет MTProto (режим dd или ee).",
+  "GET /api/telegram-proxies/generate-secret": "Генерирует секрет MTProto (по умолчанию ee FakeTLS; mode=dd для Obfuscated2).",
   "POST /api/telegram-proxies/servers/{serverId}/check-all": "Проверяет все прокси на указанном сервере.",
   "POST /api/telegram-proxies/servers/{serverId}/purge": "Удаляет все прокси с сервера и с узла.",
   "GET /api/telegram-proxies/settings": "Настройки автопроверки Telegram-прокси.",

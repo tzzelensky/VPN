@@ -6,6 +6,7 @@ import { computeDashboardStats, isExpirySoon, isTrafficSoon, remainingTrafficGb,
 import { clearUsersListCache, readUsersListCache } from "../usersListCache";
 import { notifyUsersChanged } from "../usersEvents";
 import { prefetchUsersInBackground, USERS_CACHE_UPDATED_EVENT } from "../usersPrefetch";
+import { useAnimatedNumber } from "../hooks/useAnimatedNumber";
 import AdminSidebarThemeDock from "./AdminSidebarThemeDock";
 import AdminSettingsButton from "./AdminSettingsButton";
 import PanelSettingsModal from "./PanelSettingsModal";
@@ -212,7 +213,7 @@ const NAV_ITEMS: NavItem[] = [
   { to: "/config-vault", label: "Конфиг-хранилище", Icon: IconConfigVault, sectionKey: "config_vault" },
   { to: "/whitelist-vault", label: "Белые списки", Icon: IconWhiteFlag, sectionKey: "whitelist_vault" },
   { to: "/telegram-proxies", label: "Прокси", Icon: IconProxy, sectionKey: "telegram_proxies" },
-  { to: "/dropper-game", label: "Игра", Icon: IconGame, sectionKey: "dropper_game" },
+  { to: "/roulette-game", label: "Рулетка", Icon: IconGame, sectionKey: "roulette_game" },
   { to: "/daily-gift", label: "Ежедневный подарок", Icon: IconGift, sectionKey: "daily_gift" },
   { to: "/device-limit", label: "Устройства", Icon: IconDevice, sectionKey: "device_limit" },
 ];
@@ -236,6 +237,24 @@ function SidebarNav({ items, onNavigate }: { items: NavItem[]; onNavigate?: () =
       ))}
     </nav>
   );
+}
+
+function resolveSectionLabel(pathname: string, items: NavItem[]): string {
+  const path = pathname.replace(/\/+$/, "") || "/";
+  let best: NavItem | null = null;
+  for (const item of items) {
+    const base = item.to.replace(/\/+$/, "") || "/";
+    if (path === base || path.startsWith(`${base}/`)) {
+      if (!best || base.length > best.to.length) best = item;
+    }
+  }
+  return best?.label ?? "Панель";
+}
+
+function MetricValue({ value, loading }: { value: number | null | undefined; loading: boolean }) {
+  const animated = useAnimatedNumber(loading && value == null ? null : (value ?? 0));
+  if (loading && value == null) return <span className="admin-metric__value admin-metric__value--skeleton">—</span>;
+  return <span className="admin-metric__value">{animated ?? 0}</span>;
 }
 
 export default function DashboardLayout({
@@ -265,6 +284,7 @@ export default function DashboardLayout({
   const shellRef = useRef<HTMLDivElement>(null);
   const drawerRef = useRef<HTMLElement>(null);
   const statsBarRef = useRef<HTMLDivElement>(null);
+  const statsPopoverListRef = useRef<HTMLDivElement>(null);
   const drawerOpenRef = useRef(drawerOpen);
   drawerOpenRef.current = drawerOpen;
 
@@ -520,12 +540,31 @@ export default function DashboardLayout({
     })();
   }
 
-  const statValue = (n: number | undefined) => (statsLoading && stats == null ? "…" : String(n ?? 0));
   const now = Date.now();
   const onlineUsers = statsUsers.filter((u) => u.online);
   const expiringSoonUsers = statsUsers
     .filter((u) => u.enable && (isExpirySoon(u, now) || isTrafficSoon(u)))
     .sort((a, b) => a.name.localeCompare(b.name, "ru-RU"));
+  const warnActive = (stats?.expiringSoonCount ?? 0) > 0;
+
+  useEffect(() => {
+    if (statsPanelOpen == null) return;
+    const list = statsPopoverListRef.current;
+    if (!list) return;
+    const syncScrollable = () => {
+      const needs = list.scrollHeight > list.clientHeight + 1;
+      list.classList.toggle("is-scrollable", needs);
+    };
+    syncScrollable();
+    const raf = requestAnimationFrame(syncScrollable);
+    const t = window.setTimeout(syncScrollable, 320);
+    window.addEventListener("resize", syncScrollable);
+    return () => {
+      cancelAnimationFrame(raf);
+      window.clearTimeout(t);
+      window.removeEventListener("resize", syncScrollable);
+    };
+  }, [statsPanelOpen, onlineUsers.length, expiringSoonUsers.length]);
 
   function formatSoonHint(u: UserDto): string {
     const parts: string[] = [];
@@ -587,6 +626,7 @@ export default function DashboardLayout({
   const panelTitle = panel.settings?.panel.title ?? "Панель управления";
   const panelSubtitle = panel.settings?.panel.subtitle ?? "";
   const brandShort = panel.settings?.panel.brandName ?? panelTitle.split(" ")[0] ?? "VPN";
+  const sectionLabel = resolveSectionLabel(location.pathname, visibleNav);
   const avatarSrc = panel.settings?.panel.avatarPath && panel.avatarUrl ? panel.avatarUrl : null;
   const [avatarBroken, setAvatarBroken] = useState(false);
   useEffect(() => {
@@ -615,8 +655,8 @@ export default function DashboardLayout({
               <div className="admin-sidebar-logo admin-sidebar-logo--placeholder">{brandShort.slice(0, 2).toUpperCase()}</div>
             )}
             <div className="admin-sidebar-brand-text">
-              <span className="admin-sidebar-brand-title">{brandShort}</span>
-              <span className="admin-sidebar-brand-sub">{panelTitle}</span>
+              <span className="admin-sidebar-brand-title">{panelTitle}</span>
+              {panelSubtitle ? <span className="admin-sidebar-brand-sub">{panelSubtitle}</span> : null}
             </div>
           </div>
           <SidebarNav items={visibleNav} />
@@ -642,47 +682,58 @@ export default function DashboardLayout({
           ) : null}
 
           <div className="admin-topbar-leading">
-            <h1 className="admin-topbar-title">{panelTitle}</h1>
-            {panelSubtitle ? <p className="admin-topbar-sub">{panelSubtitle}</p> : null}
-            <div ref={statsBarRef} className="admin-stats-wrap">
-              <div className="admin-stats-bar" aria-label="Сводка по клиентам">
-                <div className="admin-stats-segment">
-                  <span className="admin-stats-label">Клиентов</span>
-                  <span className="admin-stats-value">{statValue(stats?.totalClients)}</span>
-                </div>
-                <div className="admin-stats-divider" aria-hidden />
-                <button
-                  type="button"
-                  className="admin-stats-segment admin-stats-segment--button admin-stats-segment--online"
-                  aria-expanded={statsPanelOpen === "online"}
-                  onClick={() => setStatsPanelOpen((prev) => (prev === "online" ? null : "online"))}
-                >
-                  <span className="admin-stats-label">Онлайн</span>
-                  <span className="admin-stats-value">{statValue(stats?.onlineCount)}</span>
-                </button>
-                <div className="admin-stats-divider" aria-hidden />
-                <button
-                  type="button"
-                  className="admin-stats-segment admin-stats-segment--button admin-stats-segment--warn"
-                  aria-expanded={statsPanelOpen === "warn"}
-                  onClick={() => setStatsPanelOpen((prev) => (prev === "warn" ? null : "warn"))}
-                >
-                  <span className="admin-stats-label">Скоро истекает</span>
-                  <span className="admin-stats-value" title="Подписка ≤ 3 суток или трафик ≤ 30 ГБ">
-                    {statValue(stats?.expiringSoonCount)}
-                  </span>
-                </button>
+            <h1 className="admin-topbar-section">{sectionLabel}</h1>
+            <div
+              ref={statsBarRef}
+              className={`admin-metrics ${statsLoading && stats == null ? "admin-metrics--loading" : "admin-metrics--ready"}`.trim()}
+              aria-label="Сводка по клиентам"
+            >
+              <div className="admin-metric admin-metric--total" style={{ ["--metric-i" as string]: 0 }}>
+                <span className="admin-metric__label">Клиентов</span>
+                <MetricValue value={stats?.totalClients} loading={statsLoading} />
               </div>
-              <div className={`admin-stats-popover ${statsPanelOpen ? "is-open" : ""}`.trim()} aria-hidden={statsPanelOpen == null}>
+              <button
+                type="button"
+                className={`admin-metric admin-metric--online${statsPanelOpen === "online" ? " is-expanded" : ""}`.trim()}
+                style={{ ["--metric-i" as string]: 1 }}
+                aria-expanded={statsPanelOpen === "online"}
+                onClick={() => setStatsPanelOpen((prev) => (prev === "online" ? null : "online"))}
+              >
+                <span className="admin-metric__label">
+                  <span className="admin-metric__pulse" aria-hidden />
+                  Онлайн
+                </span>
+                <MetricValue value={stats?.onlineCount} loading={statsLoading} />
+              </button>
+              <button
+                type="button"
+                className={`admin-metric admin-metric--warn${warnActive ? " is-alert" : ""}${statsPanelOpen === "warn" ? " is-expanded" : ""}`.trim()}
+                style={{ ["--metric-i" as string]: 2 }}
+                aria-expanded={statsPanelOpen === "warn"}
+                title="Подписка ≤ 3 суток или трафик ≤ 30 ГБ"
+                onClick={() => setStatsPanelOpen((prev) => (prev === "warn" ? null : "warn"))}
+              >
+                <span className="admin-metric__label">Скоро истекает</span>
+                <MetricValue value={stats?.expiringSoonCount} loading={statsLoading} />
+              </button>
+
+              <div
+                className={`admin-stats-popover ${statsPanelOpen ? "is-open" : ""}`.trim()}
+                aria-hidden={statsPanelOpen == null}
+              >
                 {statsPanelOpen === "online" ? (
                   <>
                     <div className="admin-stats-popover-title">Сейчас онлайн</div>
-                    <div className="admin-stats-popover-list">
+                    <div className="admin-stats-popover-list" ref={statsPopoverListRef}>
                       {onlineUsers.length === 0 ? (
                         <div className="admin-stats-popover-empty">Сейчас никого нет онлайн.</div>
                       ) : (
-                        onlineUsers.map((u) => (
-                          <div key={u.id} className="admin-stats-popover-row">
+                        onlineUsers.map((u, i) => (
+                          <div
+                            key={u.id}
+                            className="admin-stats-popover-row"
+                            style={{ ["--row-i" as string]: i }}
+                          >
                             <span className="admin-stats-popover-name">{u.name}</span>
                           </div>
                         ))
@@ -693,12 +744,16 @@ export default function DashboardLayout({
                 {statsPanelOpen === "warn" ? (
                   <>
                     <div className="admin-stats-popover-title">Скоро истекают</div>
-                    <div className="admin-stats-popover-list">
+                    <div className="admin-stats-popover-list" ref={statsPopoverListRef}>
                       {expiringSoonUsers.length === 0 ? (
                         <div className="admin-stats-popover-empty">Таких подписок сейчас нет.</div>
                       ) : (
-                        expiringSoonUsers.map((u) => (
-                          <div key={u.id} className="admin-stats-popover-row admin-stats-popover-row--renew">
+                        expiringSoonUsers.map((u, i) => (
+                          <div
+                            key={u.id}
+                            className="admin-stats-popover-row admin-stats-popover-row--renew"
+                            style={{ ["--row-i" as string]: i }}
+                          >
                             <div className="admin-stats-popover-main">
                               <span className="admin-stats-popover-name">{u.name}</span>
                               <span className="admin-stats-popover-meta">
@@ -836,8 +891,8 @@ export default function DashboardLayout({
                 <div className="admin-sidebar-logo admin-sidebar-logo--placeholder">{brandShort.slice(0, 2).toUpperCase()}</div>
               )}
               <div className="admin-sidebar-brand-text">
-                <span className="admin-sidebar-brand-title">{brandShort}</span>
-                <span className="admin-sidebar-brand-sub">{panelTitle}</span>
+                <span className="admin-sidebar-brand-title">{panelTitle}</span>
+                {panelSubtitle ? <span className="admin-sidebar-brand-sub">{panelSubtitle}</span> : null}
               </div>
             </div>
             <button type="button" className="ghost admin-drawer-close" aria-label="Закрыть меню" onClick={() => setDrawerOpen(false)}>

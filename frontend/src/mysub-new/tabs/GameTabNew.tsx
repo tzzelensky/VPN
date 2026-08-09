@@ -6,10 +6,12 @@ import { loadMySubWebAppProfile } from "../../api";
 import Card from "../components/Card";
 import SecondaryButton from "../components/SecondaryButton";
 import type { MySubWebAppController } from "../types";
+import { useMySubPortalRoot } from "../portalContext";
 
 type Props = { ctrl: MySubWebAppController };
 
 export default function GameTabNew({ ctrl }: Props) {
+  const portalRoot = useMySubPortalRoot();
   const {
     data,
     initData,
@@ -42,6 +44,8 @@ export default function GameTabNew({ ctrl }: Props) {
       <div className="mn-game-wrap">
         <RouletteGame
           initData={initData}
+          theme={ctrl.theme}
+          previewMode={ctrl.previewMode === true}
           subscriptions={data.subscriptions.map((s) => ({
             id: s.id,
             name: s.name,
@@ -72,6 +76,19 @@ export default function GameTabNew({ ctrl }: Props) {
                       ...s,
                       ...(patch.tickets != null ? { tickets: patch.tickets } : {}),
                       ...(patch.gb_piggy !== undefined ? { gb_piggy: patch.gb_piggy } : {}),
+                      ...(patch.remaining_days !== undefined || patch.remaining_gb !== undefined
+                        ? {
+                            stats: {
+                              ...s.stats,
+                              ...(patch.remaining_days !== undefined
+                                ? { remaining_days: patch.remaining_days }
+                                : {}),
+                              ...(patch.remaining_gb !== undefined
+                                ? { remaining_gb: patch.remaining_gb }
+                                : {}),
+                            },
+                          }
+                        : {}),
                     },
               );
               const totalTickets = subs.reduce((sum, s) => sum + (s.tickets ?? 0), 0);
@@ -125,12 +142,16 @@ export default function GameTabNew({ ctrl }: Props) {
               <SecondaryButton
                 fullWidth
                 className="mn-dropper-play"
-                disabled={dropperStartBusy || !dropperTargetUserId}
+                disabled={ctrl.previewMode || dropperStartBusy || !dropperTargetUserId}
                 onClick={() => void startDropperPlay()}
               >
-                {dropperStartBusy ? "Запуск…" : "Играть"}
+                {ctrl.previewMode ? "Превью — игра отключена" : dropperStartBusy ? "Запуск…" : "Играть"}
               </SecondaryButton>
-              <SecondaryButton fullWidth onClick={openDropperPracticeIntro} disabled={dropperStartBusy}>
+              <SecondaryButton
+                fullWidth
+                onClick={openDropperPracticeIntro}
+                disabled={ctrl.previewMode || dropperStartBusy}
+              >
                 Тренировка
               </SecondaryButton>
               {dropperNoTickets ? (
@@ -160,7 +181,7 @@ export default function GameTabNew({ ctrl }: Props) {
                   onDone={() => void finishDropperAndRefresh()}
                 />
               </div>,
-              document.body,
+              portalRoot,
             )
           : null}
       </>

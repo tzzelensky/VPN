@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useModalEscape } from "../hooks/useModalEscape";
 
 export type DualListItem = { id: number; label: string };
 
@@ -110,11 +111,13 @@ export default function DualListPicker({
     moveToLeft(ids);
   }
 
+  useModalEscape(onClose, open);
+
   if (!open) return null;
 
   return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal comms-picker-modal" onClick={(e) => e.stopPropagation()}>
+    <div className="modal-backdrop">
+      <div className="modal comms-picker-modal">
         <div className="modal-head">
           <h2>{title}</h2>
           <button type="button" className="ghost modal-close" onClick={onClose}>

@@ -1,63 +1,41 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   deletePanelAvatar,
-  deletePanelMenuImage,
   fetchPanelGeminiApiKey,
   fetchPanelSystemInfo,
   fetchPanelTelegramBotToken,
   importPanelSettings,
-  panelSettingsExportUrl,
   resetPanelSettings,
   testTelegramAdminMessage,
   testTelegramBot,
   uploadPanelAvatar,
-  uploadPanelMenuImage,
   type PanelSettingsPatchPayload,
 } from "../api";
 import { usePanelSettings } from "../panelSettingsContext";
 import { normalizeSectionOrder, orderSectionsMeta } from "../panelNavUtils";
 import type { PanelSectionKey, PanelSettings } from "../panelSettingsTypes";
 import { readFileAsDataUrl } from "../avatarCrop";
-import { compressImageForPanelUpload } from "../compressAvatar";
-import { PANEL_HINTS } from "../panelSettingsHints";
 import AdminModalBackdrop from "./AdminModalBackdrop";
 import AvatarCropModal from "./AvatarCropModal";
-import { FieldLabel, SettingHint } from "./SettingHint";
-import SettingsToggleRow from "./SettingsToggleRow";
-import VpnDisplaySettingsPanel from "./VpnDisplaySettingsPanel";
-
-type TabId =
-  | "main"
-  | "sections"
-  | "vpnDisplay"
-  | "telegram"
-  | "appearance"
-  | "security"
-  | "backup"
-  | "about";
-
-const TABS: Array<{ id: TabId; label: string }> = [
-  { id: "main", label: "Основное" },
-  { id: "sections", label: "Разделы" },
-  { id: "vpnDisplay", label: "Отображение VPN" },
-  { id: "telegram", label: "Telegram" },
-  { id: "appearance", label: "Внешний вид" },
-  { id: "security", label: "Безопасность" },
-  { id: "backup", label: "Резервные копии" },
-  { id: "about", label: "О системе" },
-];
+import SettingsNav from "./panel-settings/SettingsNav";
+import BrandTab from "./panel-settings/tabs/BrandTab";
+import NavVpnTab from "./panel-settings/tabs/NavVpnTab";
+import BotTab from "./panel-settings/tabs/BotTab";
+import AppearanceTab from "./panel-settings/tabs/AppearanceTab";
+import SystemTab from "./panel-settings/tabs/SystemTab";
+import type { MsgState, SettingsTabId } from "./panel-settings/types";
 
 function cloneSettings(s: PanelSettings): PanelSettings {
   return JSON.parse(JSON.stringify(s)) as PanelSettings;
 }
 
 export default function PanelSettingsModal({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const { settings, meta, telegram, applyPatch, refresh, avatarUrl, menuImageUrl } = usePanelSettings();
-  const [tab, setTab] = useState<TabId>("main");
+  const { settings, meta, telegram, applyPatch, refresh, avatarUrl } = usePanelSettings();
+  const [tab, setTab] = useState<SettingsTabId>("brand");
   const [draft, setDraft] = useState<PanelSettings | null>(null);
   const [dirty, setDirty] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [msg, setMsg] = useState<{ type: "ok" | "err"; text: string } | null>(null);
+  const [msg, setMsg] = useState<MsgState>(null);
   const [botTokenEdit, setBotTokenEdit] = useState("");
   const [showToken, setShowToken] = useState(false);
   const [revealedToken, setRevealedToken] = useState<string | null>(null);
@@ -69,16 +47,31 @@ export default function PanelSettingsModal({ open, onClose }: { open: boolean; o
   const [clearGeminiKey, setClearGeminiKey] = useState(false);
   const [botTest, setBotTest] = useState<{ type: "ok" | "err"; text: string } | null>(null);
   const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
-  const [menuImagePreview, setMenuImagePreview] = useState<string | null>(null);
   const [avatarCropOpen, setAvatarCropOpen] = useState(false);
   const [avatarCropSrc, setAvatarCropSrc] = useState<string | null>(null);
   const [systemInfo, setSystemInfo] = useState<Record<string, unknown> | null>(null);
   const [dragSectionKey, setDragSectionKey] = useState<PanelSectionKey | null>(null);
   const [overSectionKey, setOverSectionKey] = useState<PanelSectionKey | null>(null);
+  const [sectionsSavedFlash, setSectionsSavedFlash] = useState(false);
+  const [webAppSavedFlash, setWebAppSavedFlash] = useState(false);
   const avatarInputRef = useRef<HTMLInputElement>(null);
-  const menuImageInputRef = useRef<HTMLInputElement>(null);
   const wasOpenRef = useRef(false);
   const lastSyncedAtRef = useRef(0);
+  const flashTimers = useRef<{ sections?: number; webapp?: number }>({});
+
+  function flashSaved(kind: "sections" | "webapp") {
+    const setFlash = kind === "sections" ? setSectionsSavedFlash : setWebAppSavedFlash;
+    setFlash(true);
+    window.clearTimeout(flashTimers.current[kind]);
+    flashTimers.current[kind] = window.setTimeout(() => setFlash(false), 1800);
+  }
+
+  useEffect(() => {
+    return () => {
+      window.clearTimeout(flashTimers.current.sections);
+      window.clearTimeout(flashTimers.current.webapp);
+    };
+  }, []);
 
   useEffect(() => {
     if (!open) {
@@ -94,12 +87,8 @@ export default function PanelSettingsModal({ open, onClose }: { open: boolean; o
     const cloned = cloneSettings(settings);
     cloned.sectionOrder = normalizeSectionOrder(cloned.sectionOrder ?? settings.sectionOrder);
     cloned.vpnDisplay = {
-      serverOrder: Array.isArray(cloned.vpnDisplay?.serverOrder)
-        ? [...cloned.vpnDisplay.serverOrder]
-        : [],
-      entryOrder: Array.isArray(cloned.vpnDisplay?.entryOrder)
-        ? [...cloned.vpnDisplay.entryOrder]
-        : [],
+      serverOrder: Array.isArray(cloned.vpnDisplay?.serverOrder) ? [...cloned.vpnDisplay.serverOrder] : [],
+      entryOrder: Array.isArray(cloned.vpnDisplay?.entryOrder) ? [...cloned.vpnDisplay.entryOrder] : [],
     };
     cloned.panel.subscriptionBanner = {
       ...{
@@ -113,7 +102,6 @@ export default function PanelSettingsModal({ open, onClose }: { open: boolean; o
     };
     cloned.telegram = {
       ...cloned.telegram,
-      menuImagePath: cloned.telegram.menuImagePath ?? null,
       aiAssistantEnabled: cloned.telegram.aiAssistantEnabled !== false,
       geminiModel: cloned.telegram.geminiModel || "gemini-2.5-flash-lite",
     };
@@ -122,15 +110,18 @@ export default function PanelSettingsModal({ open, onClose }: { open: boolean; o
     setBotTokenEdit("");
     setShowToken(false);
     setRevealedToken(null);
+    setGeminiKeyEdit("");
+    setClearGeminiKey(false);
+    setShowGeminiKey(false);
+    setRevealedGeminiKey(null);
     setBotTest(null);
     setAvatarPreview(null);
-    setMenuImagePreview(null);
-    setTab("main");
+    setTab("brand");
     setMsg(null);
   }, [open, settings]);
 
   useEffect(() => {
-    if (open && tab === "about") {
+    if (open && tab === "system") {
       void fetchPanelSystemInfo().then(setSystemInfo).catch(() => setSystemInfo(null));
     }
   }, [open, tab]);
@@ -145,10 +136,22 @@ export default function PanelSettingsModal({ open, onClose }: { open: boolean; o
     return orderSectionsMeta(meta, draft.sectionOrder);
   }, [draft, meta]);
 
+  function patchDraft(fn: (d: PanelSettings) => PanelSettings) {
+    setDraft((prev) => {
+      if (!prev) return prev;
+      setDirty(true);
+      return fn(prev);
+    });
+  }
+
+  function patchDraftQuiet(fn: (d: PanelSettings) => PanelSettings) {
+    setDraft((prev) => (prev ? fn(prev) : prev));
+  }
+
   function reorderSections(from: PanelSectionKey, to: PanelSectionKey) {
     if (from === to) return;
     let nextOrder: PanelSectionKey[] | null = null;
-    patchDraft((d) => {
+    patchDraftQuiet((d) => {
       const order = normalizeSectionOrder(d.sectionOrder);
       const fromIdx = order.indexOf(from);
       const toIdx = order.indexOf(to);
@@ -160,35 +163,17 @@ export default function PanelSettingsModal({ open, onClose }: { open: boolean; o
       return { ...d, sectionOrder: next };
     });
     if (!nextOrder) return;
-    void applyPatch({ settings: { sectionOrder: nextOrder } }).catch((e) => {
-      setMsg({ type: "err", text: `Не удалось сохранить порядок: ${String(e)}` });
-    });
-  }
-
-  function patchDraft(fn: (d: PanelSettings) => PanelSettings) {
-    setDraft((prev) => {
-      if (!prev) return prev;
-      const next = fn(prev);
-      setDirty(true);
-      return next;
-    });
+    void applyPatch({ settings: { sectionOrder: nextOrder } })
+      .then(() => flashSaved("sections"))
+      .catch((e) => {
+        setMsg({ type: "err", text: `Не удалось сохранить порядок: ${String(e)}` });
+      });
   }
 
   function requestClose() {
     if (dirty && !window.confirm("Есть несохранённые изменения. Закрыть без сохранения?")) return;
     onClose();
   }
-
-  useEffect(() => {
-    if (!open) return;
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key !== "Escape") return;
-      e.preventDefault();
-      requestClose();
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [open, dirty]);
 
   async function save(closeAfter: boolean) {
     if (!draft) return;
@@ -273,35 +258,6 @@ export default function PanelSettingsModal({ open, onClose }: { open: boolean; o
     }
   }
 
-  async function onMenuImageFile(file: File | null) {
-    if (!file) return;
-    if (file.size > 5 * 1024 * 1024) {
-      setMsg({ type: "err", text: "Файл больше 5 МБ." });
-      return;
-    }
-    setBusy(true);
-    try {
-      const { dataUrl, mime } = await compressImageForPanelUpload(file, { maxSide: 1280, maxBytes: 500_000 });
-      setMenuImagePreview(dataUrl);
-      const uploaded = await uploadPanelMenuImage(dataUrl, mime);
-      setDraft((d) =>
-        d
-          ? {
-              ...d,
-              telegram: { ...d.telegram, menuImagePath: uploaded.settings.telegram.menuImagePath },
-              updatedAt: uploaded.settings.updatedAt,
-            }
-          : d,
-      );
-      await refresh();
-      setMsg({ type: "ok", text: "Изображение меню бота обновлено." });
-    } catch (e) {
-      setMsg({ type: "err", text: String(e) });
-    } finally {
-      setBusy(false);
-    }
-  }
-
   async function toggleShowBotToken() {
     if (showToken) {
       setShowToken(false);
@@ -348,684 +304,122 @@ export default function PanelSettingsModal({ open, onClose }: { open: boolean; o
     }
   }
 
+  function onToggleWebApp() {
+    if (!draft) return;
+    const next = !(draft.ui.webAppNewDesign ?? false);
+    const ui = { ...draft.ui, webAppNewDesign: next };
+    patchDraftQuiet((d) => ({ ...d, ui }));
+    void applyPatch({ settings: { ui } })
+      .then(() => {
+        flashSaved("webapp");
+        setMsg({
+          type: "ok",
+          text: next ? "Новый дизайн WebApp включён." : "Старый дизайн WebApp включён.",
+        });
+      })
+      .catch((e) => setMsg({ type: "err", text: String(e) }));
+  }
+
   if (!open || !draft) return null;
 
   const avatarDisplaySrc = avatarPreview ?? avatarUrl ?? null;
-  const menuImageDisplaySrc = menuImagePreview ?? menuImageUrl ?? null;
+  const footerMeta = dirty
+    ? "Есть несохранённые изменения"
+    : msg?.type === "ok"
+      ? msg.text
+      : msg?.type === "err"
+        ? msg.text
+        : "Все изменения сохранены";
 
   return (
     <>
-    <AdminModalBackdrop className="panel-settings-backdrop">
-      <div className="modal panel-settings-modal" onClick={(e) => e.stopPropagation()}>
-        <div className="modal-head panel-settings-head">
-          <h2>Настройки панели</h2>
-          <button type="button" className="ghost modal-close" onClick={requestClose} aria-label="Закрыть">
-            ×
-          </button>
-        </div>
-
-        <div className="panel-settings-tabs" role="tablist">
-          {TABS.map((t) => (
-            <button
-              key={t.id}
-              type="button"
-              role="tab"
-              className={`panel-settings-tab ${tab === t.id ? "active" : ""}`}
-              aria-selected={tab === t.id}
-              onClick={() => setTab(t.id)}
-            >
-              {t.label}
+      <AdminModalBackdrop className="panel-settings-backdrop" onClose={requestClose}>
+        <div className="modal panel-settings-modal">
+          <div className="modal-head panel-settings-head">
+            <h2>Настройки панели</h2>
+            <button type="button" className="ghost modal-close" onClick={requestClose} aria-label="Закрыть">
+              ×
             </button>
-          ))}
-        </div>
+          </div>
 
-        <div className="modal-body panel-settings-body">
-          {msg ? <div className={`flash ${msg.type === "ok" ? "ok" : "err"}`}>{msg.text}</div> : null}
+          <div className="panel-settings-shell">
+            <SettingsNav tab={tab} onChange={setTab} />
 
-          {tab === "main" ? (
-            <div className="panel-settings-tab-content">
-              <div className="form-field">
-                <FieldLabel label="Название панели" hint={PANEL_HINTS.panelTitle} />
-                <input
-                  value={draft.panel.title}
-                  onChange={(e) => patchDraft((d) => ({ ...d, panel: { ...d.panel, title: e.target.value } }))}
-                />
-              </div>
-              <div className="form-field">
-                <FieldLabel label="Подпись / описание" hint={PANEL_HINTS.panelSubtitle} />
-                <input
-                  value={draft.panel.subtitle}
-                  onChange={(e) => patchDraft((d) => ({ ...d, panel: { ...d.panel, subtitle: e.target.value } }))}
-                />
-              </div>
-              <div className="form-field">
-                <FieldLabel label="Название бренда для сообщений" hint={PANEL_HINTS.brandName} />
-                <input
-                  value={draft.panel.brandName}
-                  onChange={(e) => patchDraft((d) => ({ ...d, panel: { ...d.panel, brandName: e.target.value } }))}
-                />
-              </div>
-              <div className="form-field">
-                <FieldLabel label="Подпись в Telegram-сообщениях" hint={PANEL_HINTS.telegramFooter} />
-                <textarea
-                  className="comms-textarea"
-                  rows={3}
-                  value={draft.panel.telegramFooter}
-                  onChange={(e) => patchDraft((d) => ({ ...d, panel: { ...d.panel, telegramFooter: e.target.value } }))}
-                />
-              </div>
-              <div className="panel-subscription-text-block">
-                <SettingsToggleRow
-                  label="Текст подписки"
-                  hint={PANEL_HINTS.subscriptionBanner}
-                  on={draft.panel.subscriptionBanner?.enabled ?? false}
-                  onToggle={() =>
-                    patchDraft((d) => ({
-                      ...d,
-                      panel: {
-                        ...d.panel,
-                        subscriptionBanner: {
-                          ...(d.panel.subscriptionBanner ?? {
-                            enabled: false,
-                            text: "",
-                            whitelistText: "",
-                            telegramUrl: "",
-                            telegramLinkText: "тех. поддержку",
-                          }),
-                          enabled: !(d.panel.subscriptionBanner?.enabled ?? false),
-                        },
-                      },
-                    }))
-                  }
-                />
-                {draft.panel.subscriptionBanner?.enabled ? (
-                  <div className="panel-subscription-text-fields">
-                    <div className="form-field">
-                      <FieldLabel label="Текст в Happ / подписке" hint={PANEL_HINTS.subscriptionBannerText} />
-                      <textarea
-                        className="comms-textarea"
-                        rows={5}
-                        placeholder={"Нет подключения к интернету? Обновите подписку 🔄\n🪄 = Подключение к RU сайтам без VPN"}
-                        value={draft.panel.subscriptionBanner.text}
-                        onChange={(e) =>
-                          patchDraft((d) => ({
-                            ...d,
-                            panel: {
-                              ...d.panel,
-                              subscriptionBanner: { ...d.panel.subscriptionBanner, text: e.target.value },
-                            },
-                          }))
-                        }
-                      />
-                    </div>
-                    <div className="form-field">
-                      <FieldLabel
-                        label="Текст для белых списков (Happ)"
-                        hint={PANEL_HINTS.subscriptionBannerWhitelistText}
-                      />
-                      <textarea
-                        className="comms-textarea"
-                        rows={4}
-                        placeholder={"🪄 Белые списки подключены — обновите подписку 🔄"}
-                        value={draft.panel.subscriptionBanner.whitelistText ?? ""}
-                        onChange={(e) =>
-                          patchDraft((d) => ({
-                            ...d,
-                            panel: {
-                              ...d.panel,
-                              subscriptionBanner: {
-                                ...d.panel.subscriptionBanner,
-                                whitelistText: e.target.value,
-                              },
-                            },
-                          }))
-                        }
-                      />
-                    </div>
-                    <div className="form-field">
-                      <FieldLabel label="Ссылка Telegram (поддержка)" hint={PANEL_HINTS.subscriptionBannerTelegram} />
-                      <input
-                        value={draft.panel.subscriptionBanner.telegramUrl}
-                        placeholder="https://t.me/your_support или @username"
-                        onChange={(e) =>
-                          patchDraft((d) => ({
-                            ...d,
-                            panel: {
-                              ...d.panel,
-                              subscriptionBanner: { ...d.panel.subscriptionBanner, telegramUrl: e.target.value },
-                            },
-                          }))
-                        }
-                      />
-                    </div>
-                    <div className="form-field">
-                      <FieldLabel label="Текст ссылки" hint={PANEL_HINTS.subscriptionBannerLinkText} />
-                      <input
-                        value={draft.panel.subscriptionBanner.telegramLinkText}
-                        placeholder="тех. поддержку"
-                        onChange={(e) =>
-                          patchDraft((d) => ({
-                            ...d,
-                            panel: {
-                              ...d.panel,
-                              subscriptionBanner: { ...d.panel.subscriptionBanner, telegramLinkText: e.target.value },
-                            },
-                          }))
-                        }
-                      />
-                    </div>
-                  </div>
-                ) : null}
-              </div>
-              <div className="panel-avatar-block">
-                <FieldLabel label="Аватарка / логотип" hint={PANEL_HINTS.avatar} />
-                <div className="panel-avatar-row">
-                  <button
-                    type="button"
-                    className="panel-avatar-hit"
-                    disabled={busy}
-                    title="Изменить аватарку"
-                    aria-label="Изменить аватарку"
-                    onClick={() => openAvatarCrop()}
-                  >
-                    {avatarDisplaySrc ? (
-                      <img src={avatarDisplaySrc} alt="" className="panel-avatar-preview" />
-                    ) : (
-                      <div className="panel-avatar-placeholder">{draft.panel.title.slice(0, 2).toUpperCase()}</div>
-                    )}
-                  </button>
-                  <div className="panel-avatar-actions">
-                    <input
-                      ref={avatarInputRef}
-                      type="file"
-                      accept="image/png,image/jpeg,image/webp"
-                      className="panel-avatar-file-input"
-                      onChange={(e) => {
-                        void onAvatarFile(e.target.files?.[0] ?? null);
-                        e.target.value = "";
-                      }}
-                    />
-                    <button
-                      type="button"
-                      className="ghost"
-                      disabled={busy}
-                      onClick={() => avatarInputRef.current?.click()}
-                    >
-                      Загрузить
-                    </button>
-                    <button
-                      type="button"
-                      className="ghost"
-                      disabled={busy}
-                      onClick={() => {
-                        void (async () => {
-                          setBusy(true);
-                          try {
-                            await deletePanelAvatar();
-                            await refresh();
-                            setAvatarPreview(null);
-                            setMsg({ type: "ok", text: "Аватарка удалена." });
-                          } catch (e) {
-                            setMsg({ type: "err", text: String(e) });
-                          } finally {
-                            setBusy(false);
-                          }
-                        })();
-                      }}
-                    >
-                      Удалить аватарку
-                    </button>
-                  </div>
-                </div>
-                <p className="field-hint">PNG, JPG или WebP, до 5 МБ (на сервер отправляется сжатая копия).</p>
-              </div>
-              <SettingsToggleRow
-                label="Режим обслуживания"
-                hint={PANEL_HINTS.maintenance}
-                on={draft.maintenance.enabled}
-                onToggle={() => patchDraft((d) => ({ ...d, maintenance: { enabled: !d.maintenance.enabled } }))}
-              />
-            </div>
-          ) : null}
+            <div className="modal-body panel-settings-body">
+              {msg ? <div className={`flash ${msg.type === "ok" ? "ok" : "err"}`}>{msg.text}</div> : null}
 
-          {tab === "sections" ? (
-            <div className="panel-settings-tab-content">
-              <p className="field-hint">{PANEL_HINTS.sectionsIntro}</p>
-              <div className="panel-sections-list settings-toggle-list">
-                {sectionsOrdered.map((s) => (
-                  <div
-                    key={s.key}
-                    className={[
-                      "settings-toggle-row",
-                      "settings-toggle-row--section",
-                      "panel-sections-row",
-                      dragSectionKey === s.key ? "panel-sections-row--dragging" : "",
-                      overSectionKey === s.key && dragSectionKey !== s.key ? "panel-sections-row--over" : "",
-                    ]
-                      .filter(Boolean)
-                      .join(" ")}
-                    draggable
-                    onDragStart={() => setDragSectionKey(s.key)}
-                    onDragEnd={() => {
-                      setDragSectionKey(null);
-                      setOverSectionKey(null);
-                    }}
-                    onDragOver={(e) => {
-                      e.preventDefault();
-                      setOverSectionKey(s.key);
-                    }}
-                    onDragLeave={() => {
-                      if (overSectionKey === s.key) setOverSectionKey(null);
-                    }}
-                    onDrop={(e) => {
-                      e.preventDefault();
-                      if (dragSectionKey) reorderSections(dragSectionKey, s.key);
-                      setDragSectionKey(null);
-                      setOverSectionKey(null);
-                    }}
-                  >
-                    <button
-                      type="button"
-                      className="panel-sections-drag"
-                      title="Перетащите для смены порядка"
-                      aria-label={`Порядок: ${s.label}`}
-                      onMouseDown={(e) => e.stopPropagation()}
-                    >
-                      ⋮⋮
-                    </button>
-                    <div className="settings-toggle-row__label settings-toggle-row__label--stack">
-                      <div className="form-label-with-hint">
-                        <span className="settings-toggle-row__text">{s.label}</span>
-                        <SettingHint text={s.description} />
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      className={`toggle ${draft.sections[s.key] !== false ? "on" : ""}`}
-                      aria-pressed={draft.sections[s.key] !== false}
-                      onClick={() =>
-                        patchDraft((d) => ({
-                          ...d,
-                          sections: { ...d.sections, [s.key]: !(d.sections[s.key] !== false) },
-                        }))
+              {tab === "brand" ? (
+                <BrandTab
+                  draft={draft}
+                  patchDraft={patchDraft}
+                  busy={busy}
+                  avatarDisplaySrc={avatarDisplaySrc}
+                  avatarInputRef={avatarInputRef}
+                  onOpenAvatarCrop={() => openAvatarCrop()}
+                  onAvatarFile={(f) => void onAvatarFile(f)}
+                  onDeleteAvatar={() => {
+                    void (async () => {
+                      setBusy(true);
+                      try {
+                        await deletePanelAvatar();
+                        await refresh();
+                        setAvatarPreview(null);
+                        setMsg({ type: "ok", text: "Аватарка удалена." });
+                      } catch (e) {
+                        setMsg({ type: "err", text: String(e) });
+                      } finally {
+                        setBusy(false);
                       }
-                    />
-                  </div>
-                ))}
-              </div>
-              <div className="row-actions">
-                <button
-                  type="button"
-                  className="ghost"
-                  onClick={() => {
-                    const all = {} as Record<PanelSectionKey, boolean>;
-                    for (const s of meta) all[s.key] = true;
-                    patchDraft((d) => ({ ...d, sections: all }));
+                    })();
                   }}
-                >
-                  Показать все разделы
-                </button>
-                <button
-                  type="button"
-                  className="ghost"
-                  onClick={() => {
-                    if (!window.confirm("Сбросить видимость разделов к стандартной?")) return;
-                    const def = meta.reduce(
-                      (acc, s) => {
-                        acc[s.key] = true;
-                        return acc;
-                      },
-                      {} as Record<PanelSectionKey, boolean>,
-                    );
-                    patchDraft((d) => ({
-                      ...d,
-                      sections: def,
-                      sectionOrder: normalizeSectionOrder(meta.map((m) => m.key)),
-                    }));
-                  }}
-                >
-                  Сбросить к стандартным
-                </button>
-              </div>
-            </div>
-          ) : null}
-
-          {tab === "vpnDisplay" && draft ? (
-            <div className="panel-settings-tab-content">
-              <VpnDisplaySettingsPanel
-                entryOrder={draft.vpnDisplay?.entryOrder ?? []}
-                onEntryOrderChange={(keys) =>
-                  patchDraft((d) => ({
-                    ...d,
-                    vpnDisplay: {
-                      serverOrder: keys
-                        .map((k) => /^vless:(\d+)$/.exec(k))
-                        .filter(Boolean)
-                        .map((m) => Number(m![1])),
-                      entryOrder: keys,
-                    },
-                  }))
-                }
-              />
-            </div>
-          ) : null}
-
-          {tab === "telegram" ? (
-            <div className="panel-settings-tab-content">
-              <div className="form-field">
-                <FieldLabel label="Telegram Bot Token" hint={PANEL_HINTS.botToken} />
-                <div className="panel-token-row">
-                  <input
-                    type={showToken || !telegram?.botTokenConfigured ? "text" : "password"}
-                    value={
-                      botTokenEdit
-                        ? botTokenEdit
-                        : telegram?.botTokenConfigured
-                          ? showToken
-                            ? (revealedToken ?? "")
-                            : "••••••••••••••••"
-                          : ""
-                    }
-                    placeholder={telegram?.botTokenConfigured ? "Оставьте пустым, чтобы не менять" : "Введите новый токен"}
-                    onChange={(e) => {
-                      setBotTokenEdit(e.target.value);
-                      setDirty(true);
-                    }}
-                  />
-                  <button
-                    type="button"
-                    className="ghost"
-                    disabled={(!telegram?.botTokenConfigured && !botTokenEdit) || tokenRevealBusy}
-                    onClick={() => void toggleShowBotToken()}
-                  >
-                    {tokenRevealBusy ? "…" : showToken ? "Скрыть" : "Показать"}
-                  </button>
-                  <button
-                    type="button"
-                    className="ghost"
-                    onClick={() => {
-                      const toCopy =
-                        botTokenEdit.trim() || (showToken ? (revealedToken ?? "").trim() : "");
-                      if (!toCopy) {
-                        setMsg({ type: "err", text: "Нажмите «Показать», чтобы скопировать токен, или введите новый." });
-                        return;
-                      }
-                      void navigator.clipboard.writeText(toCopy);
-                      setMsg({ type: "ok", text: "Скопировано в буфер обмена." });
-                    }}
-                  >
-                    Копировать
-                  </button>
-                </div>
-                <p className="field-hint">
-                  {telegram?.botTokenConfigured
-                    ? "Токен настроен. «Показать» загружает полный токен с сервера."
-                    : "Токен не задан."}
-                </p>
-              </div>
-              <div className="form-field">
-                <FieldLabel label="Gemini API Key" hint={PANEL_HINTS.geminiApiKey} />
-                <div className="panel-token-row">
-                  <input
-                    type={showGeminiKey || (!telegram?.geminiApiKeyConfigured && !clearGeminiKey) ? "text" : "password"}
-                    value={
-                      clearGeminiKey
-                        ? ""
-                        : geminiKeyEdit
-                          ? geminiKeyEdit
-                          : telegram?.geminiApiKeyConfigured
-                            ? showGeminiKey
-                              ? (revealedGeminiKey ?? "")
-                              : "••••••••••••••••"
-                            : ""
-                    }
-                    placeholder={
-                      clearGeminiKey
-                        ? "Ключ будет удалён после сохранения"
-                        : telegram?.geminiApiKeyConfigured
-                          ? "Оставьте пустым, чтобы не менять"
-                          : "Вставьте API key Gemini"
-                    }
-                    disabled={clearGeminiKey}
-                    onChange={(e) => {
-                      setClearGeminiKey(false);
-                      setGeminiKeyEdit(e.target.value);
-                      setDirty(true);
-                    }}
-                  />
-                  <button
-                    type="button"
-                    className="ghost"
-                    disabled={
-                      clearGeminiKey ||
-                      ((!telegram?.geminiApiKeyConfigured || clearGeminiKey) && !geminiKeyEdit) ||
-                      geminiRevealBusy
-                    }
-                    onClick={() => void toggleShowGeminiKey()}
-                  >
-                    {geminiRevealBusy ? "…" : showGeminiKey ? "Скрыть" : "Показать"}
-                  </button>
-                  <button
-                    type="button"
-                    className="ghost"
-                    onClick={() => {
-                      const toCopy =
-                        geminiKeyEdit.trim() || (showGeminiKey ? (revealedGeminiKey ?? "").trim() : "");
-                      if (!toCopy) {
-                        setMsg({
-                          type: "err",
-                          text: "Нажмите «Показать», чтобы скопировать ключ, или введите новый.",
-                        });
-                        return;
-                      }
-                      void navigator.clipboard.writeText(toCopy);
-                      setMsg({ type: "ok", text: "Скопировано в буфер обмена." });
-                    }}
-                  >
-                    Копировать
-                  </button>
-                  {telegram?.geminiApiKeyConfigured && !clearGeminiKey ? (
-                    <button
-                      type="button"
-                      className="ghost"
-                      onClick={() => {
-                        setClearGeminiKey(true);
-                        setGeminiKeyEdit("");
-                        setShowGeminiKey(false);
-                        setRevealedGeminiKey(null);
-                        setDirty(true);
-                      }}
-                    >
-                      Очистить
-                    </button>
-                  ) : null}
-                </div>
-                <p className="field-hint">
-                  {clearGeminiKey
-                    ? "Ключ будет удалён после «Сохранить». Кнопка «Спросить AI» исчезнет из бота."
-                    : telegram?.geminiApiKeyConfigured
-                      ? "Ключ настроен — в боте доступна «Спросить AI». «Показать» загружает полный ключ с сервера."
-                      : "Ключ не задан — кнопка «Спросить AI» в боте скрыта."}
-                </p>
-              </div>
-              <div className="settings-toggle-list" style={{ marginBottom: "1rem" }}>
-                <SettingsToggleRow
-                  label="AI-помощник в боте"
-                  hint={PANEL_HINTS.aiAssistantEnabled}
-                  on={draft.telegram.aiAssistantEnabled !== false}
-                  onToggle={() =>
-                    patchDraft((d) => ({
-                      ...d,
-                      telegram: {
-                        ...d.telegram,
-                        aiAssistantEnabled: d.telegram.aiAssistantEnabled === false,
-                      },
-                    }))
-                  }
                 />
-              </div>
-              <div className="form-field">
-                <FieldLabel label="Модель Gemini" hint={PANEL_HINTS.geminiModel} />
-                <select
-                  value={draft.telegram.geminiModel || "gemini-2.5-flash-lite"}
-                  onChange={(e) =>
-                    patchDraft((d) => ({
-                      ...d,
-                      telegram: { ...d.telegram, geminiModel: e.target.value },
-                    }))
-                  }
-                >
-                  <option value="gemini-2.5-flash-lite">gemini-2.5-flash-lite (рекомендуется)</option>
-                  <option value="gemini-2.5-flash">gemini-2.5-flash</option>
-                  <option value="gemini-2.0-flash-lite">gemini-2.0-flash-lite</option>
-                  <option value="gemini-2.0-flash">gemini-2.0-flash</option>
-                  <option value="gemini-3.1-flash-lite">gemini-3.1-flash-lite</option>
-                  <option value="gemini-flash-latest">gemini-flash-latest</option>
-                </select>
-              </div>
-              <div className="form-field">
-                <FieldLabel label="Изображение меню бота" hint={PANEL_HINTS.menuImage} />
-                <div className="panel-avatar-row">
-                  <div className="panel-menu-image-hit">
-                    {menuImageDisplaySrc ? (
-                      <img src={menuImageDisplaySrc} alt="" className="panel-menu-image-preview" />
-                    ) : (
-                      <div className="panel-avatar-placeholder">Нет фото</div>
-                    )}
-                  </div>
-                  <div className="panel-avatar-actions">
-                    <input
-                      ref={menuImageInputRef}
-                      type="file"
-                      accept="image/png,image/jpeg,image/webp"
-                      className="panel-avatar-file-input"
-                      onChange={(e) => {
-                        void onMenuImageFile(e.target.files?.[0] ?? null);
-                        e.target.value = "";
-                      }}
-                    />
-                    <button type="button" className="ghost" disabled={busy} onClick={() => menuImageInputRef.current?.click()}>
-                      Загрузить
-                    </button>
-                    {draft.telegram.menuImagePath || menuImageDisplaySrc ? (
-                      <button
-                        type="button"
-                        className="ghost"
-                        disabled={busy}
-                        onClick={() => {
-                          void (async () => {
-                            setBusy(true);
-                            try {
-                              await deletePanelMenuImage();
-                              setMenuImagePreview(null);
-                              setDraft((d) =>
-                                d
-                                  ? {
-                                      ...d,
-                                      telegram: { ...d.telegram, menuImagePath: null },
-                                    }
-                                  : d,
-                              );
-                              await refresh();
-                              setMsg({ type: "ok", text: "Изображение меню удалено." });
-                            } catch (e) {
-                              setMsg({ type: "err", text: String(e) });
-                            } finally {
-                              setBusy(false);
-                            }
-                          })();
-                        }}
-                      >
-                        Удалить
-                      </button>
-                    ) : null}
-                  </div>
-                </div>
-                <p className="field-hint">Без картинки меню уйдёт текстом с теми же inline-кнопками.</p>
-              </div>
-              <div className="form-field">
-                <FieldLabel label="Telegram Admin ID" hint={PANEL_HINTS.adminIds} />
-                <input
-                  value={draft.telegram.adminIds.join(", ")}
-                  onChange={(e) => {
-                    const ids = e.target.value
-                      .split(/[,;\s]+/)
-                      .map((x) => Math.floor(Number(x)))
-                      .filter((n) => Number.isFinite(n) && n > 0);
-                    patchDraft((d) => ({ ...d, telegram: { ...d.telegram, adminIds: ids } }));
-                  }}
-                  placeholder="404740026"
+              ) : null}
+
+              {tab === "navVpn" ? (
+                <NavVpnTab
+                  draft={draft}
+                  patchDraft={patchDraft}
+                  meta={meta}
+                  sectionsOrdered={sectionsOrdered}
+                  dragSectionKey={dragSectionKey}
+                  overSectionKey={overSectionKey}
+                  setDragSectionKey={setDragSectionKey}
+                  setOverSectionKey={setOverSectionKey}
+                  onReorderSections={reorderSections}
+                  sectionsSavedFlash={sectionsSavedFlash}
                 />
-              </div>
-              <div className="form-field">
-                <FieldLabel label="Цвета кнопок бота (HEX)" hint={PANEL_HINTS.telegramButtonColors} />
-                <div className="panel-tg-button-colors">
-                  {(
-                    [
-                      ["menuHome", "« В меню"],
-                      ["menuSubscription", "Подписка"],
-                      ["menuPay", "Оплата подписки"],
-                      ["menuBuyGb", "Докупить ГБ"],
-                      ["menuBuyDevice", "Купить устройство"],
-                      ["menuAdminClients", "Клиенты"],
-                      ["deleteSubscription", "Удалить подписку"],
-                      ["createNewSubscription", "Создать новую подписку"],
-                      ["pickSubscription", "Выбор готовой подписки"],
-                      ["comboOffer", "Спец-предложение (комбо)"],
-                      ["applyPromo", "Применить промокод"],
-                      ["buyWhitelist", "Купить белые списки"],
-                      ["sendAppeal", "Отправить обращение"],
-                      ["askAi", "Спросить AI"],
-                      ["inviteFriend", "Пригласить друга"],
-                    ] as const
-                  ).map(([key, label]) => (
-                    <label key={key} className="panel-tg-color-row">
-                      <span className="panel-tg-color-label">{label}</span>
-                      <input
-                        type="color"
-                        value={
-                          /^#[0-9a-fA-F]{6}$/.test(draft.telegram.buttonColors?.[key] ?? "")
-                            ? (draft.telegram.buttonColors[key] as string)
-                            : "#3390ec"
-                        }
-                        onChange={(e) => {
-                          const hex = e.target.value.toLowerCase();
-                          patchDraft((d) => ({
-                            ...d,
-                            telegram: {
-                              ...d.telegram,
-                              buttonColors: { ...d.telegram.buttonColors, [key]: hex },
-                            },
-                          }));
-                        }}
-                      />
-                      <input
-                        className="panel-tg-color-hex"
-                        value={draft.telegram.buttonColors?.[key] ?? ""}
-                        onChange={(e) => {
-                          let v = e.target.value.trim();
-                          if (v && !v.startsWith("#")) v = `#${v}`;
-                          patchDraft((d) => ({
-                            ...d,
-                            telegram: {
-                              ...d.telegram,
-                              buttonColors: { ...d.telegram.buttonColors, [key]: v },
-                            },
-                          }));
-                        }}
-                        placeholder="#3390ec"
-                        spellCheck={false}
-                      />
-                    </label>
-                  ))}
-                </div>
-              </div>
-              <div className="panel-settings-actions">
-                <button
-                  type="button"
-                  className="ghost"
-                  disabled={busy}
-                  onClick={() => {
+              ) : null}
+
+              {tab === "bot" ? (
+                <BotTab
+                  draft={draft}
+                  patchDraft={patchDraft}
+                  telegram={telegram}
+                  busy={busy}
+                  botTokenEdit={botTokenEdit}
+                  setBotTokenEdit={setBotTokenEdit}
+                  showToken={showToken}
+                  revealedToken={revealedToken}
+                  tokenRevealBusy={tokenRevealBusy}
+                  onToggleShowToken={() => void toggleShowBotToken()}
+                  geminiKeyEdit={geminiKeyEdit}
+                  setGeminiKeyEdit={setGeminiKeyEdit}
+                  showGeminiKey={showGeminiKey}
+                  revealedGeminiKey={revealedGeminiKey}
+                  geminiRevealBusy={geminiRevealBusy}
+                  clearGeminiKey={clearGeminiKey}
+                  setClearGeminiKey={(v) => {
+                    setClearGeminiKey(v);
+                    if (v) {
+                      setShowGeminiKey(false);
+                      setRevealedGeminiKey(null);
+                    }
+                  }}
+                  onToggleShowGemini={() => void toggleShowGeminiKey()}
+                  setDirty={setDirty}
+                  setMsg={setMsg}
+                  botTest={botTest}
+                  onTestBot={() => {
                     void (async () => {
                       setBusy(true);
                       setBotTest(null);
@@ -1033,10 +427,7 @@ export default function PanelSettingsModal({ open, onClose }: { open: boolean; o
                         const r = await testTelegramBot(botTokenEdit.trim() || undefined);
                         if (r.ok) {
                           const name = r.username ? `@${r.username}` : r.name ?? "бот";
-                          setBotTest({
-                            type: "ok",
-                            text: `Бот подключён. ${name} — всё в порядке.`,
-                          });
+                          setBotTest({ type: "ok", text: `Бот подключён. ${name} — всё в порядке.` });
                         } else {
                           setBotTest({
                             type: "err",
@@ -1050,20 +441,17 @@ export default function PanelSettingsModal({ open, onClose }: { open: boolean; o
                       }
                     })();
                   }}
-                >
-                  Проверить бота
-                </button>
-                <button
-                  type="button"
-                  className="ghost"
-                  disabled={busy}
-                  onClick={() => {
+                  onTestMessage={() => {
                     void (async () => {
                       setBusy(true);
                       try {
                         await save(false);
                         const r = await testTelegramAdminMessage();
-                        setMsg(r.ok ? { type: "ok", text: "Тестовое сообщение отправлено." } : { type: "err", text: r.error ?? "Ошибка" });
+                        setMsg(
+                          r.ok
+                            ? { type: "ok", text: "Тестовое сообщение отправлено." }
+                            : { type: "err", text: r.error ?? "Ошибка" },
+                        );
                       } catch (e) {
                         setMsg({ type: "err", text: String(e) });
                       } finally {
@@ -1071,332 +459,68 @@ export default function PanelSettingsModal({ open, onClose }: { open: boolean; o
                       }
                     })();
                   }}
-                >
-                  Отправить тестовое сообщение
-                </button>
-              </div>
-              {botTest ? (
-                <div className={`panel-settings-status flash ${botTest.type}`} role="status">
-                  {botTest.type === "ok" ? "✓ " : ""}
-                  {botTest.text}
-                </div>
-              ) : null}
-              <div className="settings-toggle-list">
-              <SettingsToggleRow
-                label="Двухфакторная аутентификация"
-                hint={PANEL_HINTS.login2faEnabled}
-                on={draft.telegram.login2faEnabled !== false}
-                onToggle={() =>
-                  patchDraft((d) => ({
-                    ...d,
-                    telegram: {
-                      ...d.telegram,
-                      login2faEnabled: d.telegram.login2faEnabled === false,
-                    },
-                  }))
-                }
-              />
-              {(
-                [
-                  ["adminClientsButtonEnabled", "Показывать кнопку «Клиенты» у админов"],
-                  ["notifyNewUsers", "Уведомлять о новых пользователях"],
-                  ["notifyBroadcastErrors", "Уведомлять об ошибках рассылок"],
-                  ["notifySurveyResponses", "Уведомлять о новых ответах на опросы"],
-                  ["notifyServerErrors", "Уведомлять об ошибках серверов"],
-                  ["testMode", "Тестовый режим Telegram"],
-                ] as const
-              ).map(([key, label]) => {
-                const hintMap: Record<string, string> = {
-                  adminClientsButtonEnabled: PANEL_HINTS.adminClientsButtonEnabled,
-                  notifyNewUsers: PANEL_HINTS.notifyNewUsers,
-                  notifyBroadcastErrors: PANEL_HINTS.notifyBroadcastErrors,
-                  notifySurveyResponses: PANEL_HINTS.notifySurveyResponses,
-                  notifyServerErrors: PANEL_HINTS.notifyServerErrors,
-                  testMode: PANEL_HINTS.testMode,
-                };
-                return (
-                  <SettingsToggleRow
-                    key={key}
-                    label={label}
-                    hint={hintMap[key] ?? ""}
-                    on={draft.telegram[key]}
-                    onToggle={() =>
-                      patchDraft((d) => ({
-                        ...d,
-                        telegram: { ...d.telegram, [key]: !d.telegram[key] },
-                      }))
-                    }
-                  />
-                );
-              })}
-              </div>
-            </div>
-          ) : null}
-
-          {tab === "appearance" ? (
-            <div className="panel-settings-tab-content">
-              <div className="form-field">
-                <FieldLabel label="Тема" hint={PANEL_HINTS.theme} />
-                <select
-                  value={draft.ui.theme}
-                  onChange={(e) =>
-                    patchDraft((d) => ({
-                      ...d,
-                      ui: { ...d.ui, theme: e.target.value as PanelSettings["ui"]["theme"] },
-                    }))
-                  }
-                >
-                  <option value="system">Системная</option>
-                  <option value="light">Светлая</option>
-                  <option value="dark">Тёмная</option>
-                </select>
-              </div>
-              <div className="form-field">
-                <FieldLabel label="Акцентный цвет" hint={PANEL_HINTS.accent} />
-                <select
-                  value={["blue", "green", "purple", "orange", "red"].includes(String(draft.ui.accentColor)) ? draft.ui.accentColor : "custom"}
-                  onChange={(e) => {
-                    const v = e.target.value;
-                    patchDraft((d) => ({
-                      ...d,
-                      ui: { ...d.ui, accentColor: v === "custom" ? "#3d9eff" : v },
-                    }));
-                  }}
-                >
-                  <option value="blue">Синий</option>
-                  <option value="green">Зелёный</option>
-                  <option value="purple">Фиолетовый</option>
-                  <option value="orange">Оранжевый</option>
-                  <option value="red">Красный</option>
-                  <option value="custom">Свой (hex)</option>
-                </select>
-                {!["blue", "green", "purple", "orange", "red"].includes(String(draft.ui.accentColor)) ? (
-                  <input
-                    value={String(draft.ui.accentColor)}
-                    onChange={(e) => patchDraft((d) => ({ ...d, ui: { ...d.ui, accentColor: e.target.value } }))}
-                    placeholder="#3d9eff"
-                  />
-                ) : null}
-              </div>
-              <div className="settings-toggle-list">
-              <SettingsToggleRow
-                label="Компактный режим"
-                hint={PANEL_HINTS.compact}
-                on={draft.ui.compactMode}
-                onToggle={() => patchDraft((d) => ({ ...d, ui: { ...d.ui, compactMode: !d.ui.compactMode } }))}
-              />
-              <SettingsToggleRow
-                label="Показывать подсказки"
-                hint={PANEL_HINTS.showHints}
-                on={draft.ui.showHints}
-                onToggle={() => patchDraft((d) => ({ ...d, ui: { ...d.ui, showHints: !d.ui.showHints } }))}
-              />
-              <SettingsToggleRow
-                label="Новый дизайн WebApp"
-                hint={PANEL_HINTS.webAppNewDesign}
-                on={draft.ui.webAppNewDesign ?? false}
-                onToggle={() => {
-                  const next = !(draft.ui.webAppNewDesign ?? false);
-                  const ui = { ...draft.ui, webAppNewDesign: next };
-                  patchDraft((d) => ({ ...d, ui }));
-                  void applyPatch({ settings: { ui } })
-                    .then(() =>
-                      setMsg({
-                        type: "ok",
-                        text: next ? "Новый дизайн WebApp включён." : "Старый дизайн WebApp включён.",
-                      }),
-                    )
-                    .catch((e) => setMsg({ type: "err", text: String(e) }));
-                }}
-              />
-              </div>
-              <div className="form-field">
-                <FieldLabel label="Часовой пояс" hint={PANEL_HINTS.timezone} />
-                <input
-                  value={draft.ui.timezone}
-                  onChange={(e) => patchDraft((d) => ({ ...d, ui: { ...d.ui, timezone: e.target.value } }))}
-                  placeholder="Europe/Moscow"
                 />
-              </div>
-            </div>
-          ) : null}
+              ) : null}
 
-          {tab === "security" ? (
-            <div className="panel-settings-tab-content">
-              <div className="settings-toggle-list">
-              {(
-                [
-                  ["maskSecrets", "Маскировать секреты в UI"],
-                  ["confirmDangerousActions", "Подтверждение опасных действий"],
-                  ["showDiagnosticDetails", "Показывать диагностические данные"],
-                ] as const
-              ).map(([key, label]) => {
-                const hintMap: Record<string, string> = {
-                  maskSecrets: PANEL_HINTS.maskSecrets,
-                  confirmDangerousActions: PANEL_HINTS.confirmDangerous,
-                  showDiagnosticDetails: PANEL_HINTS.showDiagnostic,
-                };
-                return (
-                  <SettingsToggleRow
-                    key={key}
-                    label={label}
-                    hint={hintMap[key] ?? ""}
-                    on={draft.security[key]}
-                    onToggle={() =>
-                      patchDraft((d) => ({
-                        ...d,
-                        security: { ...d.security, [key]: !d.security[key] },
-                      }))
-                    }
-                  />
-                );
-              })}
-              </div>
-              <div className="form-field form-field--spaced">
-                <FieldLabel label="Автовыход из панели" hint={PANEL_HINTS.autoLogout} />
-                <select
-                  value={draft.security.autoLogoutMinutes == null ? "" : String(draft.security.autoLogoutMinutes)}
-                  onChange={(e) => {
-                    const v = e.target.value;
-                    patchDraft((d) => ({
-                      ...d,
-                      security: {
-                        ...d.security,
-                        autoLogoutMinutes: v === "" ? null : Number(v),
-                      },
-                    }));
+              {tab === "appearance" ? (
+                <AppearanceTab
+                  draft={draft}
+                  patchDraft={patchDraft}
+                  webAppSavedFlash={webAppSavedFlash}
+                  onToggleWebApp={onToggleWebApp}
+                />
+              ) : null}
+
+              {tab === "system" ? (
+                <SystemTab
+                  draft={draft}
+                  patchDraft={patchDraft}
+                  busy={busy}
+                  systemInfo={systemInfo}
+                  setMsg={setMsg}
+                  setDirty={setDirty}
+                  setBusy={setBusy}
+                  onImport={async (parsed) => {
+                    await importPanelSettings(parsed);
+                    await refresh();
                   }}
-                >
-                  <option value="">Никогда</option>
-                  <option value="15">15 минут бездействия</option>
-                  <option value="30">30 минут бездействия</option>
-                  <option value="60">1 час бездействия</option>
-                  <option value="720">12 часов бездействия</option>
-                </select>
-              </div>
-            </div>
-          ) : null}
-
-          {tab === "backup" ? (
-            <div className="panel-settings-tab-content">
-              <p className="field-hint">{PANEL_HINTS.export}</p>
-              <div className="row-actions">
-                <a className="ghost" href={panelSettingsExportUrl()} download>
-                  Скачать настройки
-                </a>
-                <label className="ghost panel-avatar-upload">
-                  <input
-                    type="file"
-                    accept="application/json"
-                    className="comms-file-input"
-                    onChange={(e) => {
-                      const f = e.target.files?.[0];
-                      if (!f) return;
-                      void (async () => {
-                        if (!window.confirm("Применить импортированные настройки?")) return;
-                        try {
-                          const text = await f.text();
-                          const parsed = JSON.parse(text) as PanelSettings;
-                          await importPanelSettings(parsed);
-                          await refresh();
-                          setMsg({ type: "ok", text: "Настройки импортированы." });
-                        } catch (err) {
-                          setMsg({ type: "err", text: String(err) });
-                        }
-                      })();
-                    }}
-                  />
-                  Импортировать настройки
-                </label>
-                <button
-                  type="button"
-                  className="ghost danger"
-                  onClick={() => {
-                    if (!window.confirm("Вы уверены, что хотите сбросить настройки панели?")) return;
-                    void (async () => {
-                      setBusy(true);
-                      try {
-                        await resetPanelSettings();
-                        await refresh();
-                        setDirty(false);
-                        setMsg({ type: "ok", text: "Настройки сброшены." });
-                      } catch (e) {
-                        setMsg({ type: "err", text: String(e) });
-                      } finally {
-                        setBusy(false);
-                      }
-                    })();
+                  onReset={async () => {
+                    await resetPanelSettings();
+                    await refresh();
                   }}
-                >
-                  Сбросить настройки панели
-                </button>
-              </div>
+                />
+              ) : null}
             </div>
-          ) : null}
+          </div>
 
-          {tab === "about" ? (
-            <div className="panel-settings-tab-content">
-              {systemInfo ? (
-                <ul className="panel-about-list">
-                  <li>Версия панели: {String(systemInfo.panelVersion ?? "—")}</li>
-                  <li>Node: {String(systemInfo.nodeVersion ?? "—")}</li>
-                  <li>Окружение: {String(systemInfo.environment ?? "—")}</li>
-                  <li>
-                    Uptime{" "}
-                    <a
-                      href="/panel/swagger/admin"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="panel-about-api-link"
-                      title="Документация API (Swagger)"
-                    >
-                      API
-                    </a>
-                    : {String(systemInfo.uptimeSec ?? "—")} с
-                  </li>
-                  <li>Обновление настроек: {systemInfo.settingsUpdatedAt ? new Date(Number(systemInfo.settingsUpdatedAt)).toLocaleString("ru-RU") : "—"}</li>
-                  <li>Telegram: {systemInfo.telegramBotConfigured ? String(systemInfo.telegramBotMasked) : "не настроен"}</li>
-                </ul>
-              ) : (
-                <p className="sub">Загрузка…</p>
-              )}
-              <button
-                type="button"
-                className="ghost"
-                onClick={() => {
-                  const text = JSON.stringify(systemInfo ?? {}, null, 2);
-                  void navigator.clipboard.writeText(text);
-                  setMsg({ type: "ok", text: "Диагностика скопирована." });
-                }}
-              >
-                Скопировать диагностическую информацию
+          <div className="panel-settings-footer">
+            <div
+              className={`panel-settings-footer__meta ${
+                dirty ? "is-dirty" : msg?.type === "err" ? "is-err" : msg?.type === "ok" ? "is-ok" : ""
+              }`}
+            >
+              {footerMeta}
+            </div>
+            <div className="panel-settings-footer__actions">
+              <button type="button" className="ghost" disabled={busy} onClick={requestClose}>
+                Отменить
+              </button>
+              <button type="button" className="primary" disabled={busy || !dirty} onClick={() => void save(false)}>
+                Применить
               </button>
             </div>
-          ) : null}
+          </div>
         </div>
-
-        <div className="modal-footer panel-settings-footer">
-          <button type="button" className="ghost" disabled={busy} onClick={requestClose}>
-            Отменить
-          </button>
-          <button type="button" className="ghost" disabled={busy} onClick={() => void save(false)}>
-            Применить
-          </button>
-          <button type="button" className="primary" disabled={busy} onClick={() => void save(true)}>
-            Сохранить
-          </button>
-        </div>
-      </div>
-    </AdminModalBackdrop>
-    <AvatarCropModal
-      open={avatarCropOpen}
-      initialSrc={avatarCropSrc}
-      busy={busy}
-      onClose={() => {
-        if (!busy) setAvatarCropOpen(false);
-      }}
-      onSave={onAvatarCropSave}
-    />
+      </AdminModalBackdrop>
+      <AvatarCropModal
+        open={avatarCropOpen}
+        initialSrc={avatarCropSrc}
+        busy={busy}
+        onClose={() => {
+          if (!busy) setAvatarCropOpen(false);
+        }}
+        onSave={onAvatarCropSave}
+      />
     </>
   );
 }

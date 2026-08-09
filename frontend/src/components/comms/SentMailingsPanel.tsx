@@ -288,7 +288,7 @@ export default function SentMailingsPanel({ busy, onCopy, onFlash }: Props) {
       })}
 
       {recipientsModal ? (
-        <AdminModalBackdrop onClick={() => setRecipientsModal(null)}>
+        <AdminModalBackdrop onClose={() => setRecipientsModal(null)}>
           <div
             className="modal comms-recipients-modal"
             role="dialog"

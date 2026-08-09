@@ -101,7 +101,7 @@ export default function SendConfirmBar({
       </section>
 
       {confirmOpen && needsConfirm ? (
-        <AdminModalBackdrop onClick={onCancelConfirm}>
+        <AdminModalBackdrop onClose={onCancelConfirm}>
           <div
             className="modal comms-wiz-confirm-modal"
             role="dialog"

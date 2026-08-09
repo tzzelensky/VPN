@@ -175,8 +175,14 @@ export type ServerSubscriptionSettingsDto = {
     show: boolean;
   };
   tcp: { header_type: string };
-  grpc: { service_name: string; authority: string; mode: boolean };
+  grpc: { service_name: string; authority: string; multi_mode: boolean };
   ws: { path: string; host: string };
+  xhttp: {
+    path: string;
+    host: string;
+    mode: "auto" | "packet-up" | "stream-up" | "stream-one";
+    extra: string;
+  };
   mux: {
     enabled: boolean;
     concurrency: number;
@@ -352,6 +358,8 @@ export const SUBSCRIPTION_SNI_PRESETS = [
   "www.cloudflare.com",
   "custom",
 ] as const;
+
+export const SUBSCRIPTION_XHTTP_MODES = ["auto", "packet-up", "stream-up", "stream-one"] as const;
 
 export type NdjsonEvent =
   | { type: "log"; msg: string; t?: number }
@@ -931,6 +939,19 @@ export async function resetUserTraffic(id: number): Promise<{ ok: boolean; user:
     credentials: "include",
     headers: jsonHeaders,
     body: JSON.stringify({}),
+  });
+  return handle(res);
+}
+
+export async function setUserTrafficUsed(
+  id: number,
+  used_gb: number,
+): Promise<{ ok: boolean; user: UserDto }> {
+  const res = await fetch(`/api/users/${id}/set-traffic`, {
+    method: "POST",
+    credentials: "include",
+    headers: jsonHeaders,
+    body: JSON.stringify({ used_gb }),
   });
   return handle(res);
 }
@@ -1734,21 +1755,6 @@ export async function deletePanelAvatar(): Promise<PanelSettingsResponse> {
   return handle(res);
 }
 
-export async function uploadPanelMenuImage(photo_base64: string, photo_mime: string): Promise<PanelSettingsResponse> {
-  const res = await fetch("/api/settings/telegram-menu-image", {
-    method: "POST",
-    credentials: "include",
-    headers: jsonHeaders,
-    body: JSON.stringify({ photo_base64, photo_mime }),
-  });
-  return handle(res);
-}
-
-export async function deletePanelMenuImage(): Promise<PanelSettingsResponse> {
-  const res = await fetch("/api/settings/telegram-menu-image", { method: "DELETE", credentials: "include" });
-  return handle(res);
-}
-
 export async function resetPanelSettings(): Promise<PanelSettingsResponse> {
   const res = await fetch("/api/settings/reset", { method: "POST", credentials: "include" });
   return handle(res);
@@ -1923,14 +1929,6 @@ export function referralEventsXlsxExportUrl(params?: { kind?: string }): string 
   if (params?.kind) qs.set("kind", params.kind);
   const suffix = qs.toString() ? `?${qs}` : "";
   return `/api/referral-program/export/events.xlsx${suffix}`;
-}
-
-export function referralReportExportUrl(): string {
-  return "/api/referral-program/export/report.csv";
-}
-
-export function referralReportXlsxExportUrl(): string {
-  return "/api/referral-program/export/report.xlsx";
 }
 
 export async function grantReferralAdminGift(payload: {
@@ -2141,6 +2139,14 @@ export async function loadMySubWebAppProfile(initData: string): Promise<MySubPro
     method: "POST",
     headers: jsonHeaders,
     body: JSON.stringify({ init_data: initData }),
+  });
+  return handle(res);
+}
+
+/** Admin: WebApp-профиль клиента по Telegram id (только чтение). */
+export async function loadAdminMySubWebAppProfile(tgId: number): Promise<MySubProfileDto> {
+  const res = await fetch(`/api/mysub/admin/webapp-profile/${encodeURIComponent(String(tgId))}`, {
+    credentials: "include",
   });
   return handle(res);
 }
@@ -2486,7 +2492,11 @@ export type RouletteGbPiggyDto = {
   can_exchange: boolean;
 };
 
-export async function spinMySubRoulette(initData: string, userId: number): Promise<{
+export async function spinMySubRoulette(
+  initData: string,
+  userId: number,
+  opts?: { signal?: AbortSignal },
+): Promise<{
   ok: boolean;
   prize?: MySubRoulettePrizeDto;
   prize_index?: number;
@@ -2503,6 +2513,7 @@ export async function spinMySubRoulette(initData: string, userId: number): Promi
     method: "POST",
     headers: jsonHeaders,
     body: JSON.stringify({ init_data: initData, user_id: userId }),
+    signal: opts?.signal,
   });
   return handle(res);
 }
@@ -2724,7 +2735,7 @@ export type PromoCodeDto = {
   id: string;
   name: string;
   code: string;
-  type: "percent" | "rub" | "gb" | "days" | "combo";
+  type: "percent" | "rub" | "gb" | "days";
   discount_percent: number;
   discount_rub: number;
   gift_gb: number;
@@ -2732,7 +2743,6 @@ export type PromoCodeDto = {
   one_time_per_user: boolean;
   max_uses_total?: number;
   max_uses_per_user: number;
-  min_purchase_rub?: number;
   first_purchase_only: boolean;
   new_users_only: boolean;
   apply_plan_ids?: number[];
@@ -2776,7 +2786,7 @@ export async function listPromoCodes(): Promise<{ promos: PromoCodeDto[] }> {
 export async function createPromoCode(payload: {
   name: string;
   code: string;
-  type: "percent" | "rub" | "gb" | "days" | "combo";
+  type: "percent" | "rub" | "gb" | "days";
   discount_percent: number;
   discount_rub?: number;
   gift_gb?: number;
@@ -2784,7 +2794,6 @@ export async function createPromoCode(payload: {
   one_time_per_user: boolean;
   max_uses_total?: number;
   max_uses_per_user?: number;
-  min_purchase_rub?: number;
   first_purchase_only?: boolean;
   new_users_only?: boolean;
   apply_plan_ids?: number[];
@@ -2806,7 +2815,7 @@ export async function patchPromoCode(
   payload: Partial<{
     name: string;
     code: string;
-    type: "percent" | "rub" | "gb" | "days" | "combo";
+    type: "percent" | "rub" | "gb" | "days";
     discount_percent: number;
     discount_rub: number;
     gift_gb: number;
@@ -2814,7 +2823,6 @@ export async function patchPromoCode(
     one_time_per_user: boolean;
     max_uses_total: number;
     max_uses_per_user: number;
-    min_purchase_rub: number;
     first_purchase_only: boolean;
     new_users_only: boolean;
     apply_plan_ids: number[];
@@ -2928,12 +2936,24 @@ export async function previewMySubPromoCode(payload: {
   init_data: string;
   code: string;
   original_price_rub: number;
+  plan_id?: number;
+  purchase_kind?: "subscription" | "topup";
 }): Promise<{
-  promo: { code: string; discount_percent: number };
+  promo: {
+    code: string;
+    type: "percent" | "rub" | "gb" | "days";
+    discount_percent: number;
+    discount_rub: number;
+    gift_gb: number;
+    gift_days: number;
+    apply_plan_ids?: number[];
+  };
   final_price_rub: number;
   original_price_rub: number;
   discount_rub: number;
   discount_percent: number;
+  bonus_gb: number;
+  bonus_days: number;
 }> {
   const res = await fetch("/api/mysub/webapp/promo/preview", {
     method: "POST",
@@ -3273,8 +3293,8 @@ export async function listConfigVaultChecks(
   return handleVault(res);
 }
 
-export function configVaultExportUrl(mode: "all" | "active" | "subscriptions" | "available", format: "txt" | "json"): string {
-  return `/api/config-vault/export?mode=${mode}&format=${format}`;
+export function configVaultExportUrl(mode: "all" | "active" | "subscriptions" | "available"): string {
+  return `/api/config-vault/export?mode=${mode}&format=txt`;
 }
 
 export async function fetchConfigVaultKeyRaw(id: number): Promise<{ key: ConfigVaultKeyDto; parsed: Record<string, unknown> | null }> {
@@ -3938,8 +3958,8 @@ export async function suggestTelegramProxyPort(
   return handleProxies(res);
 }
 
-export async function generateMtprotoSecretApi(): Promise<{ secret: string }> {
-  const res = await fetch("/api/telegram-proxies/generate-secret", { credentials: "include" });
+export async function generateMtprotoSecretApi(mode: "ee" | "dd" = "ee"): Promise<{ secret: string }> {
+  const res = await fetch(`/api/telegram-proxies/generate-secret?mode=${mode}`, { credentials: "include" });
   return handleProxies(res);
 }
 

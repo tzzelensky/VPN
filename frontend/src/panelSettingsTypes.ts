@@ -13,7 +13,7 @@ export type PanelSectionKey =
   | "config_vault"
   | "whitelist_vault"
   | "telegram_proxies"
-  | "dropper_game"
+  | "roulette_game"
   | "device_limit"
   | "daily_gift";
 
@@ -61,6 +61,8 @@ export type PanelSettings = {
     showHints: boolean;
     timezone: string;
     webAppNewDesign: boolean;
+    /** Показывать функционал «Превью WebApp» в админ-панели. */
+    webAppPreviewEnabled: boolean;
   };
   sections: Record<PanelSectionKey, boolean>;
   sectionOrder: PanelSectionKey[];
@@ -74,7 +76,6 @@ export type PanelSettings = {
     testMode: boolean;
     login2faEnabled: boolean;
     buttonColors: TelegramButtonColors;
-    menuImagePath: string | null;
     aiAssistantEnabled: boolean;
     geminiModel: string;
   };
@@ -83,6 +84,8 @@ export type PanelSettings = {
     confirmDangerousActions: boolean;
     autoLogoutMinutes: number | null;
     showDiagnosticDetails: boolean;
+    /** Регулировка потраченных ГБ слайдером на странице пользователей. */
+    manualTrafficAdjust: boolean;
   };
   maintenance: { enabled: boolean };
   vpnDisplay: {
@@ -110,5 +113,4 @@ export type PanelSettingsResponse = {
     adminIds: number[];
   };
   avatarUrl: string | null;
-  menuImageUrl: string | null;
 };

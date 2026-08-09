@@ -25,6 +25,8 @@ import {
   getWebAppActiveGame,
   getSubscriptionShop,
   grantDropperTicketsForPurchaseChat,
+  applyPromoBonusesToUser,
+  findPromoCodeUsageBySessionId,
   registerPromoCodeUsage,
   markPaymentSessionPendingAdmin,
   snapExpiryTimeToNoonLocal,
@@ -319,17 +321,34 @@ function injectComboOfferKeyboardRows(
 
 export function vpnPlansKeyboardPromo(code: string, tgUserId: number, targetUserId?: number) {
   const promo = String(code ?? "").trim().replace(/\s+/g, "");
-  let promoRow;
+  let sample;
   try {
-    promoRow = applyPromoCodeForUser({ code: promo, tg_user_id: tgUserId, original_price_rub: 100 }).promo;
+    sample = applyPromoCodeForUser({ code: promo, tg_user_id: tgUserId, original_price_rub: 100 });
   } catch {
     return vpnPlansKeyboard(targetUserId);
   }
   const shop = getSubscriptionShop();
-  const rows = shop.plans.map((p) => {
-    const finalPrice = Math.max(0, Math.floor(p.price_rub - (p.price_rub * promoRow.discount_percent) / 100));
+  const allowed = sample.promo.apply_plan_ids ?? [];
+  const plans = allowed.length > 0 ? shop.plans.filter((p) => allowed.includes(p.id)) : shop.plans;
+  const rows = (plans.length > 0 ? plans : shop.plans).map((p) => {
+    let finalPrice = p.price_rub;
+    try {
+      finalPrice = applyPromoCodeForUser({
+        code: promo,
+        tg_user_id: tgUserId,
+        original_price_rub: p.price_rub,
+        plan_id: p.id,
+        purchase_kind: "subscription",
+      }).final_price_rub;
+    } catch {
+      finalPrice = p.price_rub;
+    }
     const gb = p.total_gb > 0 ? `${p.total_gb} ГБ` : "безлимит";
-    const text = `${p.id} — ${gb} / ${p.days} дн. — ${finalPrice} ₽`;
+    const bonusBits: string[] = [];
+    if (sample.bonus_gb > 0) bonusBits.push(`+${sample.bonus_gb}ГБ`);
+    if (sample.bonus_days > 0) bonusBits.push(`+${sample.bonus_days}д`);
+    const bonus = bonusBits.length ? ` · ${bonusBits.join(" ")}` : "";
+    const text = `${p.id} — ${gb} / ${p.days} дн. — ${finalPrice} ₽${bonus}`;
     return [
       {
         text: text.length > 58 ? `${text.slice(0, 55)}…` : text,
@@ -372,16 +391,35 @@ export function gbTopUpPlansKeyboardPromo(chatId: number, tgUserId: number, targ
   const code = getPromoContext(chatId)?.pending_promo_code?.trim();
   if (!code) return gbTopUpPlansKeyboard(targetUserId);
   const shop = getSubscriptionShop();
-  const samplePrice = shop.topup_plans[0]?.price_rub ?? shop.plans[0]?.price_rub ?? 100;
-  let discountPercent = 0;
+  let sample;
   try {
-    discountPercent = applyPromoCodeForUser({ code, tg_user_id: tgUserId, original_price_rub: samplePrice }).promo.discount_percent;
+    const samplePrice = shop.topup_plans[0]?.price_rub ?? shop.plans[0]?.price_rub ?? 100;
+    sample = applyPromoCodeForUser({
+      code,
+      tg_user_id: tgUserId,
+      original_price_rub: samplePrice,
+      purchase_kind: "topup",
+    });
   } catch {
     return gbTopUpPlansKeyboard(targetUserId);
   }
   const rows = shop.topup_plans.map((p) => {
-    const finalPrice = Math.max(0, Math.floor(p.price_rub - (p.price_rub * discountPercent) / 100));
-    let t = `${p.id} — +${p.add_gb} ГБ — ${finalPrice} ₽`;
+    let finalPrice = p.price_rub;
+    try {
+      finalPrice = applyPromoCodeForUser({
+        code,
+        tg_user_id: tgUserId,
+        original_price_rub: p.price_rub,
+        purchase_kind: "topup",
+      }).final_price_rub;
+    } catch {
+      finalPrice = p.price_rub;
+    }
+    const bonusBits: string[] = [];
+    if (sample.bonus_gb > 0) bonusBits.push(`+${sample.bonus_gb}ГБ`);
+    if (sample.bonus_days > 0) bonusBits.push(`+${sample.bonus_days}д`);
+    const bonus = bonusBits.length ? ` · ${bonusBits.join(" ")}` : "";
+    let t = `${p.id} — +${p.add_gb} ГБ — ${finalPrice} ₽${bonus}`;
     if (t.length > 58) t = `${t.slice(0, 55)}…`;
     return [{ text: t, callback_data: targetUserId ? `gplanpromo:${p.id}:${targetUserId}` : `gplanpromo:${p.id}` }];
   });
@@ -626,19 +664,36 @@ export async function onVpnPlanChosen(
   }
   const meta = getPlanRuntimeMeta(planId);
   const cleanPromo = String(promoCode ?? "").trim().replace(/\s+/g, "");
-  let priceRes = resolvePurchasePrice({
-    tg_user_id: tgUserId,
-    original_price_rub: meta.priceRub,
-    promo_code: cleanPromo || undefined,
-    target_user_id: target?.id,
-    new_subscription_name: newName || undefined,
-  });
-  if (cleanPromo && !priceRes.promo_calc) priceRes = resolvePurchasePrice({
-    tg_user_id: tgUserId,
-    original_price_rub: meta.priceRub,
-    target_user_id: target?.id,
-    new_subscription_name: newName || undefined,
-  });
+  let priceRes;
+  try {
+    priceRes = resolvePurchasePrice({
+      tg_user_id: tgUserId,
+      original_price_rub: meta.priceRub,
+      promo_code: cleanPromo || undefined,
+      target_user_id: target?.id,
+      new_subscription_name: newName || undefined,
+      plan_id: planId,
+      purchase_kind: "subscription",
+    });
+    if (cleanPromo && !priceRes.promo_calc) {
+      priceRes = resolvePurchasePrice({
+        tg_user_id: tgUserId,
+        original_price_rub: meta.priceRub,
+        target_user_id: target?.id,
+        new_subscription_name: newName || undefined,
+        plan_id: planId,
+        purchase_kind: "subscription",
+      });
+    }
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    if (msg === "promo_plan_not_allowed") {
+      await sendTelegramHtml(chatId, "Этот промокод нельзя применить к выбранному тарифу.", backHomeRow());
+      return;
+    }
+    await sendTelegramHtml(chatId, "Не удалось применить промокод к тарифу.", backHomeRow());
+    return;
+  }
   const payUrl = effectivePaymentUrl();
   const sessionId = startPaymentAwaitingProof(chatId, tgUserId, planId, "subscription", target?.id, newName || undefined, {
     username: from?.username,
@@ -657,6 +712,13 @@ export async function onVpnPlanChosen(
       tg_username: from?.username,
       tg_first_name: from?.first_name,
       session_id: sessionId,
+      plan_id: planId,
+      plan_title: meta.title,
+      original_price_rub: priceRes.original_price_rub,
+      final_price_rub: priceRes.final_price_rub,
+      discount_rub: priceRes.promo_calc.discount_rub,
+      bonus_gb: priceRes.promo_calc.bonus_gb,
+      bonus_days: priceRes.promo_calc.bonus_days,
     });
   }
   trackPaymentSessionStart(sessionId, "chat");
@@ -781,18 +843,35 @@ export async function onGbTopUpPlanChosen(
   const payUrl = effectivePaymentUrl();
   const cleanPromo = String(promoCode ?? "").trim();
   if (!cleanPromo) clearPromoPendingCodeForChat(chatId);
-  let priceRes = resolvePurchasePrice({
-    tg_user_id: tgUserId,
-    original_price_rub: meta.priceRub,
-    promo_code: cleanPromo || undefined,
-    allow_referral: false,
-  });
-  if (cleanPromo && !priceRes.promo_calc) {
+  let priceRes;
+  try {
     priceRes = resolvePurchasePrice({
       tg_user_id: tgUserId,
       original_price_rub: meta.priceRub,
+      promo_code: cleanPromo || undefined,
       allow_referral: false,
+      purchase_kind: "topup",
     });
+    if (cleanPromo && !priceRes.promo_calc) {
+      priceRes = resolvePurchasePrice({
+        tg_user_id: tgUserId,
+        original_price_rub: meta.priceRub,
+        allow_referral: false,
+        purchase_kind: "topup",
+      });
+    }
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    if (msg === "promo_plan_not_allowed") {
+      await sendTelegramHtml(
+        chatId,
+        "Этот промокод действует только для выбранных тарифов подписки, не для докупки ГБ.",
+        backHomeRow(),
+      );
+      return;
+    }
+    await sendTelegramHtml(chatId, "Не удалось применить промокод.", backHomeRow());
+    return;
   }
   const sessionId = startPaymentAwaitingProof(chatId, tgUserId, planId, "topup", target?.id, undefined, {
     username: from?.username,
@@ -809,6 +888,13 @@ export async function onGbTopUpPlanChosen(
       tg_username: from?.username,
       tg_first_name: from?.first_name,
       session_id: sessionId,
+      plan_id: planId,
+      plan_title: meta.title,
+      original_price_rub: priceRes.original_price_rub,
+      final_price_rub: priceRes.final_price_rub,
+      discount_rub: priceRes.promo_calc.discount_rub,
+      bonus_gb: priceRes.promo_calc.bonus_gb,
+      bonus_days: priceRes.promo_calc.bonus_days,
     });
   }
   clearPromoPendingCodeForChat(chatId);
@@ -1570,6 +1656,20 @@ export async function onAdminPaymentConfirm(
     affected.push(autoCreatedUser);
   }
 
+  const promoUsage = findPromoCodeUsageBySessionId(sessionId);
+  const promoBonusGb = Math.max(0, Math.floor(Number(promoUsage?.bonus_gb) || 0));
+  const promoBonusDays = Math.max(0, Math.floor(Number(promoUsage?.bonus_days) || 0));
+  if ((promoBonusGb > 0 || promoBonusDays > 0) && affected.length > 0) {
+    const gifted: UserRow[] = [];
+    for (const row of affected) {
+      const next = applyPromoBonusesToUser(row.id, promoBonusGb, promoBonusDays);
+      if (next) gifted.push(next);
+    }
+    if (gifted.length > 0) {
+      affected.splice(0, affected.length, ...gifted);
+    }
+  }
+
   if (!isTopUp && !isTest && affected.length > 0) {
     clearTestSubscriptionFlags(affected.map((u) => u.id));
   }
@@ -1623,6 +1723,15 @@ export async function onAdminPaymentConfirm(
     console.error("[telegram] push after payment confirm:", e);
   }
   const trafficNote = subMeta.total_gb > 0 ? `${subMeta.total_gb} ГБ/мес` : "безлимит по трафику";
+  const promoGiftNote =
+    promoBonusGb > 0 || promoBonusDays > 0
+      ? `\n<b>Бонус промокода:</b> ${[
+          promoBonusGb > 0 ? `+${promoBonusGb} ГБ` : "",
+          promoBonusDays > 0 ? `+${promoBonusDays} дн.` : "",
+        ]
+          .filter(Boolean)
+          .join(" · ")}\n`
+      : "";
   const primary = affected[0] ?? linked[0];
   if (!primary) return;
   const subUrl = publicSubscriptionUrl(primary.sub_token);
@@ -1644,7 +1753,9 @@ export async function onAdminPaymentConfirm(
   const body = isTopUp
     ? `<b>Оплата подтверждена.</b>\n\n` +
       `Начислено: <b>+${topupMeta.add_gb} ГБ</b>\n` +
-      `Пакет: ${escHtml(topupSummary(topupMeta))}\n\n` +
+      `Пакет: ${escHtml(topupSummary(topupMeta))}\n` +
+      promoGiftNote +
+      `\n` +
       (topupList ? `<b>Подписки, к которым применена докупка:</b>\n${topupList}` : "Начисление не применено.") +
       `${skippedUnlimitedText}\n\n` +
       `Актуальные данные — в разделе «Статистика по подписке».`
@@ -1659,7 +1770,9 @@ export async function onAdminPaymentConfirm(
     ? `<b>Оплата подтверждена — доступ открыт.</b>\n\n` +
       `Тариф: ${escHtml(planSummary(subMeta))}\n` +
       `Лимит трафика: <b>${escHtml(trafficNote)}</b>\n` +
-      `Срок: <b>${subMeta.days}</b> суток с момента активации (до полудня дня окончания).\n\n` +
+      `Срок: <b>${subMeta.days}</b> суток с момента активации (до полудня дня окончания).\n` +
+      promoGiftNote +
+      `\n` +
       `<b>Ссылка на подписку (добавьте в клиент):</b>\n\n<code>${subCode}</code>\n\n` +
       `Позже её можно скопировать в меню «Подписка». Статистика — в «Статистика по подписке».`
     : `<b>Оплата подтверждена.</b>\n\n` +
@@ -1667,6 +1780,7 @@ export async function onAdminPaymentConfirm(
       `Лимит трафика: <b>${escHtml(trafficNote)}</b>\n` +
       (subMeta.total_gb > 0 ? `Использованный трафик <b>обнулён</b>.\n` : "") +
       `Срок: <b>${subMeta.days}</b> суток с момента активации (до полудня дня окончания).\n` +
+      promoGiftNote +
       (affectedList ? `\n<b>Обновлённые подписки:</b>\n${affectedList}\n` : "") +
       `Актуальные дата и трафик — в разделе «Статистика по подписке».`;
   logPaymentBotMessage(sess.tg_chat_id, body);

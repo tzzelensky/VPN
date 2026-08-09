@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import Spinner from "./Spinner";
 import RoulettePrizeIcon from "./RoulettePrizeIcon";
 import { subscriptionLabel } from "../subscriptionLabel";
@@ -45,23 +46,50 @@ import {
   resolveHistoryPrize,
   type PrizeDisplayInput,
 } from "../roulettePrizeDisplay";
+import { useMySubPortalRoot } from "../mysub-new/portalContext";
 
-const SPIN_MS = 4000;
-const SPIN_API_TIMEOUT_MS = 15_000;
+/** Полная длительность прокрута от нажатия — всегда ровно столько. */
+const SPIN_MS = 2000;
+/** Если API опоздал — короткий докат, без второго длинного спина. */
+const SPIN_MIN_SETTLE_MS = 320;
+const SPIN_API_TIMEOUT_MS = 12_000;
+const BUY_API_TIMEOUT_MS = 20_000;
 
-function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
+function withTimeout<T>(promise: Promise<T>, ms: number, message: string, signal?: AbortSignal): Promise<T> {
   return new Promise<T>((resolve, reject) => {
-    const timer = window.setTimeout(() => reject(new Error(message)), ms);
+    if (signal?.aborted) {
+      reject(new DOMException("Aborted", "AbortError"));
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      reject(new Error(message));
+    }, ms);
+    const onAbort = () => {
+      window.clearTimeout(timer);
+      reject(new DOMException("Aborted", "AbortError"));
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
     promise
       .then((value) => {
         window.clearTimeout(timer);
+        signal?.removeEventListener("abort", onAbort);
         resolve(value);
       })
       .catch((err) => {
         window.clearTimeout(timer);
+        signal?.removeEventListener("abort", onAbort);
         reject(err);
       });
   });
+}
+
+/** Кривая: быстро крутит большую часть времени, мягко тормозит в конце (не «обрыв» на 0.5с). */
+function spinEase(t: number): number {
+  const x = Math.min(1, Math.max(0, t));
+  // 0..0.62 почти линейно → ~72% пути, затем ease-out
+  if (x <= 0.62) return (0.72 / 0.62) * x;
+  const u = (x - 0.62) / 0.38;
+  return 0.72 + 0.28 * (1 - (1 - u) * (1 - u) * (1 - u));
 }
 
 type TicketPurchaseHistoryItem = {
@@ -98,12 +126,20 @@ type Props = {
   ticketShop?: RouletteTicketShopPublicDto;
   history: Array<{ id: number; date: string; prize: string; status: string }>;
   ticketPurchaseHistory?: TicketPurchaseHistoryItem[];
+  theme?: "light" | "dark";
   onSubscriptionUpdate?: (
     subId: number,
-    patch: { tickets?: number; gb_piggy?: RouletteGbPiggyDto | null },
+    patch: {
+      tickets?: number;
+      gb_piggy?: RouletteGbPiggyDto | null;
+      remaining_days?: number | null;
+      remaining_gb?: number | null;
+    },
   ) => void;
   onBuyClick: () => void;
   onRefreshProfile: () => void;
+  /** Админ-превью: спин и покупка билетов отключены. */
+  previewMode?: boolean;
 };
 
 type BuyPaymentType = "subscription_days" | "traffic_gb";
@@ -174,10 +210,13 @@ export default function RouletteGame({
   ticketShop,
   history,
   ticketPurchaseHistory = [],
+  theme = "light",
   onSubscriptionUpdate,
   onBuyClick,
   onRefreshProfile,
+  previewMode = false,
 }: Props) {
+  const portalRoot = useMySubPortalRoot();
   const wheelRef = useRef<HTMLDivElement>(null);
   const caseTrackRef = useRef<HTMLDivElement>(null);
   const caseViewportRef = useRef<HTMLDivElement>(null);
@@ -236,7 +275,12 @@ export default function RouletteGame({
   }, [subscriptions, selectedSubId]);
 
   const patchSelectedSub = useCallback(
-    (patch: { tickets?: number; gb_piggy?: RouletteGbPiggyDto | null }) => {
+    (patch: {
+      tickets?: number;
+      gb_piggy?: RouletteGbPiggyDto | null;
+      remaining_days?: number | null;
+      remaining_gb?: number | null;
+    }) => {
       if (!selectedSub) return;
       if (patch.tickets != null) setLocalTickets(patch.tickets);
       if (patch.gb_piggy !== undefined) setLocalPiggy(patch.gb_piggy);
@@ -244,6 +288,11 @@ export default function RouletteGame({
     },
     [onSubscriptionUpdate, selectedSub],
   );
+
+  const portalBackdropClass = useMemo(() => {
+    const light = theme !== "dark";
+    return `modal-backdrop roulette-modal-portal mn-app mn-app--${theme}${light ? " mysub-wrap--light" : ""}`;
+  }, [theme]);
 
   useEffect(() => {
     const el = wheelRef.current;
@@ -299,6 +348,10 @@ export default function RouletteGame({
       window.cancelAnimationFrame(pendingSpinRafRef.current);
       pendingSpinRafRef.current = 0;
     }
+    if (spinFinishTimerRef.current) {
+      window.clearTimeout(spinFinishTimerRef.current);
+      spinFinishTimerRef.current = 0;
+    }
   }, []);
 
   const activePrizesRef = useRef(prizes);
@@ -306,14 +359,10 @@ export default function RouletteGame({
     activePrizesRef.current = prizes;
   }, [prizes]);
 
-  const applyCaseTransform = useCallback((offset: number, withTransition: boolean, durationMs = SPIN_MS) => {
+  const applyCaseTransform = useCallback((offset: number) => {
     const el = caseTrackRef.current;
     if (!el) return;
-    if (withTransition) {
-      el.style.transition = `transform ${durationMs}ms cubic-bezier(0.08, 0.82, 0.12, 1)`;
-    } else {
-      el.style.transition = "none";
-    }
+    el.style.transition = "none";
     el.style.transform = `translate3d(${offset}px, 0, 0)`;
   }, []);
 
@@ -324,15 +373,14 @@ export default function RouletteGame({
       const dt = Math.min(48, now - lastTs);
       lastTs = now;
       if (uiModeRef.current === "case") {
-        // Быстрая «летящая» лента сразу после клика
         let next = caseOffsetRef.current - dt * 2.6;
         const n = Math.max(1, activePrizesRef.current.length);
         const viewportW = caseViewportRef.current?.clientWidth || 320;
         next = wrapCaseOffsetToIdle(next, n, viewportW);
         caseOffsetRef.current = next;
-        applyCaseTransform(next, false);
+        applyCaseTransform(next);
       } else {
-        const next = rotationRef.current + dt * 0.72;
+        const next = rotationRef.current + dt * 0.85;
         rotationRef.current = next;
         const el = wheelRef.current;
         if (el) {
@@ -345,75 +393,80 @@ export default function RouletteGame({
     pendingSpinRafRef.current = window.requestAnimationFrame(tick);
   }, [stopPendingWheelSpin, applyCaseTransform]);
 
-  const animateWheelToFinal = useCallback((finalRotation: number, durationMs = SPIN_MS) => {
+  /** RAF-анимация ровно durationMs — не зависит от CSS transitionend. */
+  const animateWheelToFinal = useCallback((finalRotation: number, durationMs: number) => {
     return new Promise<void>((resolve) => {
+      stopPendingWheelSpin();
+      const startRot = rotationRef.current;
+      const delta = finalRotation - startRot;
+      const t0 = performance.now();
       let settled = false;
       const done = () => {
         if (settled) return;
         settled = true;
-        if (spinFinishTimerRef.current) {
-          window.clearTimeout(spinFinishTimerRef.current);
-          spinFinishTimerRef.current = 0;
-        }
+        stopPendingWheelSpin();
         rotationRef.current = finalRotation;
+        const el = wheelRef.current;
+        if (el) {
+          el.style.transition = "none";
+          el.style.transform = `rotate(${finalRotation}deg)`;
+        }
         setRotation(finalRotation);
         resolve();
       };
-
-      const el = wheelRef.current;
-      const startRot = rotationRef.current;
-      if (el) {
-        el.style.transition = "none";
-        el.style.transform = `rotate(${startRot}deg)`;
-        void el.offsetHeight;
-        el.style.transition = `transform ${durationMs}ms cubic-bezier(0.08, 0.82, 0.12, 1)`;
-        el.style.transform = `rotate(${finalRotation}deg)`;
-        const onEnd = (e: TransitionEvent) => {
-          if (e.propertyName !== "transform") return;
-          el.removeEventListener("transitionend", onEnd);
+      const tick = (now: number) => {
+        if (settled) return;
+        const t = Math.min(1, (now - t0) / Math.max(1, durationMs));
+        const value = startRot + delta * spinEase(t);
+        rotationRef.current = value;
+        const el = wheelRef.current;
+        if (el) {
+          el.style.transition = "none";
+          el.style.transform = `rotate(${value}deg)`;
+        }
+        if (t < 1) {
+          pendingSpinRafRef.current = window.requestAnimationFrame(tick);
+        } else {
           done();
-        };
-        el.addEventListener("transitionend", onEnd);
-      }
-      setRotation(finalRotation);
-      spinFinishTimerRef.current = window.setTimeout(done, durationMs + 80);
+        }
+      };
+      pendingSpinRafRef.current = window.requestAnimationFrame(tick);
+      spinFinishTimerRef.current = window.setTimeout(done, durationMs + 120);
     });
-  }, []);
+  }, [stopPendingWheelSpin]);
 
-  const animateCaseToFinal = useCallback((finalOffset: number, durationMs = SPIN_MS) => {
+  const animateCaseToFinal = useCallback((finalOffset: number, durationMs: number) => {
     return new Promise<void>((resolve) => {
+      stopPendingWheelSpin();
+      const startOff = caseOffsetRef.current;
+      const delta = finalOffset - startOff;
+      const t0 = performance.now();
       let settled = false;
       const done = () => {
         if (settled) return;
         settled = true;
-        if (spinFinishTimerRef.current) {
-          window.clearTimeout(spinFinishTimerRef.current);
-          spinFinishTimerRef.current = 0;
-        }
+        stopPendingWheelSpin();
         caseOffsetRef.current = finalOffset;
+        applyCaseTransform(finalOffset);
         setCaseOffset(finalOffset);
         resolve();
       };
-
-      const el = caseTrackRef.current;
-      const startOff = caseOffsetRef.current;
-      if (el) {
-        el.style.transition = "none";
-        el.style.transform = `translate3d(${startOff}px, 0, 0)`;
-        void el.offsetHeight;
-      }
-      setCaseOffset(finalOffset);
-      applyCaseTransform(finalOffset, true, durationMs);
-
-      const onEnd = (e: TransitionEvent) => {
-        if (e.propertyName !== "transform") return;
-        el?.removeEventListener("transitionend", onEnd);
-        done();
+      const tick = (now: number) => {
+        if (settled) return;
+        const t = Math.min(1, (now - t0) / Math.max(1, durationMs));
+        const value = startOff + delta * spinEase(t);
+        caseOffsetRef.current = value;
+        applyCaseTransform(value);
+        if (t < 1) {
+          pendingSpinRafRef.current = window.requestAnimationFrame(tick);
+        } else {
+          done();
+        }
       };
-      el?.addEventListener("transitionend", onEnd);
-      spinFinishTimerRef.current = window.setTimeout(done, durationMs + 80);
+      pendingSpinRafRef.current = window.requestAnimationFrame(tick);
+      spinFinishTimerRef.current = window.setTimeout(done, durationMs + 120);
     });
-  }, [applyCaseTransform]);
+  }, [stopPendingWheelSpin, applyCaseTransform]);
 
   const ticketCount = Math.max(0, localTickets);
   const spinBusy = spinning || spinRequesting;
@@ -502,12 +555,16 @@ export default function RouletteGame({
 
   const openBuyModal = useCallback(
     (paymentType: BuyPaymentType) => {
+      if (previewMode) {
+        setError("Превью — покупка билетов отключена");
+        return;
+      }
       setBuyPaymentType(paymentType);
       setBuyQuantity(minTickets);
       setBuyModalStep("quantity");
       setBuyError(null);
     },
-    [minTickets],
+    [minTickets, previewMode],
   );
 
   useEffect(() => {
@@ -530,12 +587,20 @@ export default function RouletteGame({
     setBuySubmitting(true);
     setBuyError(null);
     try {
-      const result = await buyMySubRouletteTickets(initData, buyPaymentType, buyQuantity, selectedSub.id);
+      const result = await withTimeout(
+        buyMySubRouletteTickets(initData, buyPaymentType, buyQuantity, selectedSub.id),
+        BUY_API_TIMEOUT_MS,
+        "Покупка билетов слишком долго не отвечает. Обновите страницу.",
+      );
       if (!result.ok) {
         setBuyError(result.error?.trim() || "Не удалось купить билеты.");
         return;
       }
-      patchSelectedSub({ tickets: result.tickets_count });
+      patchSelectedSub({
+        tickets: result.tickets_count,
+        remaining_days: result.remaining_days,
+        remaining_gb: result.remaining_gb,
+      });
       setBuyModalStep(null);
       setBuyPaymentType(null);
       setBuySuccess({
@@ -574,7 +639,7 @@ export default function RouletteGame({
       const start = caseIdleOffset(activePrizes.length, viewportW, 0);
       setCaseOffset(start);
       caseOffsetRef.current = start;
-      applyCaseTransform(start, false);
+      applyCaseTransform(start);
     };
     measure();
     // После layout viewport может стать шире
@@ -632,6 +697,10 @@ export default function RouletteGame({
 
   const spin = useCallback(async (opts?: { fromAuto?: boolean }) => {
     const fromAuto = opts?.fromAuto === true;
+    if (previewMode) {
+      setError("Превью — кручение рулетки отключено");
+      return;
+    }
     if (!selectedSub) {
       setError("Нет подписки для игры.");
       return;
@@ -657,17 +726,22 @@ export default function RouletteGame({
     if (fromAuto) {
       setAutoSpinToast(`Автопрокрутка… билетов: ${ticketCount}`);
     }
+    const spinStartedAt = performance.now();
     stopSpinSound();
+    stopSoundRef.current = playRouletteSpinSound(SPIN_MS);
     startPendingWheelSpin();
+
+    const abort = new AbortController();
+    const abortTimer = window.setTimeout(() => abort.abort(), SPIN_API_TIMEOUT_MS);
 
     try {
       const result = await withTimeout(
-        spinMySubRoulette(initData, selectedSub.id),
+        spinMySubRoulette(initData, selectedSub.id, { signal: abort.signal }),
         SPIN_API_TIMEOUT_MS,
         "Сервер не ответил вовремя. Попробуйте ещё раз.",
+        abort.signal,
       );
-      stopPendingWheelSpin();
-      stopSoundRef.current = playRouletteSpinSound(SPIN_MS);
+      window.clearTimeout(abortTimer);
 
       let idx = Math.max(0, Math.min(activePrizes.length - 1, result.prize_index ?? 0));
       if (result.prize?.id) {
@@ -678,24 +752,28 @@ export default function RouletteGame({
       const prize = prizeDto ? toDisplayPrize(prizeDto) : catalog[idx]!;
       const lose = isRouletteLosePrize(prize);
 
+      // Длительность доката: добиваем ровно SPIN_MS от клика (без «0.5с» и без вечного кручения).
+      const elapsed = performance.now() - spinStartedAt;
+      const animMs = Math.max(SPIN_MIN_SETTLE_MS, SPIN_MS - elapsed);
+
       if (uiModeRef.current === "case") {
         const viewportW = caseViewportRef.current?.clientWidth || 320;
         const n = activePrizes.length;
-        // Продолжаем с текущей позиции ленты — без паузы и без сброса
         const current = caseOffsetRef.current;
         const jitter = (Math.random() - 0.5) * 0.28;
-        const minCycles = 4 + Math.floor(Math.random() * 2);
+        // Меньше циклов при коротком докате — иначе лента «летит» слишком быстро
+        const minCycles = animMs >= 1400 ? 3 + Math.floor(Math.random() * 2) : 2;
         const finalOffset = caseSpinTargetOffset(current, idx, n, viewportW, minCycles, jitter);
-        await animateCaseToFinal(finalOffset, SPIN_MS);
+        await animateCaseToFinal(finalOffset, animMs);
         const settled = wrapCaseOffsetToIdle(finalOffset, n, viewportW);
         caseOffsetRef.current = settled;
         setCaseOffset(settled);
-        applyCaseTransform(settled, false);
+        applyCaseTransform(settled);
       } else {
-        setRotation(rotationRef.current);
-        const extraTurns = 5 + Math.floor(Math.random() * 3);
+        // ~3–4 оборота за 2с — выглядит как полноценный прокрут
+        const extraTurns = animMs >= 1400 ? 3 + Math.floor(Math.random() * 2) : 1;
         const finalRotation = rotationForPrizeIndex(rotationRef.current, idx, activePrizes.length, extraTurns);
-        await animateWheelToFinal(finalRotation, SPIN_MS);
+        await animateWheelToFinal(finalRotation, animMs);
       }
 
       const appliedTitle = result.spin?.prize_title?.trim();
@@ -744,8 +822,14 @@ export default function RouletteGame({
         resetSpinState({ stopAuto: true });
       }
     } catch (e) {
+      window.clearTimeout(abortTimer);
+      abort.abort();
       resetSpinState({ stopAuto: fromAuto });
-      setError(formatClientError(e));
+      if (e instanceof DOMException && e.name === "AbortError") {
+        setError("Сервер не ответил вовремя. Попробуйте ещё раз.");
+      } else {
+        setError(formatClientError(e));
+      }
     }
   }, [
     ticketCount,
@@ -762,8 +846,13 @@ export default function RouletteGame({
     animateCaseToFinal,
     applyCaseTransform,
     resetSpinState,
+    previewMode,
   ]);
   const requestSpin = useCallback(() => {
+    if (previewMode) {
+      setError("Превью — кручение рулетки отключено");
+      return;
+    }
     if (autoSpinRef.current) {
       setAutoSpin(false);
       autoSpinRef.current = false;
@@ -775,10 +864,14 @@ export default function RouletteGame({
       return;
     }
     void spin();
-  }, [gameTab, spin]);
+  }, [gameTab, spin, previewMode]);
 
   const handleAutoSpinToggle = useCallback(
     (next: boolean) => {
+      if (previewMode) {
+        setError("Превью — кручение рулетки отключено");
+        return;
+      }
       setAutoSpin(next);
       autoSpinRef.current = next;
       if (!next) setAutoSpinToast(null);
@@ -786,7 +879,7 @@ export default function RouletteGame({
         void spin({ fromAuto: true });
       }
     },
-    [ticketCount, spin],
+    [ticketCount, spin, previewMode],
   );
 
   const piggyPct = localPiggy
@@ -870,6 +963,7 @@ export default function RouletteGame({
                 type="button"
                 className="primary roulette-game__buy-card-btn"
                 disabled={
+                  previewMode ||
                   selectedSub.stats?.unlimited_time ||
                   !selectedSub.stats ||
                   maxBuyTicketsDays < minTickets
@@ -896,6 +990,7 @@ export default function RouletteGame({
                 type="button"
                 className="primary roulette-game__buy-card-btn"
                 disabled={
+                  previewMode ||
                   selectedSub.stats?.unlimited_traffic ||
                   !selectedSub.stats ||
                   (selectedSub.stats.remaining_gb ?? 0) < shop.price_gb_per_ticket
@@ -1109,7 +1204,7 @@ export default function RouletteGame({
           <button
             type="button"
             className={`toggle ${autoSpin ? "on" : ""}`}
-            disabled={spinBusy && !autoSpin}
+            disabled={previewMode || (spinBusy && !autoSpin)}
             onClick={() => handleAutoSpinToggle(!autoSpin)}
             aria-pressed={autoSpin}
             aria-label="Автопрокрутка"
@@ -1121,7 +1216,7 @@ export default function RouletteGame({
         <button
           type="button"
           className="primary roulette-game__spin-btn"
-          disabled={spinBusy || ticketCount <= 0}
+          disabled={previewMode || spinBusy || ticketCount <= 0}
           onClick={() => {
             if (autoSpin) {
               handleAutoSpinToggle(false);
@@ -1130,7 +1225,9 @@ export default function RouletteGame({
             requestSpin();
           }}
         >
-          {spinBusy ? (
+          {previewMode ? (
+            "Превью — спин отключён"
+          ) : spinBusy ? (
             <>
               <Spinner /> {autoSpin ? "Автокрутка…" : "Крутим…"}
             </>
@@ -1146,11 +1243,11 @@ export default function RouletteGame({
           <>
             <p className="field-hint roulette-game__no-tickets-hint">Билеты начисляются за покупки.</p>
             {shopVisible ? (
-              <button type="button" className="ghost" onClick={() => setGameTab("buy")}>
+              <button type="button" className="ghost" disabled={previewMode} onClick={() => setGameTab("buy")}>
                 Купить билеты за ресурсы
               </button>
             ) : null}
-            <button type="button" className="ghost" onClick={onBuyClick}>
+            <button type="button" className="ghost" disabled={previewMode} onClick={onBuyClick}>
               Купить подписку и получить билеты
             </button>
           </>
@@ -1197,7 +1294,7 @@ export default function RouletteGame({
               <button
                 type="button"
                 className="primary roulette-piggy__exchange-btn"
-                disabled={!localPiggy.can_exchange || piggyExchanging || spinBusy}
+                disabled={previewMode || !localPiggy.can_exchange || piggyExchanging || spinBusy}
                 onClick={() => void exchangePiggy()}
               >
                 {piggyExchanging
@@ -1212,312 +1309,339 @@ export default function RouletteGame({
       ) : null}
       </div>
 
-      {ticketsHelpOpen ? (
-        <div className="modal-backdrop" onClick={() => setTicketsHelpOpen(false)}>
-          <div className="modal mysub-modal" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-head">
-              <h2>Как получить билеты?</h2>
-              <ModalCloseButton onClick={() => setTicketsHelpOpen(false)} />
-            </div>
-            <div className="modal-body">
-              <p style={{ lineHeight: 1.7, margin: 0 }}>
-                Билеты начисляются за подтверждённые покупки.
-                <br />
-                За одну покупку вы получаете <b>{ticketsPerPurchase}</b>{" "}
-                {ticketsPerPurchase === 1 ? "билет" : "билета"}.
-                <br />
-                1 билет = 1 прокрут рулетки.
-              </p>
-            </div>
-            <div className="modal-footer roulette-game__modal-footer">
-              <button type="button" className="ghost" onClick={() => setTicketsHelpOpen(false)}>
-                Понятно
-              </button>
-              <button
-                type="button"
-                className="primary"
-                onClick={() => {
-                  setTicketsHelpOpen(false);
-                  onBuyClick();
-                }}
-              >
-                Купить подписку
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
-
-      {historyOpen ? (
-        <div className="modal-backdrop" onClick={() => setHistoryOpen(false)}>
-          <div className="modal mysub-modal roulette-game__history-modal" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-head">
-              <h2>Мои выигрыши</h2>
-              <ModalCloseButton onClick={() => setHistoryOpen(false)} />
-            </div>
-            <div className="modal-body roulette-game__history-modal-body">
-              {mergedHistory.length === 0 ? (
-                <p className="field-hint">Вы ещё не крутили рулетку.</p>
-              ) : (
-                <ul className="roulette-game__history">
-                  {mergedHistory.map((item) => {
-                    if (item.kind === "ticket_purchase") {
-                      const p = item.purchase;
-                      const label =
-                        p.payment_type === "subscription_days"
-                          ? `Куплено ${p.tickets} ${ticketsWord(p.tickets)} за ${p.cost} ${daysWord(p.cost)}`
-                          : `Куплено ${p.tickets} ${ticketsWord(p.tickets)} за ${p.cost} ГБ`;
-                      return (
-                        <li key={item.key}>
-                          <span className="roulette-game__history-icon" aria-hidden>
-                            🎟️
-                          </span>
-                          <span className="roulette-game__history-text">{label}</span>
-                          <span className="roulette-game__history-date">{formatDate(item.date)}</span>
-                        </li>
-                      );
-                    }
-                    const resolved = resolveHistoryPrize(item.spin.prize, catalog);
-                    return (
-                      <li key={item.key}>
-                        <span className="roulette-game__history-icon" aria-hidden>
-                          <RoulettePrizeIcon type={resolved.type} size={18} className="roulette-game__history-icon-svg" />
-                        </span>
-                        <span className="roulette-game__history-text">
-                          {getPrizeShortTitle(resolved)} — {historyStatusLabel(item.spin.status)}
-                        </span>
-                        <span className="roulette-game__history-date">{formatDate(item.date)}</span>
-                      </li>
-                    );
-                  })}
-                </ul>
-              )}
-            </div>
-            <div className="modal-footer roulette-game__modal-footer roulette-game__modal-footer--stack">
-              <button type="button" className="primary" onClick={() => setHistoryOpen(false)}>
-                Закрыть
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
-
-      {buyModalStep && buyPaymentType && shop ? (
-        <div className="modal-backdrop" onClick={closeBuyModal}>
-          <div className="modal mysub-modal" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-head">
-              <h2>{buyModalStep === "confirm" ? "Подтверждение покупки" : "Покупка билетов"}</h2>
-            </div>
-            <div className="modal-body">
-              {buyModalStep === "quantity" ? (
-                <>
-                  <div className="roulette-game__buy-qty">
-                    <button
-                      type="button"
-                      className="ghost"
-                      disabled={buyQuantity <= minTickets}
-                      {...holdDecBuyQty}
-                    >
-                      −
-                    </button>
-                    <span className="roulette-game__buy-qty-value">{buyQuantity}</span>
-                    <button
-                      type="button"
-                      className="ghost"
-                      disabled={buyQuantity >= buyTicketCap}
-                      {...holdIncBuyQty}
-                    >
-                      +
-                    </button>
-                  </div>
-                  <p className="roulette-game__buy-cost">
-                    Стоимость:{" "}
-                    {buyPaymentType === "subscription_days"
-                      ? `${buyCost} ${daysWord(buyCost)}`
-                      : `${buyCost} ГБ трафика`}
+      {ticketsHelpOpen
+        ? createPortal(
+            <div className={portalBackdropClass} onClick={() => setTicketsHelpOpen(false)}>
+              <div className="modal mysub-modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
+                <div className="modal-head">
+                  <h2>Как получить билеты?</h2>
+                  <ModalCloseButton onClick={() => setTicketsHelpOpen(false)} />
+                </div>
+                <div className="modal-body">
+                  <p style={{ lineHeight: 1.7, margin: 0 }}>
+                    Билеты начисляются за подтверждённые покупки.
+                    <br />
+                    За одну покупку вы получаете <b>{ticketsPerPurchase}</b>{" "}
+                    {ticketsPerPurchase === 1 ? "билет" : "билета"}.
+                    <br />
+                    1 билет = 1 прокрут рулетки.
                   </p>
-                  {selectedSub?.stats ? (
-                    <div className="roulette-game__buy-balances">
-                      {subscriptions.length > 1 ? (
-                        <p className="field-hint">Подписка: <b>{subscriptionLabel(selectedSub)}</b></p>
-                      ) : null}
-                      {selectedSub.stats.remaining_days != null && !selectedSub.stats.unlimited_time ? (
-                        <p>
-                          Дней подписки доступно: <b>{selectedSub.stats.remaining_days}</b>
-                          {buyPaymentType === "subscription_days" && maxBuyTicketsDays > 0 ? (
-                            <span className="field-hint">
-                              {" "}
-                              · макс. {maxBuyTicketsDays} {ticketsWord(maxBuyTicketsDays)}
+                </div>
+                <div className="modal-footer roulette-game__modal-footer">
+                  <button type="button" className="ghost" onClick={() => setTicketsHelpOpen(false)}>
+                    Понятно
+                  </button>
+                  <button
+                    type="button"
+                    className="primary"
+                    onClick={() => {
+                      setTicketsHelpOpen(false);
+                      onBuyClick();
+                    }}
+                  >
+                    Купить подписку
+                  </button>
+                </div>
+              </div>
+            </div>,
+            portalRoot,
+          )
+        : null}
+
+      {historyOpen
+        ? createPortal(
+            <div className={portalBackdropClass} onClick={() => setHistoryOpen(false)}>
+              <div
+                className="modal mysub-modal roulette-game__history-modal"
+                onClick={(e) => e.stopPropagation()}
+                role="dialog"
+                aria-modal="true"
+              >
+                <div className="modal-head">
+                  <h2>Мои выигрыши</h2>
+                  <ModalCloseButton onClick={() => setHistoryOpen(false)} />
+                </div>
+                <div className="modal-body roulette-game__history-modal-body">
+                  {mergedHistory.length === 0 ? (
+                    <p className="field-hint">Вы ещё не крутили рулетку.</p>
+                  ) : (
+                    <ul className="roulette-game__history">
+                      {mergedHistory.map((item) => {
+                        if (item.kind === "ticket_purchase") {
+                          const p = item.purchase;
+                          const label =
+                            p.payment_type === "subscription_days"
+                              ? `Куплено ${p.tickets} ${ticketsWord(p.tickets)} за ${p.cost} ${daysWord(p.cost)}`
+                              : `Куплено ${p.tickets} ${ticketsWord(p.tickets)} за ${p.cost} ГБ`;
+                          return (
+                            <li key={item.key}>
+                              <span className="roulette-game__history-icon" aria-hidden>
+                                🎟️
+                              </span>
+                              <span className="roulette-game__history-text">{label}</span>
+                              <span className="roulette-game__history-date">{formatDate(item.date)}</span>
+                            </li>
+                          );
+                        }
+                        const resolved = resolveHistoryPrize(item.spin.prize, catalog);
+                        return (
+                          <li key={item.key}>
+                            <span className="roulette-game__history-icon" aria-hidden>
+                              <RoulettePrizeIcon type={resolved.type} size={18} className="roulette-game__history-icon-svg" />
                             </span>
-                          ) : null}
-                        </p>
-                      ) : null}
-                      {selectedSub.stats.remaining_gb != null && !selectedSub.stats.unlimited_traffic ? (
-                        <p>ГБ доступно: <b>{selectedSub.stats.remaining_gb}</b></p>
-                      ) : null}
-                    </div>
-                  ) : null}
-                </>
-              ) : (
-                <p style={{ lineHeight: 1.7, margin: 0 }}>
-                  Вы хотите купить {buyQuantity} {ticketsWord(buyQuantity)} за{" "}
-                  {buyPaymentType === "subscription_days"
-                    ? `${buyCost} ${daysWord(buyCost)}`
-                    : `${buyCost} ГБ трафика`}
-                  ?
-                </p>
-              )}
-              {buyError ? <div className="flash err">{buyError}</div> : null}
-            </div>
-            <div className="modal-footer roulette-game__modal-footer">
-              <button type="button" className="ghost" disabled={buySubmitting} onClick={closeBuyModal}>
-                Отмена
-              </button>
-              {buyModalStep === "quantity" ? (
-                <button
-                  type="button"
-                  className="primary"
-                  disabled={
-                    buySubmitting ||
-                    (buyPaymentType === "subscription_days" ? !canPayWithDays : !canPayWithGb)
-                  }
-                  onClick={() => setBuyModalStep("confirm")}
-                >
-                  Купить
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  className="primary"
-                  disabled={
-                    buySubmitting ||
-                    (buyPaymentType === "subscription_days" ? !canPayWithDays : !canPayWithGb)
-                  }
-                  onClick={() => void confirmBuy()}
-                >
-                  {buySubmitting ? (
+                            <span className="roulette-game__history-text">
+                              {getPrizeShortTitle(resolved)} — {historyStatusLabel(item.spin.status)}
+                            </span>
+                            <span className="roulette-game__history-date">{formatDate(item.date)}</span>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  )}
+                </div>
+                <div className="modal-footer roulette-game__modal-footer roulette-game__modal-footer--stack">
+                  <button type="button" className="primary" onClick={() => setHistoryOpen(false)}>
+                    Закрыть
+                  </button>
+                </div>
+              </div>
+            </div>,
+            portalRoot,
+          )
+        : null}
+
+      {buyModalStep && buyPaymentType && shop
+        ? createPortal(
+            <div className={portalBackdropClass} onClick={closeBuyModal}>
+              <div className="modal mysub-modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
+                <div className="modal-head">
+                  <h2>{buyModalStep === "confirm" ? "Подтверждение покупки" : "Покупка билетов"}</h2>
+                </div>
+                <div className="modal-body">
+                  {buyModalStep === "quantity" ? (
                     <>
-                      <Spinner /> Покупаем…
+                      <div className="roulette-game__buy-qty">
+                        <button
+                          type="button"
+                          className="ghost"
+                          disabled={buyQuantity <= minTickets}
+                          {...holdDecBuyQty}
+                        >
+                          −
+                        </button>
+                        <span className="roulette-game__buy-qty-value">{buyQuantity}</span>
+                        <button
+                          type="button"
+                          className="ghost"
+                          disabled={buyQuantity >= buyTicketCap}
+                          {...holdIncBuyQty}
+                        >
+                          +
+                        </button>
+                      </div>
+                      <p className="roulette-game__buy-cost">
+                        Стоимость:{" "}
+                        {buyPaymentType === "subscription_days"
+                          ? `${buyCost} ${daysWord(buyCost)}`
+                          : `${buyCost} ГБ трафика`}
+                      </p>
+                      {selectedSub?.stats ? (
+                        <div className="roulette-game__buy-balances">
+                          {subscriptions.length > 1 ? (
+                            <p className="field-hint">
+                              Подписка: <b>{subscriptionLabel(selectedSub)}</b>
+                            </p>
+                          ) : null}
+                          {selectedSub.stats.remaining_days != null && !selectedSub.stats.unlimited_time ? (
+                            <p>
+                              Дней подписки доступно: <b>{selectedSub.stats.remaining_days}</b>
+                              {buyPaymentType === "subscription_days" && maxBuyTicketsDays > 0 ? (
+                                <span className="field-hint">
+                                  {" "}
+                                  · макс. {maxBuyTicketsDays} {ticketsWord(maxBuyTicketsDays)}
+                                </span>
+                              ) : null}
+                            </p>
+                          ) : null}
+                          {selectedSub.stats.remaining_gb != null && !selectedSub.stats.unlimited_traffic ? (
+                            <p>
+                              ГБ доступно: <b>{selectedSub.stats.remaining_gb}</b>
+                            </p>
+                          ) : null}
+                        </div>
+                      ) : null}
                     </>
                   ) : (
-                    "Подтвердить"
+                    <p style={{ lineHeight: 1.7, margin: 0 }}>
+                      Вы хотите купить {buyQuantity} {ticketsWord(buyQuantity)} за{" "}
+                      {buyPaymentType === "subscription_days"
+                        ? `${buyCost} ${daysWord(buyCost)}`
+                        : `${buyCost} ГБ трафика`}
+                      ?
+                    </p>
                   )}
-                </button>
-              )}
-            </div>
-          </div>
-        </div>
-      ) : null}
-
-      {buySuccess ? (
-        <div className="modal-backdrop" onClick={() => setBuySuccess(null)}>
-          <div className="modal mysub-modal" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-head">
-              <h2>Готово!</h2>
-            </div>
-            <div className="modal-body">
-              <p style={{ lineHeight: 1.7, margin: 0 }}>
-                Вы купили {buySuccess.tickets} {ticketsWord(buySuccess.tickets)} 🎟️
-              </p>
-              <p className="field-hint" style={{ marginTop: "0.5rem" }}>
-                Списано:{" "}
-                {buySuccess.paymentType === "subscription_days"
-                  ? `${buySuccess.cost} ${daysWord(buySuccess.cost)}`
-                  : `${buySuccess.cost} ГБ трафика`}
-              </p>
-            </div>
-            <div className="modal-footer roulette-game__success-footer">
-              <button
-                type="button"
-                className="primary"
-                onClick={() => {
-                  setBuySuccess(null);
-                  requestSpin();
-                }}
-              >
-                Крутить рулетку
-              </button>
-              <button type="button" className="ghost" onClick={() => setBuySuccess(null)}>
-                Закрыть
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
-
-      {winModal ? (
-        <div className="modal-backdrop roulette-game__win-backdrop" onClick={() => setWinModal(null)}>
-          <div
-            className={`roulette-game__win-sheet ${winModal.lose ? "roulette-game__win-sheet--lose" : ""} ${getPrizeAccentClass(winModal.prize)}`}
-            onClick={(e) => e.stopPropagation()}
-            role="dialog"
-            aria-modal="true"
-          >
-            <div className="roulette-game__win-sheet-glow" aria-hidden />
-            <div className="roulette-game__win-sheet-body">
-              <p className="roulette-game__win-eyebrow">{winModal.lose ? "🎲" : "🎉"}</p>
-              <div className="roulette-game__win-icon-ring" aria-hidden>
-                <RoulettePrizeIcon type={winModal.prize.type} size={44} className="roulette-game__win-icon-svg" />
+                  {buyError ? <div className="flash err">{buyError}</div> : null}
+                </div>
+                <div className="modal-footer roulette-game__modal-footer">
+                  <button type="button" className="ghost" disabled={buySubmitting} onClick={closeBuyModal}>
+                    Отмена
+                  </button>
+                  {buyModalStep === "quantity" ? (
+                    <button
+                      type="button"
+                      className="primary"
+                      disabled={
+                        buySubmitting ||
+                        (buyPaymentType === "subscription_days" ? !canPayWithDays : !canPayWithGb)
+                      }
+                      onClick={() => setBuyModalStep("confirm")}
+                    >
+                      Купить
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      className="primary"
+                      disabled={
+                        buySubmitting ||
+                        (buyPaymentType === "subscription_days" ? !canPayWithDays : !canPayWithGb)
+                      }
+                      onClick={() => void confirmBuy()}
+                    >
+                      {buySubmitting ? (
+                        <>
+                          <Spinner /> Покупаем…
+                        </>
+                      ) : (
+                        "Подтвердить"
+                      )}
+                    </button>
+                  )}
+                </div>
               </div>
-              <h2 className="roulette-game__win-heading">{winModal.lose ? "Не повезло" : "Поздравляем!"}</h2>
-              {winModal.lose ? (
-                <>
-                  <p className="roulette-game__win-prize">{getRouletteLoseMessage()}</p>
-                  <p className="roulette-game__win-sub">{winModal.winSub ?? "Билет списан. Попробуйте ещё раз!"}</p>
-                </>
-              ) : (
-                <>
-                  <p className="roulette-game__win-kicker">Вы выиграли</p>
-                  <p className="roulette-game__win-prize roulette-game__win-prize--big">
-                    {winModal.winText ?? getPrizeShortTitle(winModal.prize)}
+            </div>,
+            portalRoot,
+          )
+        : null}
+
+      {buySuccess
+        ? createPortal(
+            <div className={portalBackdropClass} onClick={() => setBuySuccess(null)}>
+              <div className="modal mysub-modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
+                <div className="modal-head">
+                  <h2>Готово!</h2>
+                </div>
+                <div className="modal-body">
+                  <p style={{ lineHeight: 1.7, margin: 0 }}>
+                    Вы купили {buySuccess.tickets} {ticketsWord(buySuccess.tickets)} 🎟️
                   </p>
-                  <p className="roulette-game__win-sub">{winModal.winSub ?? "Приз уже начислен в вашу подписку"}</p>
-                </>
-              )}
-            </div>
-            <div className="roulette-game__win-sheet-actions">
-              <button
-                type="button"
-                className="primary roulette-game__win-btn roulette-game__win-btn--main"
-                onClick={() => setWinModal(null)}
-              >
-                {winModal.lose ? "Отлично" : "Забрать"}
-              </button>
-              {!winModal.lose && ticketCount > 0 ? (
-                <button
-                  type="button"
-                  className="ghost roulette-game__win-btn"
-                  onClick={() => {
-                    setWinModal(null);
-                    requestSpin();
-                  }}
-                >
-                  Крутить ещё
-                </button>
-              ) : null}
-              <div className="roulette-game__win-btn-row">
-                <button
-                  type="button"
-                  className="ghost roulette-game__win-btn roulette-game__win-btn--half"
-                  onClick={() => {
-                    setWinModal(null);
-                    setHistoryOpen(true);
-                  }}
-                >
-                  Мои выигрыши
-                </button>
-                <button
-                  type="button"
-                  className="ghost roulette-game__win-btn roulette-game__win-btn--half"
-                  onClick={() => setWinModal(null)}
-                >
-                  Закрыть
-                </button>
+                  <p className="field-hint" style={{ marginTop: "0.5rem" }}>
+                    Списано:{" "}
+                    {buySuccess.paymentType === "subscription_days"
+                      ? `${buySuccess.cost} ${daysWord(buySuccess.cost)}`
+                      : `${buySuccess.cost} ГБ трафика`}
+                  </p>
+                </div>
+                <div className="modal-footer roulette-game__success-footer">
+                  <button
+                    type="button"
+                    className="primary"
+                    onClick={() => {
+                      setBuySuccess(null);
+                      requestSpin();
+                    }}
+                  >
+                    Крутить рулетку
+                  </button>
+                  <button type="button" className="ghost" onClick={() => setBuySuccess(null)}>
+                    Закрыть
+                  </button>
+                </div>
               </div>
-            </div>
-          </div>
-        </div>
-      ) : null}
+            </div>,
+            portalRoot,
+          )
+        : null}
+
+      {winModal
+        ? createPortal(
+            <div
+              className={`${portalBackdropClass} roulette-game__win-backdrop`}
+              onClick={() => setWinModal(null)}
+            >
+              <div
+                className={`roulette-game__win-sheet ${winModal.lose ? "roulette-game__win-sheet--lose" : ""} ${getPrizeAccentClass(winModal.prize)}`}
+                onClick={(e) => e.stopPropagation()}
+                role="dialog"
+                aria-modal="true"
+              >
+                <div className="roulette-game__win-sheet-glow" aria-hidden />
+                <div className="roulette-game__win-sheet-body">
+                  <p className="roulette-game__win-eyebrow">{winModal.lose ? "🎲" : "🎉"}</p>
+                  <div className="roulette-game__win-icon-ring" aria-hidden>
+                    <RoulettePrizeIcon type={winModal.prize.type} size={44} className="roulette-game__win-icon-svg" />
+                  </div>
+                  <h2 className="roulette-game__win-heading">{winModal.lose ? "Не повезло" : "Поздравляем!"}</h2>
+                  {winModal.lose ? (
+                    <>
+                      <p className="roulette-game__win-prize">{getRouletteLoseMessage()}</p>
+                      <p className="roulette-game__win-sub">{winModal.winSub ?? "Билет списан. Попробуйте ещё раз!"}</p>
+                    </>
+                  ) : (
+                    <>
+                      <p className="roulette-game__win-kicker">Вы выиграли</p>
+                      <p className="roulette-game__win-prize roulette-game__win-prize--big">
+                        {winModal.winText ?? getPrizeShortTitle(winModal.prize)}
+                      </p>
+                      <p className="roulette-game__win-sub">{winModal.winSub ?? "Приз уже начислен в вашу подписку"}</p>
+                    </>
+                  )}
+                </div>
+                <div className="roulette-game__win-sheet-actions">
+                  <button
+                    type="button"
+                    className="primary roulette-game__win-btn roulette-game__win-btn--main"
+                    onClick={() => setWinModal(null)}
+                  >
+                    {winModal.lose ? "Отлично" : "Забрать"}
+                  </button>
+                  {!winModal.lose && ticketCount > 0 ? (
+                    <button
+                      type="button"
+                      className="ghost roulette-game__win-btn"
+                      onClick={() => {
+                        setWinModal(null);
+                        requestSpin();
+                      }}
+                    >
+                      Крутить ещё
+                    </button>
+                  ) : null}
+                  <div className="roulette-game__win-btn-row">
+                    <button
+                      type="button"
+                      className="ghost roulette-game__win-btn roulette-game__win-btn--half"
+                      onClick={() => {
+                        setWinModal(null);
+                        setHistoryOpen(true);
+                      }}
+                    >
+                      Мои выигрыши
+                    </button>
+                    <button
+                      type="button"
+                      className="ghost roulette-game__win-btn roulette-game__win-btn--half"
+                      onClick={() => setWinModal(null)}
+                    >
+                      Закрыть
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>,
+            portalRoot,
+          )
+        : null}
     </div>
   );
 }

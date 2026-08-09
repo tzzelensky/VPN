@@ -43,7 +43,8 @@ import { pullTrafficFromAllDeployedServers } from "../xrayStatsPull.js";
 import { pullHysteria2TrafficFromAllServers } from "../hysteria2TrafficPull.js";
 import { pushHysteria2ClientsToAllDeployedServers } from "../hysteria2Deploy.js";
 import { refreshMissingSubscriptionHintsIfDue } from "../subscriptionHintsRefresh.js";
-import { resetUserTrafficCounters } from "../trafficReset.js";
+import { resetUserTrafficCounters, setUserTrafficUsedBytes, usedGbToBytes } from "../trafficReset.js";
+import { getPanelSettings } from "../panelSettings.js";
 import { coerceExtraVlessLinksInput, isValidVlessUri } from "../extraVless.js";
 import { isDeviceLimitGloballyEnabled, isDeviceLimitActiveForUser } from "../deviceLimitEffective.js";
 import { activeDeviceSlots, userDeviceTotalLimit } from "../userDeviceSlots.js";
@@ -480,6 +481,32 @@ router.post("/:id(\\d+)/reset-traffic", async (req, res) => {
     return;
   }
   const next = await resetUserTrafficCounters(u);
+  if (!next) {
+    res.status(404).json({ error: "not_found" });
+    return;
+  }
+  res.json({ ok: true, user: userDto(next) });
+});
+
+/** Выставить потраченный трафик (ГБ, до сотых) — отображается в Happ и других клиентах. */
+router.post("/:id(\\d+)/set-traffic", async (req, res) => {
+  if (!getPanelSettings().security.manualTrafficAdjust) {
+    res.status(403).json({ error: "manual_traffic_adjust_disabled" });
+    return;
+  }
+  const id = Number(req.params.id);
+  const u = getUser(id);
+  if (!u) {
+    res.status(404).json({ error: "not_found" });
+    return;
+  }
+  const raw = (req.body as { used_gb?: unknown } | null)?.used_gb;
+  const usedGb = typeof raw === "number" ? raw : Number(raw);
+  if (!Number.isFinite(usedGb) || usedGb < 0 || usedGb > 1_000_000) {
+    res.status(400).json({ error: "invalid_used_gb" });
+    return;
+  }
+  const next = await setUserTrafficUsedBytes(u, usedGbToBytes(usedGb));
   if (!next) {
     res.status(404).json({ error: "not_found" });
     return;

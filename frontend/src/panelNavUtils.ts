@@ -27,7 +27,7 @@ export const PANEL_NAV_SECTIONS: PanelSectionMeta[] = [
     label: "Прокси",
     description: "Развертывание Telegram-прокси на добавленных серверах",
   },
-  { key: "dropper_game", path: "/dropper-game", label: "Игра", description: "Мини-игра в боте" },
+  { key: "roulette_game", path: "/roulette-game", label: "Рулетка", description: "Рулетка, билеты и отчёты в WebApp" },
   {
     key: "device_limit",
     path: "/device-limit",
@@ -49,7 +49,7 @@ const PATH_TO_KEY: Record<string, PanelSectionKey> = {
   "/config-vault": "config_vault",
   "/whitelist-vault": "whitelist_vault",
   "/telegram-proxies": "telegram_proxies",
-  "/dropper-game": "dropper_game",
+  "/roulette-game": "roulette_game",
   "/device-limit": "device_limit",
   "/daily-gift": "daily_gift",
 };
@@ -78,7 +78,9 @@ export function normalizeSectionOrder(raw: unknown): PanelSectionKey[] {
   const seen = new Set<PanelSectionKey>();
   const out: PanelSectionKey[] = [];
   for (const item of raw) {
-    const k = String(item).trim() as PanelSectionKey;
+    let key = String(item).trim();
+    if (key === "dropper_game") key = "roulette_game";
+    const k = key as PanelSectionKey;
     if (!all.includes(k) || seen.has(k)) continue;
     seen.add(k);
     out.push(k);

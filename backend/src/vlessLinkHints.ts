@@ -190,6 +190,14 @@ function extractVlessLinkHintsFromInbound(ib: Record<string, unknown>): ServerLi
     out.sub_path = str(g.serviceName);
     out.sub_type = "grpc";
     out.sub_host = str(g.authority);
+  } else if (net === "xhttp" || net === "splithttp" || net === "httpupgrade") {
+    let xs = asRecord(ss.xhttpSettings);
+    if (!str(xs.path) && !str(xs.host) && !str(xs.mode)) xs = asRecord(ss.splithttpSettings);
+    if (!str(xs.path) && !str(xs.host) && !str(xs.mode)) xs = asRecord(ss.httpupgradeSettings);
+    out.sub_network = "xhttp";
+    out.sub_type = "xhttp";
+    out.sub_path = str(xs.path) || "/";
+    out.sub_host = str(xs.host);
   }
 
   if (secRaw === "tls") {

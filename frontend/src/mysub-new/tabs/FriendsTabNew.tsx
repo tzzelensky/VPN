@@ -1,14 +1,18 @@
+import { createPortal } from "react-dom";
 import Card from "../components/Card";
 import PrimaryButton from "../components/PrimaryButton";
 import SecondaryButton from "../components/SecondaryButton";
 import Badge from "../components/Badge";
 import type { MySubWebAppController } from "../types";
+import { useMySubPortalRoot } from "../portalContext";
 
 type Props = { ctrl: MySubWebAppController };
 
 export default function FriendsTabNew({ ctrl }: Props) {
+  const portalRoot = useMySubPortalRoot();
   const {
     data,
+    theme,
     copySubscription,
     shareReferralInTelegram,
     friendRewardId,
@@ -96,23 +100,29 @@ export default function FriendsTabNew({ ctrl }: Props) {
         )}
       </Card>
 
-      {friendRewardId ? (
-        <div className="mn-modal-backdrop" onClick={() => !friendRewardBusy && setFriendRewardId("")}>
-          <div className="mn-modal" onClick={(e) => e.stopPropagation()}>
-            <div className="mn-modal__head">
-              <h2>Выберите награду</h2>
-            </div>
-            <div className="mn-modal__foot">
-              <SecondaryButton disabled={friendRewardBusy} onClick={() => void claimFriendReward("gb")}>
-                +ГБ
-              </SecondaryButton>
-              <PrimaryButton disabled={friendRewardBusy} onClick={() => void claimFriendReward("days")}>
-                +Дни
-              </PrimaryButton>
-            </div>
-          </div>
-        </div>
-      ) : null}
+      {friendRewardId
+        ? createPortal(
+            <div
+              className={`mn-modal-backdrop mn-modal-backdrop--portal mn-app mn-app--${theme}${theme === "light" ? " mysub-wrap--light" : ""}`}
+              onClick={() => !friendRewardBusy && setFriendRewardId("")}
+            >
+              <div className="mn-modal mn-modal--solid" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
+                <div className="mn-modal__head">
+                  <h2>Выберите награду</h2>
+                </div>
+                <div className="mn-modal__foot">
+                  <SecondaryButton disabled={friendRewardBusy} onClick={() => void claimFriendReward("gb")}>
+                    +ГБ
+                  </SecondaryButton>
+                  <PrimaryButton disabled={friendRewardBusy} onClick={() => void claimFriendReward("days")}>
+                    +Дни
+                  </PrimaryButton>
+                </div>
+              </div>
+            </div>,
+            portalRoot,
+          )
+        : null}
     </>
   );
 }

@@ -467,9 +467,7 @@ export default function TabSwipeViews({
   }, []);
 
   useLayoutEffect(() => {
-    const gameIdx = gameIndexRef.current;
-    if (activeIndex !== gameIdx || gameIdx < 0) return;
-    const panel = pageRefs.current[gameIdx];
+    const panel = pageRefs.current[activeIndex];
     const root = rootRef.current;
     if (!panel || !root) return;
 
@@ -483,13 +481,14 @@ export default function TabSwipeViews({
       });
     };
 
+    apply();
     const ro = new ResizeObserver(apply);
     ro.observe(panel);
     return () => {
       ro.disconnect();
       cancelAnimationFrame(raf);
     };
-  }, [activeIndex, gameIndex]);
+  }, [activeIndex]);
 
   return (
     <div

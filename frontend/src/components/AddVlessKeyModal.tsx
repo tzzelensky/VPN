@@ -1,4 +1,5 @@
 import { FormEvent, useEffect, useState } from "react";
+import { useModalEscape } from "../hooks/useModalEscape";
 
 type Props = {
   open: boolean;
@@ -22,6 +23,8 @@ export default function AddVlessKeyModal({ open, editLink, onClose, onSave }: Pr
     setText(editLink?.uri ?? "");
     setErr(null);
   }, [open, editLink?.id, editLink?.uri]);
+
+  useModalEscape(onClose, open);
 
   if (!open) return null;
 
@@ -51,14 +54,8 @@ export default function AddVlessKeyModal({ open, editLink, onClose, onSave }: Pr
   }
 
   return (
-    <div
-      className="modal-backdrop modal-backdrop--nested"
-      role="presentation"
-      onClick={(ev) => {
-        if (ev.target === ev.currentTarget) onClose();
-      }}
-    >
-      <div className="modal modal--sm" role="dialog" aria-labelledby="add-vless-title" onClick={(e) => e.stopPropagation()}>
+    <div className="modal-backdrop modal-backdrop--nested" role="presentation">
+      <div className="modal modal--sm" role="dialog" aria-labelledby="add-vless-title">
         <div className="modal-head">
           <h2 id="add-vless-title">{isEdit ? "Редактировать VLESS ключ" : "Добавить VLESS ключ"}</h2>
           <button type="button" className="modal-close ghost" onClick={onClose} aria-label="Закрыть">

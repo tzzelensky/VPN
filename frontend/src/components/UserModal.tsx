@@ -64,6 +64,8 @@ type Props = {
   onClose: () => void;
   onCreate: (payload: CreateUserPayload) => void | Promise<void>;
   onUpdate: (id: number, payload: CreateUserPayload) => Promise<void>;
+  /** Открыть превью WebApp для tg_id клиента. */
+  onOpenWebAppPreview?: (user: UserDto) => void;
 };
 
 function serverSegLabel(s: ServerDto): string {
@@ -97,6 +99,7 @@ export default function UserModal({
   onClose,
   onCreate,
   onUpdate,
+  onOpenWebAppPreview,
 }: Props) {
   const [enable, setEnable] = useState(true);
   const [email, setEmail] = useState("");
@@ -704,6 +707,17 @@ export default function UserModal({
           <button type="button" className="ghost" onClick={() => onClose()}>
             Закрыть
           </button>
+          {!isCreate && user && onOpenWebAppPreview ? (
+            <button
+              type="button"
+              className="ghost"
+              disabled={saving || !String(user.tg_id || "").trim()}
+              title={String(user.tg_id || "").trim() ? "Открыть превью WebApp" : "Нет Telegram ID"}
+              onClick={() => onOpenWebAppPreview(user)}
+            >
+              Превью WebApp
+            </button>
+          ) : null}
           <button type="submit" form={formId} className="primary" disabled={saving}>
             {saving ? (
               <>

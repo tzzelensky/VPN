@@ -223,7 +223,8 @@ export function applyRoulettePrize(
   }
 }
 
-const spinLocks = new Map<number, Promise<unknown>>();
+/** Синхронный лок: не ждём предыдущий промис (иначе клиент ловит таймаут 15с). */
+const spinBusyUsers = new Set<number>();
 
 export type RouletteSpinResponse = {
   ok: boolean;
@@ -255,13 +256,12 @@ export async function spinRouletteForUser(
     return { ok: false, error: "Рулетка выключена" };
   }
 
-  const existing = spinLocks.get(tgUserId);
-  if (existing) {
-    await existing.catch(() => undefined);
+  if (spinBusyUsers.has(tgUserId)) {
     return { ok: false, error: "Подождите, прокрут уже выполняется" };
   }
+  spinBusyUsers.add(tgUserId);
 
-  const job = (async (): Promise<RouletteSpinResponse> => {
+  try {
     const linked = findUsersByTelegramChatId(tgUserId);
     let targetUserId = Math.floor(Number(opts?.user_id));
     if (!Number.isFinite(targetUserId) || targetUserId <= 0) {
@@ -311,13 +311,8 @@ export async function spinRouletteForUser(
       tickets_remaining: ticketResult.tickets_remaining,
       prize_index: idx >= 0 ? idx : 0,
     };
-  })();
-
-  spinLocks.set(tgUserId, job);
-  try {
-    return await job;
   } finally {
-    spinLocks.delete(tgUserId);
+    spinBusyUsers.delete(tgUserId);
   }
 }
 

@@ -268,7 +268,7 @@ export default function CommunicationsPage({ onLogout }: { onLogout: () => void 
       ) : null}
 
       {historyRecipients ? (
-        <AdminModalBackdrop onClick={() => setHistoryRecipients(null)}>
+        <AdminModalBackdrop onClose={() => setHistoryRecipients(null)}>
           <div
             className="modal comms-history-recipients-modal"
             onClick={(e) => e.stopPropagation()}

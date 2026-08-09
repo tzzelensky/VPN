@@ -46,6 +46,11 @@ function mergeSettings(raw: Partial<PanelSettings> | null): PanelSettings {
   const base = defaultPanelSettings();
   if (!raw) return base;
   const rawBanner = raw.panel?.subscriptionBanner;
+  const rawSections = { ...(raw.sections as Record<string, boolean> | undefined) };
+  if (rawSections && "dropper_game" in rawSections && !("roulette_game" in rawSections)) {
+    rawSections.roulette_game = rawSections.dropper_game !== false;
+  }
+  if (rawSections) delete rawSections.dropper_game;
   return {
     panel: {
       ...base.panel,
@@ -56,18 +61,12 @@ function mergeSettings(raw: Partial<PanelSettings> | null): PanelSettings {
       },
     },
     ui: { ...base.ui, ...(raw.ui ?? {}) },
-    sections: { ...base.sections, ...(raw.sections ?? {}) },
+    sections: { ...base.sections, ...(rawSections as PanelSettings["sections"]) },
     sectionOrder: normalizeSectionOrder(raw.sectionOrder ?? base.sectionOrder),
     telegram: {
       ...base.telegram,
       ...(raw.telegram ?? {}),
       buttonColors: normalizeTelegramButtonColors(raw.telegram?.buttonColors ?? base.telegram.buttonColors),
-      menuImagePath:
-        raw.telegram?.menuImagePath !== undefined
-          ? raw.telegram.menuImagePath
-            ? String(raw.telegram.menuImagePath).trim() || null
-            : null
-          : base.telegram.menuImagePath,
       aiAssistantEnabled:
         raw.telegram?.aiAssistantEnabled === undefined
           ? base.telegram.aiAssistantEnabled
@@ -268,9 +267,6 @@ export function exportSettingsForClient(settings: PanelSettings) {
     },
     avatarUrl: settings.panel.avatarPath
       ? `/api/settings/avatar?v=${settings.updatedAt}`
-      : null,
-    menuImageUrl: settings.telegram.menuImagePath
-      ? `/api/settings/telegram-menu-image?v=${settings.updatedAt}`
       : null,
   };
 }

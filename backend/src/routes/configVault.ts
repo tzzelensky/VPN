@@ -216,19 +216,6 @@ router.get("/export", (req, res) => {
   if (mode === "active") keys = keys.filter((k) => k.active);
   else if (mode === "subscriptions") keys = keys.filter((k) => k.added_to_subscriptions);
   else if (mode === "available") keys = keys.filter((k) => k.last_check_status === "available");
-  const fmt = String(req.query.format ?? "txt").trim().toLowerCase();
-  if (fmt === "json") {
-    res.json({
-      exported_at: new Date().toISOString(),
-      keys: keys.map((k) => ({
-        name: k.name,
-        uri: k.raw_uri,
-        active: k.active,
-        added_to_subscriptions: k.added_to_subscriptions,
-      })),
-    });
-    return;
-  }
   const body = keys.map((k) => k.raw_uri).join("\n");
   res.setHeader("Content-Type", "text/plain; charset=utf-8");
   res.setHeader("Content-Disposition", `attachment; filename="vless-keys-${mode}.txt"`);

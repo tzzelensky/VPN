@@ -24,7 +24,6 @@ type PanelSettingsContextValue = {
   meta: PanelSectionMeta[];
   telegram: PanelSettingsResponse["telegram"] | null;
   avatarUrl: string | null;
-  menuImageUrl: string | null;
   refresh: () => Promise<void>;
   applyPatch: (payload: PanelSettingsPatchPayload) => Promise<PanelSettingsResponse>;
   isSectionVisible: (path: string) => boolean;
@@ -51,9 +50,7 @@ export function PanelSettingsProvider({ enabled, children }: { enabled: boolean;
           prev &&
           prev.settings.updatedAt === r.settings.updatedAt &&
           prev.settings.panel.avatarPath === r.settings.panel.avatarPath &&
-          prev.settings.telegram.menuImagePath === r.settings.telegram.menuImagePath &&
-          prev.avatarUrl === r.avatarUrl &&
-          prev.menuImageUrl === r.menuImageUrl
+          prev.avatarUrl === r.avatarUrl
         ) {
           return prev;
         }
@@ -96,7 +93,6 @@ export function PanelSettingsProvider({ enabled, children }: { enabled: boolean;
       meta,
       telegram: data?.telegram ?? null,
       avatarUrl: data?.avatarUrl ?? null,
-      menuImageUrl: data?.menuImageUrl ?? null,
       refresh,
       applyPatch,
       isSectionVisible: (path: string) => isSectionPathVisible(path, settings, meta),
@@ -126,7 +122,6 @@ export function usePanelSettings(): PanelSettingsContextValue {
       meta: [],
       telegram: null,
       avatarUrl: null,
-      menuImageUrl: null,
       refresh: async () => {},
       applyPatch: async () => {
         throw new Error("no_provider");

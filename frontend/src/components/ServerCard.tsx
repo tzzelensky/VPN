@@ -7,6 +7,7 @@ import {
 } from "../api";
 import { COUNTRY_CODES_ALPHA2, countryCodeLabel } from "../countryCodes";
 import { countryFlagEmoji } from "../flagEmoji";
+import { useModalEscape } from "../hooks/useModalEscape";
 import Spinner from "./Spinner";
 
 export type ServerBusyAction =
@@ -19,6 +20,31 @@ export type ServerBusyAction =
   | "addSubs"
   | "removeSubs"
   | null;
+
+const SERVER_CARD_COLLAPSED_KEY = "vpn.serverCard.collapsed";
+
+function readCollapsedIds(): number[] {
+  try {
+    const raw = localStorage.getItem(SERVER_CARD_COLLAPSED_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed.map((x) => Math.floor(Number(x))).filter((n) => Number.isFinite(n) && n > 0);
+  } catch {
+    return [];
+  }
+}
+
+function readServerCardCollapsed(id: number): boolean {
+  return readCollapsedIds().includes(id);
+}
+
+function writeServerCardCollapsed(id: number, collapsed: boolean): void {
+  const set = new Set(readCollapsedIds());
+  if (collapsed) set.add(id);
+  else set.delete(id);
+  localStorage.setItem(SERVER_CARD_COLLAPSED_KEY, JSON.stringify([...set]));
+}
 
 type Props = {
   server: ServerDto;
@@ -280,11 +306,16 @@ export default function ServerCard({
   const [jsonPreview, setJsonPreview] = useState("");
   const [jsonOpen, setJsonOpen] = useState(false);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
+  const [collapsed, setCollapsed] = useState(() => readServerCardCollapsed(s.id));
 
   useEffect(() => {
     setName(s.name);
     setCc(s.country_code || "");
   }, [s.id, s.updated_at, s.name, s.country_code]);
+
+  useEffect(() => {
+    setCollapsed(readServerCardCollapsed(s.id));
+  }, [s.id]);
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -394,11 +425,19 @@ export default function ServerCard({
     navigate("/logs");
   }
 
+  function toggleCollapsed() {
+    setCollapsed((prev) => {
+      const next = !prev;
+      writeServerCardCollapsed(s.id, next);
+      return next;
+    });
+  }
+
   const isBusy = disabled || saving || deleteBusy || previewBusy;
 
   return (
     <>
-      <article className="server-card-v2">
+      <article className={`server-card-v2${collapsed ? " server-card-v2--collapsed" : ""}`.trim()}>
         <header className="server-card-v2__header">
           <div className="server-card-v2__identity">
             <span className="server-card-v2__flag" title={cc ? countryCodeLabel(cc) : "Флаг не выбран"} aria-hidden>
@@ -416,33 +455,52 @@ export default function ServerCard({
                   onCopy={() => void copyText(`ssh-${s.id}`, sshLine, "SSH скопирован")}
                 />
                 <HeaderChip label="VLESS порт" value={String(vlessPort)} />
-                <HeaderChip
-                  label="config"
-                  value={configShort}
-                  mono
-                  copyKey={`cfg-${s.id}`}
-                  copiedKey={copiedKey}
-                  disabled={isBusy}
-                  onCopy={() => void copyText(`cfg-${s.id}`, configPath, "Путь config скопирован")}
-                />
+                {!collapsed ? (
+                  <HeaderChip
+                    label="config"
+                    value={configShort}
+                    mono
+                    copyKey={`cfg-${s.id}`}
+                    copiedKey={copiedKey}
+                    disabled={isBusy}
+                    onCopy={() => void copyText(`cfg-${s.id}`, configPath, "Путь config скопирован")}
+                  />
+                ) : null}
               </div>
             </div>
           </div>
-          <div className="server-card-v2__header-badges">
-            <StatusBadge tone={ssh.tone}>{ssh.text}</StatusBadge>
-            <StatusBadge tone={xray.tone}>{xray.text}</StatusBadge>
-            <StatusBadge tone={vless.tone}>{vless.text}</StatusBadge>
-            <StatusBadge tone={s.hysteria2_deployed ? "ok" : "muted"}>
-              {s.hysteria2_deployed
-                ? s.hysteria2_in_subscriptions
-                  ? `HY2 :${s.hysteria2_port ?? "—"} в подписке`
-                  : `HY2 :${s.hysteria2_port ?? "—"}`
-                : "HY2 выкл"}
-            </StatusBadge>
-            <StatusBadge tone="muted">{`:${vlessPort}`}</StatusBadge>
+          <div className="server-card-v2__header-trailing">
+            <div className="server-card-v2__header-badges">
+              <StatusBadge tone={ssh.tone}>{ssh.text}</StatusBadge>
+              <StatusBadge tone={xray.tone}>{xray.text}</StatusBadge>
+              <StatusBadge tone={vless.tone}>{vless.text}</StatusBadge>
+              <StatusBadge tone={s.hysteria2_deployed ? "ok" : "muted"}>
+                {s.hysteria2_deployed
+                  ? s.hysteria2_in_subscriptions
+                    ? `HY2 :${s.hysteria2_port ?? "—"} в подписке`
+                    : `HY2 :${s.hysteria2_port ?? "—"}`
+                  : "HY2 выкл"}
+              </StatusBadge>
+              <div className="server-card-v2__port-stack">
+                <StatusBadge tone="muted">{`:${vlessPort}`}</StatusBadge>
+                <button
+                  type="button"
+                  className="server-card-v2__collapse"
+                  aria-expanded={!collapsed}
+                  aria-label={collapsed ? "Развернуть карточку сервера" : "Свернуть карточку сервера"}
+                  title={collapsed ? "Развернуть" : "Свернуть"}
+                  onClick={toggleCollapsed}
+                >
+                  <span className="server-card-v2__collapse-chevron" aria-hidden>
+                    {collapsed ? "▸" : "▾"}
+                  </span>
+                </button>
+              </div>
+            </div>
           </div>
         </header>
 
+        {!collapsed ? (
         <div className="server-card-v2__main-grid">
           <section className="server-card-v2__section server-card-v2__section--main">
             <h4 className="server-card-v2__section-title">Основное</h4>
@@ -748,47 +806,80 @@ export default function ServerCard({
             </div>
           </section>
         </div>
+        ) : null}
       </article>
 
       {deleteOpen ? (
-        <div className="modal-backdrop" role="presentation" onClick={() => !deleteBusy && setDeleteOpen(false)}>
-          <div className="modal server-card-v2__delete-modal" role="dialog" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-head">
-              <h2>Удалить сервер?</h2>
-            </div>
-            <div className="modal-body">
-              <p>
-                Вы действительно хотите удалить сервер «{displayName}» из панели?
-              </p>
-              <p className="muted server-card-v2__delete-note">
-                Это действие уберёт сервер из панели. Перед удалением убедитесь, что сервер не используется в активных
-                подписках.
-              </p>
-              {usersInSubs ? (
-                <p className="server-card-v2__delete-warn">
-                  Сервер используется в активных подписках ({s.subscription_users_total ?? 0} пользователей). Удаление
-                  может повлиять на пользователей.
-                </p>
-              ) : null}
-              {deleteError ? <p className="server-card-v2__delete-error">Не удалось удалить сервер: {deleteError}</p> : null}
-            </div>
-            <div className="modal-footer">
-              <button type="button" className="ghost" disabled={deleteBusy} onClick={() => setDeleteOpen(false)}>
-                Отмена
-              </button>
-              <button type="button" className="danger" disabled={deleteBusy} onClick={() => void confirmDelete()}>
-                {deleteBusy ? (
-                  <>
-                    <Spinner /> Удаляем…
-                  </>
-                ) : (
-                  "Удалить сервер"
-                )}
-              </button>
-            </div>
-          </div>
-        </div>
+        <ServerDeleteModal
+          displayName={displayName}
+          usersInSubs={usersInSubs}
+          subscriptionUsersTotal={s.subscription_users_total ?? 0}
+          deleteBusy={deleteBusy}
+          deleteError={deleteError}
+          onCancel={() => setDeleteOpen(false)}
+          onConfirm={() => void confirmDelete()}
+        />
       ) : null}
     </>
+  );
+}
+
+function ServerDeleteModal({
+  displayName,
+  usersInSubs,
+  subscriptionUsersTotal,
+  deleteBusy,
+  deleteError,
+  onCancel,
+  onConfirm,
+}: {
+  displayName: string;
+  usersInSubs: boolean;
+  subscriptionUsersTotal: number;
+  deleteBusy: boolean;
+  deleteError: string | null;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  useModalEscape(() => {
+    if (!deleteBusy) onCancel();
+  }, true);
+
+  return (
+    <div className="modal-backdrop" role="presentation">
+      <div className="modal server-card-v2__delete-modal" role="dialog">
+        <div className="modal-head">
+          <h2>Удалить сервер?</h2>
+        </div>
+        <div className="modal-body">
+          <p>Вы действительно хотите удалить сервер «{displayName}» из панели?</p>
+          <p className="muted server-card-v2__delete-note">
+            Это действие уберёт сервер из панели. Перед удалением убедитесь, что сервер не используется в активных
+            подписках.
+          </p>
+          {usersInSubs ? (
+            <p className="server-card-v2__delete-warn">
+              Сервер используется в активных подписках ({subscriptionUsersTotal} пользователей). Удаление может повлиять
+              на пользователей.
+            </p>
+          ) : null}
+          {deleteError ? <p className="server-card-v2__delete-error">Не удалось удалить сервер: {deleteError}</p> : null}
+        </div>
+        <div className="modal-footer">
+          <button type="button" className="ghost" disabled={deleteBusy} onClick={onCancel}>
+            Отмена
+          </button>
+          <button type="button" className="danger" disabled={deleteBusy} onClick={onConfirm}>
+            {deleteBusy ? (
+              <>
+                <Spinner /> Удаляем…
+              </>
+            ) : (
+              "Удалить сервер"
+            )}
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type SVGProps } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   bulkDeleteInactiveUsers,
   createUser,
@@ -10,6 +10,7 @@ import {
   patchUser,
   pushAllUserClients,
   resetUserTraffic,
+  setUserTrafficUsed,
   syncUserStatsFromServers,
   type CreateUserPayload,
   type ServerDto,
@@ -30,6 +31,10 @@ import DashboardLayout from "../components/DashboardLayout";
 import PageLoadingState from "../components/PageLoadingState";
 import Spinner from "../components/Spinner";
 import UserModal from "../components/UserModal";
+import TrafficUsedSlider from "../components/TrafficUsedSlider";
+import WebAppPreviewPanel from "../components/WebAppPreviewPanel";
+import { usePanelSettings } from "../panelSettingsContext";
+import { useModalEscape } from "../hooks/useModalEscape";
 import { notifyUsersChanged, USERS_CHANGED_EVENT } from "../usersEvents";
 import { readUsersListCache, writeUsersListCache } from "../usersListCache";
 import { prefetchUsersInBackground, USERS_CACHE_UPDATED_EVENT } from "../usersPrefetch";
@@ -53,6 +58,15 @@ function usedBytes(u: UserDto): number {
 
 function formatUsedGb(u: UserDto): string {
   return `${(usedBytes(u) / BYTES_PER_GB).toFixed(2)} GB`;
+}
+
+function ruDaysWord(n: number): string {
+  const abs = Math.abs(Math.floor(n)) % 100;
+  const d = abs % 10;
+  if (abs > 10 && abs < 20) return "дней";
+  if (d === 1) return "день";
+  if (d >= 2 && d <= 4) return "дня";
+  return "дней";
 }
 
 function nodesCountLabel(u: UserDto, previewCount: number | undefined, deployedTotal: number): string {
@@ -221,11 +235,15 @@ function IconPower(p: SVGProps<SVGSVGElement>) {
 }
 
 type UserModalState = { kind: "closed" } | { kind: "create" } | { kind: "edit"; userId: number };
-const USERS_TABS = ["active", "inactive"] as const;
+const USERS_TABS = ["active", "inactive", "preview"] as const;
 
 export default function UsersPage({ onLogout }: { onLogout: () => void }) {
+  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const { tab: activeTab, setTab: setActiveTab } = usePanelTabParam("/users", USERS_TABS);
+  const panel = usePanelSettings();
+  const manualTrafficAdjust = panel.settings?.security.manualTrafficAdjust === true;
+  const webAppPreviewEnabled = panel.settings?.ui.webAppPreviewEnabled !== false;
   const [users, setUsers] = useState<UserDto[]>(() => readUsersListCache()?.users ?? []);
   const [pageLoading, setPageLoading] = useState(() => !(readUsersListCache()?.users?.length));
   const [msg, setMsg] = useState<{ type: "ok" | "err"; text: string } | null>(null);
@@ -242,6 +260,7 @@ export default function UsersPage({ onLogout }: { onLogout: () => void }) {
   const [copyBusyId, setCopyBusyId] = useState<number | null>(null);
   const [notifyBusyId, setNotifyBusyId] = useState<number | null>(null);
   const [resetBusyId, setResetBusyId] = useState<number | null>(null);
+  const [trafficAdjustBusyId, setTrafficAdjustBusyId] = useState<number | null>(null);
   const [syncBusy, setSyncBusy] = useState(false);
   const [expandedInfoId, setExpandedInfoId] = useState<number | null>(null);
   const [expirySort, setExpirySort] = useState<SortTri>(0);
@@ -254,11 +273,22 @@ export default function UsersPage({ onLogout }: { onLogout: () => void }) {
   const [inactiveDeleteMessage, setInactiveDeleteMessage] = useState("");
   const [inactiveDeleteWarnOpen, setInactiveDeleteWarnOpen] = useState(false);
   const [inactiveDeletePendingIds, setInactiveDeletePendingIds] = useState<number[]>([]);
+  useModalEscape(() => {
+    if (inactiveDeleteBusy) return;
+    if (inactiveDeleteWarnOpen) {
+      setInactiveDeleteWarnOpen(false);
+      setInactiveDeletePendingIds([]);
+      return;
+    }
+    if (inactiveDeleteOpen) setInactiveDeleteOpen(false);
+  }, (inactiveDeleteOpen || inactiveDeleteWarnOpen) && !inactiveDeleteBusy);
   const [mobileShell, setMobileShell] = useState(() => isAdminMobileShell());
   const [statsRefreshing, setStatsRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [hiddenUserIds, setHiddenUserIds] = useState<number[]>(() => readHiddenUserIds());
   const [showHiddenUsers, setShowHiddenUsers] = useState(false);
+  const [usersHelpOpen, setUsersHelpOpen] = useState(false);
+  const [notifyHints, setNotifyHints] = useState({ daysBefore: 3, lowGb: 30, expiryOn: true, trafficOn: true });
   const previewAbortRef = useRef<AbortController | null>(null);
   const previewTimerRef = useRef<number | null>(null);
   const statsSyncRunningRef = useRef(false);
@@ -310,7 +340,15 @@ export default function UsersPage({ onLogout }: { onLogout: () => void }) {
 
   useEffect(() => {
     void loadAutoCommunicationsConfig()
-      .then((cfg) => setExpiryDaysBefore(cfg.expiry.days_before))
+      .then((cfg) => {
+        setExpiryDaysBefore(cfg.expiry.days_before);
+        setNotifyHints({
+          daysBefore: Math.max(1, Math.floor(Number(cfg.expiry.days_before) || 3)),
+          lowGb: Math.max(1, Math.floor(Number(cfg.traffic.low_gb_threshold) || 30)),
+          expiryOn: cfg.expiry.enabled === true,
+          trafficOn: cfg.traffic.enabled === true,
+        });
+      })
       .catch(() => {});
   }, []);
 
@@ -329,6 +367,25 @@ export default function UsersPage({ onLogout }: { onLogout: () => void }) {
       setSearchParams(next, { replace: true });
     }
   }, [searchParams, setSearchParams]);
+
+  const openWebAppPreview = useCallback(
+    (u: UserDto) => {
+      if (!webAppPreviewEnabled) return;
+      const tg = Math.floor(Number(String(u.tg_id || "").trim()));
+      if (!Number.isFinite(tg) || tg <= 0) {
+        setMsg({ type: "err", text: "У клиента нет Telegram ID" });
+        return;
+      }
+      setModal({ kind: "closed" });
+      navigate(`/users/preview?tgId=${tg}`);
+    },
+    [navigate, webAppPreviewEnabled],
+  );
+
+  useEffect(() => {
+    if (webAppPreviewEnabled) return;
+    if (activeTab === "preview") setActiveTab("active");
+  }, [webAppPreviewEnabled, activeTab, setActiveTab]);
 
   useEffect(() => {
     if (expiryTipUserId == null) return;
@@ -391,6 +448,58 @@ export default function UsersPage({ onLogout }: { onLogout: () => void }) {
     setUsers(users);
     setDeployedServers(deployedServers);
   }, []);
+
+  const commitTrafficUsed = useCallback(
+    async (u: UserDto, usedGb: number) => {
+      setTrafficAdjustBusyId(u.id);
+      setMsg(null);
+      try {
+        const r = await setUserTrafficUsed(u.id, usedGb);
+        setUsers((cur) => {
+          const next = cur.map((row) => (row.id === r.user.id ? r.user : row));
+          writeUsersListCache({
+            users: next,
+            previews: readUsersListCache()?.previews ?? {},
+            deployedServers: readUsersListCache()?.deployedServers ?? deployedServers,
+          });
+          return next;
+        });
+        notifyUsersChanged();
+      } catch (err) {
+        setMsg({ type: "err", text: String(err) });
+        throw err;
+      } finally {
+        setTrafficAdjustBusyId(null);
+      }
+    },
+    [deployedServers],
+  );
+
+  function renderTrafficCell(u: UserDto, opts?: { mobile?: boolean }) {
+    const pct = trafficPercent(u);
+    if (manualTrafficAdjust && u.total_gb > 0) {
+      return (
+        <TrafficUsedSlider
+          user={u}
+          className={opts?.mobile ? "users-mobile-traffic-slider" : undefined}
+          disabled={trafficAdjustBusyId === u.id || tableLocked}
+          onCommit={(gb) => commitTrafficUsed(u, gb)}
+        />
+      );
+    }
+    return (
+      <>
+        <div className={opts?.mobile ? "users-mobile-traffic-value" : "ud-traffic-used"}>{formatUsedGb(u)}</div>
+        <div
+          className={`ud-traffic-bar-wrap${opts?.mobile ? " users-mobile-traffic-bar" : ""}`}
+          title={u.total_gb > 0 ? `Лимит ${u.total_gb} GB` : "Без лимита"}
+        >
+          <div className="ud-traffic-bar-fill" style={{ width: `${u.total_gb > 0 ? pct : 0}%` }} />
+        </div>
+        <div className="ud-traffic-cap muted">{u.total_gb > 0 ? `${u.total_gb} GB` : "∞"}</div>
+      </>
+    );
+  }
 
   const loadUsersSnapshot = useCallback(async () => {
     const data = await prefetchUsersInBackground({ force: true });
@@ -748,6 +857,18 @@ export default function UsersPage({ onLogout }: { onLogout: () => void }) {
         >
           <IconPencil />
         </button>
+        {webAppPreviewEnabled ? (
+          <button
+            type="button"
+            className="ud-tool"
+            title="Превью WebApp"
+            aria-label="Превью WebApp"
+            disabled={!String(u.tg_id || "").trim()}
+            onClick={() => openWebAppPreview(u)}
+          >
+            <IconEye />
+          </button>
+        ) : null}
         {mobile ? (
           <button
             type="button"
@@ -902,12 +1023,20 @@ export default function UsersPage({ onLogout }: { onLogout: () => void }) {
     <DashboardLayout onLogout={onLogout}>
       <section className="panel users-hero-panel">
         <div className="users-hero-top">
-          <div>
+          <div className="users-hero-title-row">
             <h1>Пользователи</h1>
-            <p className="sub users-hero-sub">
-              Карточки в стиле панели: трафик, срок, действия. Напоминание в Telegram за 3 суток до окончания — при
-              указанном Chat ID.
-            </p>
+            <button
+              type="button"
+              className={`users-help-toggle${usersHelpOpen ? " open" : ""}`}
+              aria-expanded={usersHelpOpen}
+              aria-controls="users-help-panel"
+              onClick={() => setUsersHelpOpen((v) => !v)}
+            >
+              <span className="users-help-toggle-label">Справка</span>
+              <span className="users-help-toggle-chevron" aria-hidden>
+                {usersHelpOpen ? "▾" : "▸"}
+              </span>
+            </button>
           </div>
           <div className="users-hero-actions">
             <button
@@ -920,6 +1049,47 @@ export default function UsersPage({ onLogout }: { onLogout: () => void }) {
             </button>
           </div>
         </div>
+        <div
+          id="users-help-panel"
+          className={`users-help-panel${usersHelpOpen ? " open" : ""}`}
+          aria-hidden={!usersHelpOpen}
+        >
+          <div className="users-help-grid">
+            <article className="users-help-card">
+              <div className="users-help-card-kicker">Раздел</div>
+              <h3 className="users-help-card-title">Клиенты и подписки</h3>
+              <p className="users-help-card-text">
+                Список VPN-клиентов: трафик, срок, онлайн и быстрые действия — без открытия карточки.
+              </p>
+            </article>
+            <article className="users-help-card">
+              <div className="users-help-card-kicker">Срок</div>
+              <h3 className="users-help-card-title">
+                {notifyHints.expiryOn
+                  ? `Пуш за ${notifyHints.daysBefore} ${ruDaysWord(notifyHints.daysBefore)}`
+                  : "Автопуш выключен"}
+              </h3>
+              <p className="users-help-card-text">
+                {notifyHints.expiryOn
+                  ? `Telegram-напоминание уходит, когда до окончания осталось ≤ ${notifyHints.daysBefore} дн. Нужен Chat ID.`
+                  : "Напоминания о сроке сейчас отключены в автокоммуникациях."}
+              </p>
+            </article>
+            <article className="users-help-card">
+              <div className="users-help-card-kicker">Трафик</div>
+              <h3 className="users-help-card-title">
+                {notifyHints.trafficOn
+                  ? `Пуш при ≤ ${notifyHints.lowGb} ГБ`
+                  : "Автопуш выключен"}
+              </h3>
+              <p className="users-help-card-text">
+                {notifyHints.trafficOn
+                  ? `Сначала предупреждение, когда осталось ≤ ${notifyHints.lowGb} ГБ, затем ещё одно при полном исчерпании. Нужен Chat ID.`
+                  : "Напоминания о трафике сейчас отключены в автокоммуникациях."}
+              </p>
+            </article>
+          </div>
+        </div>
         {msg ? <div className={`flash ${msg.type === "ok" ? "ok" : "err"}`}>{msg.text}</div> : null}
       </section>
 
@@ -929,6 +1099,7 @@ export default function UsersPage({ onLogout }: { onLogout: () => void }) {
         user={modal.kind === "edit" ? users.find((u) => u.id === modal.userId) ?? null : null}
         deployedServers={deployedServers}
         onClose={closeUserModal}
+        onOpenWebAppPreview={webAppPreviewEnabled ? openWebAppPreview : undefined}
         onCreate={async (p) => {
           await onCreateUser(p);
         }}
@@ -936,14 +1107,7 @@ export default function UsersPage({ onLogout }: { onLogout: () => void }) {
       />
 
       {inactiveDeleteOpen ? (
-        <div
-          className="modal-backdrop"
-          onClick={(e) => {
-            if (e.target === e.currentTarget && !inactiveDeleteBusy) {
-              setInactiveDeleteOpen(false);
-            }
-          }}
-        >
+        <div className="modal-backdrop">
           <div className="modal users-inactive-delete-modal">
             <div className="modal-head">
               <h2>Удаление неактивных подписок</h2>
@@ -1076,15 +1240,7 @@ export default function UsersPage({ onLogout }: { onLogout: () => void }) {
       ) : null}
 
       {inactiveDeleteWarnOpen ? (
-        <div
-          className="modal-backdrop"
-          onClick={(e) => {
-            if (e.target === e.currentTarget && !inactiveDeleteBusy) {
-              setInactiveDeleteWarnOpen(false);
-              setInactiveDeletePendingIds([]);
-            }
-          }}
-        >
+        <div className="modal-backdrop">
           <div className="modal users-inactive-warn-modal">
             <div className="modal-head">
               <h2>Не у всех есть Telegram ID</h2>
@@ -1207,6 +1363,17 @@ export default function UsersPage({ onLogout }: { onLogout: () => void }) {
               Неактивные
               <span className="users-tab-count">{inactiveUsersListed.length}</span>
             </button>
+            {webAppPreviewEnabled ? (
+              <button
+                type="button"
+                role="tab"
+                aria-selected={activeTab === "preview"}
+                className={`users-tab-button ${activeTab === "preview" ? "active" : ""}`}
+                onClick={() => setActiveTab("preview")}
+              >
+                Превью WebApp
+              </button>
+            ) : null}
           </div>
           <div className="users-dash-filters-right">
             {activeTab === "inactive" ? (
@@ -1219,6 +1386,7 @@ export default function UsersPage({ onLogout }: { onLogout: () => void }) {
                 Удалить неактивные
               </button>
             ) : null}
+            {activeTab !== "preview" ? (
             <input
               type="search"
               value={searchQuery}
@@ -1227,9 +1395,12 @@ export default function UsersPage({ onLogout }: { onLogout: () => void }) {
               className="users-search-input"
               autoComplete="off"
             />
+            ) : null}
           </div>
         </div>
-        {pageLoading && users.length === 0 ? (
+        {activeTab === "preview" && webAppPreviewEnabled ? (
+          <WebAppPreviewPanel />
+        ) : pageLoading && users.length === 0 ? (
           <PageLoadingState />
         ) : filteredUsers.length === 0 ? (
           <p className="sub" style={{ marginBottom: 0 }}>
@@ -1242,7 +1413,6 @@ export default function UsersPage({ onLogout }: { onLogout: () => void }) {
         ) : mobileShell ? (
           <div className="users-mobile-list">
             {filteredUsers.map((u) => {
-              const pct = trafficPercent(u);
               const ex = expiryPill(u);
               const alive = clientAlive(u);
               return (
@@ -1264,14 +1434,7 @@ export default function UsersPage({ onLogout }: { onLogout: () => void }) {
 
                   <div className="users-mobile-traffic">
                     <div className="users-mobile-stat-label">Трафик</div>
-                    <div className="users-mobile-traffic-value">{formatUsedGb(u)}</div>
-                    <div
-                      className="ud-traffic-bar-wrap users-mobile-traffic-bar"
-                      title={u.total_gb > 0 ? `Лимит ${u.total_gb} GB` : "Без лимита"}
-                    >
-                      <div className="ud-traffic-bar-fill" style={{ width: `${u.total_gb > 0 ? pct : 0}%` }} />
-                    </div>
-                    <div className="ud-traffic-cap muted">{u.total_gb > 0 ? `${u.total_gb} GB` : "∞"}</div>
+                    {renderTrafficCell(u, { mobile: true })}
                   </div>
 
                   {renderUserToolbar(u, { mobile: true })}
@@ -1357,7 +1520,6 @@ export default function UsersPage({ onLogout }: { onLogout: () => void }) {
               </thead>
               <tbody>
                 {filteredUsers.map((u) => {
-                  const pct = trafficPercent(u);
                   const ex = expiryPill(u);
                   const alive = clientAlive(u);
                   const emailLine =
@@ -1382,6 +1544,18 @@ export default function UsersPage({ onLogout }: { onLogout: () => void }) {
                           >
                             <IconPencil />
                           </button>
+                          {webAppPreviewEnabled ? (
+                            <button
+                              type="button"
+                              className="ud-tool"
+                              title="Превью WebApp"
+                              aria-label="Превью WebApp"
+                              disabled={!String(u.tg_id || "").trim()}
+                              onClick={() => openWebAppPreview(u)}
+                            >
+                              <IconEye />
+                            </button>
+                          ) : null}
                           <button
                             type="button"
                             className="ud-tool"
@@ -1569,13 +1743,7 @@ export default function UsersPage({ onLogout }: { onLogout: () => void }) {
                         {emailLine}
                         {infoOpen ? <div className="ud-client-info-pop">{u.comment}</div> : null}
                       </td>
-                      <td className="ud-td-traffic">
-                        <div className="ud-traffic-used">{formatUsedGb(u)}</div>
-                        <div className="ud-traffic-bar-wrap" title={u.total_gb > 0 ? `Лимит ${u.total_gb} GB` : "Без лимита"}>
-                          <div className="ud-traffic-bar-fill" style={{ width: `${u.total_gb > 0 ? pct : 0}%` }} />
-                        </div>
-                        <div className="ud-traffic-cap muted">{u.total_gb > 0 ? `${u.total_gb} GB` : "∞"}</div>
-                      </td>
+                      <td className="ud-td-traffic">{renderTrafficCell(u)}</td>
                       <td>
                         <span className="ud-pill ud-pill-total">{formatUsedGb(u)}</span>
                       </td>

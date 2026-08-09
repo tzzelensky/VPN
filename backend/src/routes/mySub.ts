@@ -61,7 +61,6 @@ import {
   checkWhitelistPurchaseAllowed,
   createPendingWhitelistPurchase,
   findActiveSubscriptionForTg,
-  findWhitelistPurchaseTarget,
   getWhitelistPurchasePriceRub,
   logWhitelistPurchaseOpened,
 } from "../whitelistPurchaseService.js";
@@ -85,6 +84,7 @@ import {
   logDailyGiftBlockSeen,
   setDailyGiftReminder,
 } from "../dailyGiftService.js";
+import { requireAuth } from "../middleware/requireAuth.js";
 
 const router = Router();
 
@@ -286,23 +286,14 @@ router.get("/:tgId(\\d+)/avatar", async (req, res) => {
   res.status(401).send("tg_webapp_auth_required");
 });
 
-router.post("/webapp/profile", async (req, res) => {
-  const initData = String((req.body as { init_data?: unknown })?.init_data ?? "").trim();
-  const ver = verifyTelegramWebAppInitData(initData);
-  if (!ver.ok) {
-    res.status(401).json({ error: "tg_webapp_auth_required", reason: ver.reason });
-    return;
-  }
-  const tgId = parseTgId(String(ver.user.id ?? ""));
-  if (!tgId) {
-    res.status(401).json({ error: "tg_webapp_auth_required", reason: "bad_user_id" });
-    return;
-  }
-  let linked = findUsersByTelegramChatId(tgId);
+async function buildMySubWebAppProfileDto(
+  tgId: number,
+  opts?: { displayNameHint?: string },
+): Promise<Record<string, unknown>> {
+  const linked = findUsersByTelegramChatId(tgId);
   const chat = await resolveChatProfile(tgId);
   const displayName =
-    `${String(ver.user.first_name ?? "").trim()} ${String(ver.user.last_name ?? "").trim()}`.trim() ||
-    (ver.user.username ? `@${ver.user.username}` : "") ||
+    String(opts?.displayNameHint ?? "").trim() ||
     chat.displayName ||
     linked[0]?.name ||
     "Пользователь";
@@ -317,31 +308,31 @@ router.post("/webapp/profile", async (req, res) => {
     const reconciled = refreshUserDeviceSlotsReconcile(u.id) ?? u;
     const fresh = refreshPlaceholderDeviceSlots(reconciled.id) ?? reconciled;
     return {
-    id: fresh.id,
-    name: fresh.name,
-    subscription_url: primarySubscriptionUrl(fresh),
-    enable: fresh.enable === 1,
-    allowed: userAllowedOnServers(fresh),
-    total_gb: fresh.total_gb,
-    traffic_up: fresh.traffic_up,
-    traffic_down: fresh.traffic_down,
-    used_text: fmtBytes(fresh.traffic_up + fresh.traffic_down),
-    total_text: fresh.total_gb > 0 ? fmtBytes(fresh.total_gb * 1073741824) : "∞",
-    expiry_time: fresh.expiry_time,
-    stats: subscriptionProfileStats(fresh),
-    tickets: fresh.dropper_tickets,
-    devices: subscriptionDeviceInfoForWebApp(fresh),
-    daily_gift: buildDailyGiftWebAppState(tgId, fresh.id),
-    whitelist: buildWhitelistStateForSubscription(fresh),
-    gb_piggy:
-      fresh.total_gb <= 0
-        ? {
-            accumulated_gb: getRouletteGbPiggy(fresh.id),
-            exchange_threshold: ROULETTE_GB_PIGGY_EXCHANGE_THRESHOLD,
-            can_exchange: getRouletteGbPiggy(fresh.id) >= ROULETTE_GB_PIGGY_EXCHANGE_THRESHOLD,
-          }
-        : null,
-  };
+      id: fresh.id,
+      name: fresh.name,
+      subscription_url: primarySubscriptionUrl(fresh),
+      enable: fresh.enable === 1,
+      allowed: userAllowedOnServers(fresh),
+      total_gb: fresh.total_gb,
+      traffic_up: fresh.traffic_up,
+      traffic_down: fresh.traffic_down,
+      used_text: fmtBytes(fresh.traffic_up + fresh.traffic_down),
+      total_text: fresh.total_gb > 0 ? fmtBytes(fresh.total_gb * 1073741824) : "∞",
+      expiry_time: fresh.expiry_time,
+      stats: subscriptionProfileStats(fresh),
+      tickets: fresh.dropper_tickets,
+      devices: subscriptionDeviceInfoForWebApp(fresh),
+      daily_gift: buildDailyGiftWebAppState(tgId, fresh.id),
+      whitelist: buildWhitelistStateForSubscription(fresh),
+      gb_piggy:
+        fresh.total_gb <= 0
+          ? {
+              accumulated_gb: getRouletteGbPiggy(fresh.id),
+              exchange_threshold: ROULETTE_GB_PIGGY_EXCHANGE_THRESHOLD,
+              can_exchange: getRouletteGbPiggy(fresh.id) >= ROULETTE_GB_PIGGY_EXCHANGE_THRESHOLD,
+            }
+          : null,
+    };
   });
   const referralCfg = getReferralProgram();
   const inviterIds = linked.map((u) => u.id);
@@ -360,7 +351,6 @@ router.post("/webapp/profile", async (req, res) => {
   const dgStats = getDropperStatsForTgUser(tgId);
   const tickets = sumDropperTicketsForTgUser(tgId);
   const ticketsPerPurchase = getGameTicketsPerPurchase();
-  const wlTarget = findWhitelistPurchaseTarget(tgId, linked);
   const whitelist = buildWhitelistOfferForMiniApp(linked, tgId);
   const instrPhotoPath = getWhitelistVaultSettings().instruction.photo_path;
   const base = String(process.env.PUBLIC_API_URL ?? "").replace(/\/$/, "");
@@ -368,7 +358,7 @@ router.post("/webapp/profile", async (req, res) => {
     instrPhotoPath && base
       ? `${base}/api/whitelist-vault/instruction/photo/${encodeURIComponent(instrPhotoPath)}`
       : null;
-  res.json({
+  return {
     tg_id: tgId,
     name: displayName,
     avatar_url: avatarDataUrl,
@@ -466,7 +456,42 @@ router.post("/webapp/profile", async (req, res) => {
       tgId,
       subscriptions.find((s) => s.stats.subscription_active)?.id ?? subscriptions[0]?.id,
     ),
-  });
+  };
+}
+
+router.post("/webapp/profile", async (req, res) => {
+  const initData = String((req.body as { init_data?: unknown })?.init_data ?? "").trim();
+  const ver = verifyTelegramWebAppInitData(initData);
+  if (!ver.ok) {
+    res.status(401).json({ error: "tg_webapp_auth_required", reason: ver.reason });
+    return;
+  }
+  const tgId = parseTgId(String(ver.user.id ?? ""));
+  if (!tgId) {
+    res.status(401).json({ error: "tg_webapp_auth_required", reason: "bad_user_id" });
+    return;
+  }
+  const displayNameHint =
+    `${String(ver.user.first_name ?? "").trim()} ${String(ver.user.last_name ?? "").trim()}`.trim() ||
+    (ver.user.username ? `@${ver.user.username}` : "");
+  const profile = await buildMySubWebAppProfileDto(tgId, { displayNameHint });
+  res.json(profile);
+});
+
+/** Admin: профиль WebApp по tg_id (только чтение, без init_data). */
+router.get("/admin/webapp-profile/:tgId", requireAuth, async (req, res) => {
+  const tgId = parseTgId(String(req.params.tgId ?? ""));
+  if (!tgId) {
+    res.status(400).json({ error: "bad_tg_id" });
+    return;
+  }
+  try {
+    const profile = await buildMySubWebAppProfileDto(tgId);
+    res.json(profile);
+  } catch (e) {
+    console.error("[mysub] admin webapp-profile:", e);
+    res.status(500).json({ error: "profile_failed" });
+  }
 });
 
 router.post("/webapp/daily-gift/claim", async (req, res) => {
@@ -602,7 +627,13 @@ router.post("/webapp/referral-reward", async (req, res) => {
 });
 
 router.post("/webapp/promo/preview", async (req, res) => {
-  const body = (req.body ?? {}) as { init_data?: unknown; code?: unknown; original_price_rub?: unknown };
+  const body = (req.body ?? {}) as {
+    init_data?: unknown;
+    code?: unknown;
+    original_price_rub?: unknown;
+    plan_id?: unknown;
+    purchase_kind?: unknown;
+  };
   const initData = String(body.init_data ?? "").trim();
   const ver = verifyTelegramWebAppInitData(initData);
   if (!ver.ok) {
@@ -612,6 +643,10 @@ router.post("/webapp/promo/preview", async (req, res) => {
   const tgId = parseTgId(String(ver.user.id ?? ""));
   const code = String(body.code ?? "").trim();
   const original = Math.max(0, Math.floor(Number(body.original_price_rub) || 0));
+  const planIdRaw = Math.floor(Number(body.plan_id));
+  const planId = Number.isFinite(planIdRaw) && planIdRaw > 0 ? planIdRaw : undefined;
+  const kindRaw = String(body.purchase_kind ?? "").trim().toLowerCase();
+  const purchaseKind = kindRaw === "topup" ? "topup" : kindRaw === "subscription" ? "subscription" : undefined;
   if (!tgId || !code) {
     res.status(400).json({ error: "bad_payload" });
     return;
@@ -621,6 +656,8 @@ router.post("/webapp/promo/preview", async (req, res) => {
       code,
       tg_user_id: tgId,
       original_price_rub: original,
+      plan_id: planId,
+      purchase_kind: purchaseKind,
     });
     res.json(calc);
   } catch (e) {
@@ -1043,6 +1080,7 @@ router.post("/webapp/payment-proof", async (req, res) => {
         original_price_rub: top.price_rub,
         promo_code: promoCode || undefined,
         allow_referral: false,
+        purchase_kind: "topup",
       });
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -1086,6 +1124,13 @@ router.post("/webapp/payment-proof", async (req, res) => {
           tg_username: String(ver.user.username ?? "").trim() || undefined,
           tg_first_name: String(ver.user.first_name ?? "").trim() || undefined,
           session_id: sessionId,
+          plan_id: top.id,
+          plan_title: top.title,
+          original_price_rub: priceRes.original_price_rub,
+          final_price_rub: priceRes.final_price_rub,
+          discount_rub: priceRes.promo_calc.discount_rub,
+          bonus_gb: priceRes.promo_calc.bonus_gb,
+          bonus_days: priceRes.promo_calc.bonus_days,
         });
       } catch {
         // no-op
@@ -1116,6 +1161,8 @@ router.post("/webapp/payment-proof", async (req, res) => {
       promo_code: promoCode || undefined,
       target_user_id: target?.id,
       new_subscription_name: target ? undefined : newSubscriptionName || clientDefaultName,
+      plan_id: plan.id,
+      purchase_kind: "subscription",
     });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
@@ -1161,6 +1208,13 @@ router.post("/webapp/payment-proof", async (req, res) => {
         tg_username: String(ver.user.username ?? "").trim() || undefined,
         tg_first_name: String(ver.user.first_name ?? "").trim() || undefined,
         session_id: sessionId,
+        plan_id: plan.id,
+        plan_title: plan.title,
+        original_price_rub: priceRes.original_price_rub,
+        final_price_rub: priceRes.final_price_rub,
+        discount_rub: priceRes.promo_calc.discount_rub,
+        bonus_gb: priceRes.promo_calc.bonus_gb,
+        bonus_days: priceRes.promo_calc.bonus_days,
       });
     } catch {
       // no-op: validated above, ignore race
@@ -1447,12 +1501,6 @@ router.post("/webapp/roulette/buy-tickets", async (req, res) => {
     return;
   }
 
-  try {
-    await pushClientListToAllDeployedServers();
-  } catch {
-    // ignore
-  }
-
   res.json({
     ok: true,
     tickets_count: result.tickets_count,
@@ -1462,6 +1510,9 @@ router.post("/webapp/roulette/buy-tickets", async (req, res) => {
     remaining_days: result.remaining_days,
     remaining_gb: result.remaining_gb,
   });
+
+  // Не блокируем ответ WebApp синхронизацией узлов — иначе модалка «вечно грузится».
+  void pushClientListToAllDeployedServers().catch(() => {});
 });
 
 router.post("/webapp/devices/add", async (req, res) => {

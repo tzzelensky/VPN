@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useModalEscape } from "../hooks/useModalEscape";
 import {
   SUBSCRIPTION_FINGERPRINTS,
   SUBSCRIPTION_FLOWS,
   SUBSCRIPTION_SNI_PRESETS,
+  SUBSCRIPTION_XHTTP_MODES,
   fetchSubscriptionSettingGenerators,
   fetchVlessAuthGenerator,
   checkServerSubscriptionSettings,
@@ -63,10 +65,27 @@ function defaultVlessBlock(flow: ServerSubscriptionSettingsDto["flow"] = ""): Se
 
 function ensureSettingsVless(s: ServerSubscriptionSettingsDto): ServerSubscriptionSettingsDto {
   const flow = s.flow ?? "";
+  const grpc = s.grpc ?? { service_name: "", authority: "", multi_mode: false };
+  const xhttp = s.xhttp ?? { path: "/", host: "", mode: "auto" as const, extra: "" };
   return syncLocalVless({
     ...s,
     vless: s.vless ?? defaultVlessBlock(flow),
     sniffing: s.sniffing ?? { ...SNIFF_DEFAULTS },
+    grpc: {
+      service_name: grpc.service_name ?? "",
+      authority: grpc.authority ?? "",
+      multi_mode:
+        typeof (grpc as { multi_mode?: boolean }).multi_mode === "boolean"
+          ? (grpc as { multi_mode: boolean }).multi_mode
+          : Boolean((grpc as { mode?: boolean }).mode),
+    },
+    ws: s.ws ?? { path: "", host: "" },
+    xhttp: {
+      path: (xhttp.path ?? "/").trim() || "/",
+      host: xhttp.host ?? "",
+      mode: (SUBSCRIPTION_XHTTP_MODES as readonly string[]).includes(xhttp.mode) ? xhttp.mode : "auto",
+      extra: xhttp.extra ?? "",
+    },
   });
 }
 
@@ -86,6 +105,8 @@ function syncLocalVless(settings: ServerSubscriptionSettingsDto): ServerSubscrip
   const encryption = resolveLocalEncryption(vless, "none");
   let flow = settings.flow ?? "";
   if (encryption.startsWith("mlkem")) {
+    flow = "";
+  } else if (flow === "xtls-rprx-vision" && settings.network !== "tcp") {
     flow = "";
   } else if (!flow && settings.security === "reality" && settings.network === "tcp" && encryption === "none") {
     flow = "xtls-rprx-vision";
@@ -176,6 +197,25 @@ function validateSettings(settings: ServerSubscriptionSettingsDto): FieldErrors 
   }
   if (settings.flow === "xtls-rprx-vision" && settings.network !== "tcp") {
     errors.network = "flow xtls-rprx-vision требует network tcp";
+  }
+  if (settings.network === "xhttp") {
+    const path = (settings.xhttp?.path ?? "/").trim() || "/";
+    if (!path.startsWith("/")) errors["xhttp.path"] = "XHTTP path должен начинаться с /";
+    const mode = settings.xhttp?.mode ?? "auto";
+    if (!(SUBSCRIPTION_XHTTP_MODES as readonly string[]).includes(mode)) {
+      errors["xhttp.mode"] = "Недопустимый XHTTP mode";
+    }
+    const extra = (settings.xhttp?.extra ?? "").trim();
+    if (extra) {
+      try {
+        const o = JSON.parse(extra) as unknown;
+        if (!o || typeof o !== "object" || Array.isArray(o)) {
+          errors["xhttp.extra"] = "extra должен быть JSON-объектом";
+        }
+      } catch {
+        errors["xhttp.extra"] = "Некорректный JSON в extra";
+      }
+    }
   }
   if (!["UseIP", "UseIPv4", "UseIPv6", "UseIPv4v6"].includes(settings.dns.query_strategy)) {
     errors["dns.query_strategy"] = "Недопустимый queryStrategy";
@@ -609,6 +649,8 @@ export default function ServerSubscriptionSettingsPanel({ server, onClose, onSav
     onClose();
   }
 
+  useModalEscape(handleClose);
+
   const dnsServersText = useMemo(
     () => (settings?.dns.servers ?? []).join("\n"),
     [settings?.dns.servers],
@@ -627,8 +669,8 @@ export default function ServerSubscriptionSettingsPanel({ server, onClose, onSav
   }
 
   return (
-    <div className="modal-backdrop" onClick={handleClose}>
-      <div className="modal modal--wide server-sub-modal" onClick={(e) => e.stopPropagation()}>
+    <div className="modal-backdrop">
+      <div className="modal modal--wide server-sub-modal">
         <div className="modal-head">
           <h2>Настройка подписки — {server.name || server.host}</h2>
           <button type="button" className="modal-close" onClick={handleClose}>
@@ -768,12 +810,19 @@ export default function ServerSubscriptionSettingsPanel({ server, onClose, onSav
                 <select
                   className="input"
                   value={settings.network}
-                  onChange={(e) => patchSettings({ network: e.target.value as ServerSubscriptionSettingsDto["network"] })}
+                  onChange={(e) => {
+                    const network = e.target.value as ServerSubscriptionSettingsDto["network"];
+                    const next: Partial<ServerSubscriptionSettingsDto> = { network };
+                    if (network !== "tcp" && settings.flow === "xtls-rprx-vision") {
+                      next.flow = "";
+                    }
+                    patchSettings(next);
+                  }}
                 >
-                  <option value="tcp">tcp</option>
-                  <option value="grpc">grpc</option>
-                  <option value="ws">ws</option>
-                  <option value="xhttp">xhttp</option>
+                  <option value="tcp">TCP</option>
+                  <option value="grpc">gRPC</option>
+                  <option value="ws">WebSocket</option>
+                  <option value="xhttp">XHTTP</option>
                 </select>
               </SubField>
               <SubField label="Security" error={err("security")}>
@@ -984,6 +1033,140 @@ export default function ServerSubscriptionSettingsPanel({ server, onClose, onSav
                   >
                     <option value="none">none</option>
                   </select>
+                </SubField>
+              </div>
+            </SubCard>
+          ) : null}
+
+          {settings.network === "grpc" ? (
+            <SubCard title="gRPC" desc="Параметры gRPC transport как в 3x-ui: serviceName, authority и multiMode.">
+              <div className="server-sub-grid">
+                <SubField
+                  label="Service Name"
+                  hint="Имя gRPC-сервиса (serviceName). Попадёт в подписку и inbound."
+                  error={err("grpc.service_name")}
+                  className="server-sub-field--wide"
+                >
+                  <input
+                    className="input mono"
+                    value={settings.grpc.service_name}
+                    onChange={(e) =>
+                      patchSettings({ grpc: { ...settings.grpc, service_name: e.target.value } })
+                    }
+                    placeholder="GunService"
+                    autoComplete="off"
+                  />
+                </SubField>
+                <SubField
+                  label="Authority"
+                  hint="Опциональный :authority для gRPC."
+                  error={err("grpc.authority")}
+                >
+                  <input
+                    className="input mono"
+                    value={settings.grpc.authority}
+                    onChange={(e) => patchSettings({ grpc: { ...settings.grpc, authority: e.target.value } })}
+                    placeholder="опционально"
+                    autoComplete="off"
+                  />
+                </SubField>
+              </div>
+              <div className="server-sub-toggle-grid">
+                <SubToggleCard
+                  title="Multi Mode"
+                  desc="Включает multiMode в grpcSettings (как в 3x-ui). Обычно нужно для совместимости с части клиентов."
+                  on={settings.grpc.multi_mode}
+                  onToggle={() =>
+                    patchSettings({ grpc: { ...settings.grpc, multi_mode: !settings.grpc.multi_mode } })
+                  }
+                />
+              </div>
+            </SubCard>
+          ) : null}
+
+          {settings.network === "ws" ? (
+            <SubCard title="WebSocket" desc="Параметры WebSocket transport: path и Host.">
+              <div className="server-sub-grid">
+                <SubField label="Path" hint="Путь WS, например /ws">
+                  <input
+                    className="input mono"
+                    value={settings.ws.path}
+                    onChange={(e) => patchSettings({ ws: { ...settings.ws, path: e.target.value } })}
+                    placeholder="/ws"
+                    autoComplete="off"
+                  />
+                </SubField>
+                <SubField label="Host" hint="Заголовок Host (опционально)">
+                  <input
+                    className="input mono"
+                    value={settings.ws.host}
+                    onChange={(e) => patchSettings({ ws: { ...settings.ws, host: e.target.value } })}
+                    placeholder="example.com"
+                    autoComplete="off"
+                  />
+                </SubField>
+              </div>
+            </SubCard>
+          ) : null}
+
+          {settings.network === "xhttp" ? (
+            <SubCard
+              title="XHTTP"
+              desc="VLESS XHTTP как в 3x-ui: path, host, mode и опциональный extra JSON для клиента."
+            >
+              <div className="server-sub-grid">
+                <SubField label="Path" error={err("xhttp.path")} hint="Должен начинаться с /">
+                  <input
+                    className="input mono"
+                    value={settings.xhttp.path}
+                    onChange={(e) => patchSettings({ xhttp: { ...settings.xhttp, path: e.target.value } })}
+                    placeholder="/"
+                    autoComplete="off"
+                  />
+                </SubField>
+                <SubField label="Host" hint="Опциональный host для XHTTP">
+                  <input
+                    className="input mono"
+                    value={settings.xhttp.host}
+                    onChange={(e) => patchSettings({ xhttp: { ...settings.xhttp, host: e.target.value } })}
+                    placeholder="опционально"
+                    autoComplete="off"
+                  />
+                </SubField>
+                <SubField label="Mode" error={err("xhttp.mode")} className="server-sub-field--wide">
+                  <select
+                    className="input"
+                    value={settings.xhttp.mode}
+                    onChange={(e) =>
+                      patchSettings({
+                        xhttp: {
+                          ...settings.xhttp,
+                          mode: e.target.value as ServerSubscriptionSettingsDto["xhttp"]["mode"],
+                        },
+                      })
+                    }
+                  >
+                    {SUBSCRIPTION_XHTTP_MODES.map((m) => (
+                      <option key={m} value={m}>
+                        {m}
+                      </option>
+                    ))}
+                  </select>
+                </SubField>
+                <SubField
+                  label="Extra (JSON)"
+                  hint="Расширенные параметры XHTTP для Happ / клиентов. Оставьте пустым, если не нужны."
+                  error={err("xhttp.extra")}
+                  className="server-sub-field--wide"
+                >
+                  <textarea
+                    className="input mono server-sub-xhttp-extra"
+                    rows={5}
+                    value={settings.xhttp.extra}
+                    onChange={(e) => patchSettings({ xhttp: { ...settings.xhttp, extra: e.target.value } })}
+                    placeholder='{"xmux":{"maxConcurrency":{"from":8,"to":16}}}'
+                    spellCheck={false}
+                  />
                 </SubField>
               </div>
             </SubCard>

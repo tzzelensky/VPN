@@ -4,6 +4,7 @@ import { countryFlagEmoji } from "./serverDisplay.js";
 import {
   extractRealityPrivateKeyFromConfig,
   extractVlessLinkHintsFromConfig,
+  streamSettingsOfInbound,
 } from "./vlessLinkHints.js";
 import { DEFAULT_SNIFF_DEST_OVERRIDE, parseDnsFromXrayConfig, parseSniffingFromInbound } from "./subscriptionXrayShared.js";
 import { formatSubscriptionNodeName } from "./subscriptionNodeName.js";
@@ -52,6 +53,9 @@ export type SubscriptionNetwork = "tcp" | "grpc" | "ws" | "xhttp";
 export type SubscriptionSecurity = "reality" | "tls" | "none";
 export type DnsQueryStrategy = "UseIP" | "UseIPv4" | "UseIPv6" | "UseIPv4v6";
 
+export const SUBSCRIPTION_XHTTP_MODES = ["auto", "packet-up", "stream-up", "stream-one"] as const;
+export type SubscriptionXhttpMode = (typeof SUBSCRIPTION_XHTTP_MODES)[number];
+
 export type ServerSubscriptionSettings = {
   address_mode: "host" | "custom";
   address_override: string;
@@ -76,8 +80,11 @@ export type ServerSubscriptionSettings = {
     show: boolean;
   };
   tcp: { header_type: string };
-  grpc: { service_name: string; authority: string; mode: boolean };
+  /** gRPC как в 3x-ui: serviceName / authority / multiMode. */
+  grpc: { service_name: string; authority: string; multi_mode: boolean };
   ws: { path: string; host: string };
+  /** XHTTP как в 3x-ui / Happ: path, host, mode, optional extra JSON. */
+  xhttp: { path: string; host: string; mode: SubscriptionXhttpMode; extra: string };
   mux: {
     enabled: boolean;
     concurrency: number;
@@ -94,6 +101,79 @@ export type ServerSubscriptionSettings = {
     dest_override: ("http" | "tls" | "quic")[];
   };
 };
+
+export function normalizeXhttpMode(raw: unknown): SubscriptionXhttpMode {
+  const t = String(raw ?? "").trim().toLowerCase();
+  if (t === "packet-up" || t === "stream-up" || t === "stream-one") return t;
+  return "auto";
+}
+
+/** extra → object для xhttpSettings; пустая/битая строка → undefined. */
+export function parseXhttpExtraObject(extra: string): Record<string, unknown> | undefined {
+  const t = String(extra ?? "").trim();
+  if (!t || t === "{}" || t === "null") return undefined;
+  try {
+    const o = JSON.parse(t) as unknown;
+    if (o && typeof o === "object" && !Array.isArray(o)) return o as Record<string, unknown>;
+  } catch {
+    /* ignore */
+  }
+  return undefined;
+}
+
+export function stringifyXhttpExtra(extra: unknown): string {
+  if (extra == null) return "";
+  if (typeof extra === "string") {
+    const t = extra.trim();
+    if (!t || t === "{}" || t === "null") return "";
+    try {
+      const o = JSON.parse(t) as unknown;
+      if (o && typeof o === "object" && !Array.isArray(o)) return JSON.stringify(o);
+    } catch {
+      return t.slice(0, 4000);
+    }
+    return t.slice(0, 4000);
+  }
+  if (typeof extra === "object" && !Array.isArray(extra)) {
+    try {
+      const s = JSON.stringify(extra);
+      return s === "{}" ? "" : s.slice(0, 4000);
+    } catch {
+      return "";
+    }
+  }
+  return "";
+}
+
+/** sub_path / sub_host / sub_type из текущих transport-настроек. */
+export function subscriptionTransportLegacyHints(settings: ServerSubscriptionSettings): {
+  sub_type: string;
+  sub_path: string;
+  sub_host: string;
+} {
+  if (settings.network === "grpc") {
+    return {
+      sub_type: "grpc",
+      sub_path: settings.grpc.service_name.trim(),
+      sub_host: settings.grpc.authority.trim(),
+    };
+  }
+  if (settings.network === "ws") {
+    return {
+      sub_type: "ws",
+      sub_path: settings.ws.path.trim(),
+      sub_host: settings.ws.host.trim(),
+    };
+  }
+  if (settings.network === "xhttp") {
+    return {
+      sub_type: "xhttp",
+      sub_path: settings.xhttp.path.trim() || "/",
+      sub_host: settings.xhttp.host.trim(),
+    };
+  }
+  return { sub_type: "tcp", sub_path: "", sub_host: "" };
+}
 
 export type SubscriptionSettingsValidationError = { field: string; message: string };
 
@@ -171,8 +251,10 @@ export function syncSubscriptionVlessFields(settings: ServerSubscriptionSettings
   });
   if (encryption !== "none" && encryption.startsWith("mlkem")) {
     flow = "";
-  } else if (!flow && settings.security === "reality") {
+  } else if (!flow && settings.security === "reality" && settings.network === "tcp") {
     flow = defaultSubscriptionFlow(settings.security);
+  } else if (flow === "xtls-rprx-vision" && settings.network !== "tcp") {
+    flow = "";
   }
   return {
     ...settings,
@@ -192,11 +274,19 @@ export function defaultSubscriptionFlow(security: SubscriptionSecurity): Subscri
   return security === "reality" ? "xtls-rprx-vision" : "";
 }
 
-export function normalizeSubscriptionFlow(raw: string | undefined | null, security: SubscriptionSecurity): SubscriptionFlow {
-  if (raw === undefined || raw === null) return defaultSubscriptionFlow(security);
+export function normalizeSubscriptionFlow(
+  raw: string | undefined | null,
+  security: SubscriptionSecurity,
+  network: SubscriptionNetwork = "tcp",
+): SubscriptionFlow {
+  if (raw === undefined || raw === null) {
+    return network === "tcp" ? defaultSubscriptionFlow(security) : "";
+  }
   const t = String(raw).trim();
-  if (!t) return defaultSubscriptionFlow(security);
-  if (t === "xtls-rprx-vision-udp443" || t === "xtls-rprx-vision") return "xtls-rprx-vision";
+  if (!t) return network === "tcp" ? defaultSubscriptionFlow(security) : "";
+  if (t === "xtls-rprx-vision-udp443" || t === "xtls-rprx-vision") {
+    return network === "tcp" ? "xtls-rprx-vision" : "";
+  }
   return "";
 }
 
@@ -226,8 +316,9 @@ export function defaultSubscriptionSettings(server: Pick<ServerRow, "host" | "na
       show: false,
     },
     tcp: { header_type: "none" },
-    grpc: { service_name: "", authority: "", mode: false },
+    grpc: { service_name: "", authority: "", multi_mode: false },
     ws: { path: "", host: "" },
+    xhttp: { path: "/", host: "", mode: "auto", extra: "" },
     mux: {
       enabled: false,
       concurrency: -1,
@@ -254,7 +345,11 @@ export function subscriptionSettingsFromLegacyServer(server: ServerRow): ServerS
     sec === "tls" ? "tls" : sec === "none" ? "none" : sec === "reality" ? "reality" : base.security;
   const net = (server.sub_network ?? "").trim().toLowerCase();
   const network: SubscriptionNetwork =
-    net === "grpc" || net === "ws" || net === "xhttp" ? net : base.network;
+    net === "grpc" || net === "ws" || net === "xhttp"
+      ? net
+      : net === "splithttp" || net === "httpupgrade"
+        ? "xhttp"
+        : base.network;
   const fp = (server.sub_fp ?? "").trim();
   return syncSubscriptionVlessFields({
     ...base,
@@ -276,11 +371,17 @@ export function subscriptionSettingsFromLegacyServer(server: ServerRow): ServerS
     grpc: {
       service_name: network === "grpc" ? (server.sub_path ?? "").trim() : "",
       authority: network === "grpc" ? (server.sub_host ?? "").trim() : "",
-      mode: false,
+      multi_mode: false,
     },
     ws: {
       path: network === "ws" ? (server.sub_path ?? "").trim() : "",
       host: network === "ws" ? (server.sub_host ?? "").trim() : "",
+    },
+    xhttp: {
+      path: network === "xhttp" ? (server.sub_path ?? "").trim() || "/" : "/",
+      host: network === "xhttp" ? (server.sub_host ?? "").trim() : "",
+      mode: "auto",
+      extra: "",
     },
   });
 }
@@ -299,7 +400,11 @@ export function subscriptionSettingsFromRemoteConfig(
     secRaw === "tls" ? "tls" : secRaw === "none" ? "none" : secRaw === "reality" ? "reality" : "reality";
   const netRaw = (hints.sub_network ?? "").trim().toLowerCase();
   const network: SubscriptionNetwork =
-    netRaw === "grpc" || netRaw === "ws" || netRaw === "xhttp" ? netRaw : "tcp";
+    netRaw === "grpc" || netRaw === "ws" || netRaw === "xhttp" || netRaw === "splithttp" || netRaw === "httpupgrade"
+      ? netRaw === "splithttp" || netRaw === "httpupgrade"
+        ? "xhttp"
+        : netRaw
+      : "tcp";
   const fp = (hints.sub_fp ?? "").trim();
   const dnsFromConfig = parseDnsFromXrayConfig(config);
   const inbounds = Array.isArray(config.inbounds) ? (config.inbounds as Record<string, unknown>[]) : [];
@@ -312,7 +417,22 @@ export function subscriptionSettingsFromRemoteConfig(
     : [];
   const clientFlowRaw = clients.map((c) => String(c.flow ?? "").trim()).find(Boolean) ?? "";
   const pq = inboundDec.startsWith("mlkem");
-  const flow = pq ? ("" as SubscriptionFlow) : normalizeSubscriptionFlow(clientFlowRaw || undefined, security);
+  const flow = pq ? ("" as SubscriptionFlow) : normalizeSubscriptionFlow(clientFlowRaw || undefined, security, network);
+
+  const ss = tagged ? streamSettingsOfInbound(tagged) : {};
+  const grpcSs = (ss.grpcSettings as Record<string, unknown> | undefined) ?? {};
+  const xhttpSs =
+    (ss.xhttpSettings as Record<string, unknown> | undefined) ??
+    (ss.splithttpSettings as Record<string, unknown> | undefined) ??
+    (ss.httpupgradeSettings as Record<string, unknown> | undefined) ??
+    {};
+  const grpcMulti =
+    grpcSs.multiMode === true ||
+    grpcSs.multiMode === 1 ||
+    grpcSs.mode === true ||
+    grpcSs.mode === 1 ||
+    String(grpcSs.mode ?? "").toLowerCase() === "multi";
+
   return syncSubscriptionVlessFields({
     ...defaultSubscriptionSettings(server),
     vless_port: port,
@@ -339,13 +459,23 @@ export function subscriptionSettingsFromRemoteConfig(
       show: false,
     },
     grpc: {
-      service_name: network === "grpc" ? (hints.sub_path ?? "").trim() : "",
-      authority: network === "grpc" ? (hints.sub_host ?? "").trim() : "",
-      mode: false,
+      service_name: network === "grpc" ? (hints.sub_path ?? "").trim() || String(grpcSs.serviceName ?? "").trim() : "",
+      authority: network === "grpc" ? (hints.sub_host ?? "").trim() || String(grpcSs.authority ?? "").trim() : "",
+      multi_mode: network === "grpc" ? grpcMulti : false,
     },
     ws: {
       path: network === "ws" ? (hints.sub_path ?? "").trim() : "",
       host: network === "ws" ? (hints.sub_host ?? "").trim() : "",
+    },
+    xhttp: {
+      path:
+        network === "xhttp"
+          ? (hints.sub_path ?? "").trim() || String(xhttpSs.path ?? "").trim() || "/"
+          : "/",
+      host:
+        network === "xhttp" ? (hints.sub_host ?? "").trim() || String(xhttpSs.host ?? "").trim() : "",
+      mode: network === "xhttp" ? normalizeXhttpMode(xhttpSs.mode ?? hints.sub_type) : "auto",
+      extra: network === "xhttp" ? stringifyXhttpExtra(xhttpSs.extra) : "",
     },
     dns: dnsFromConfig,
     sniffing,
@@ -360,6 +490,7 @@ export function normalizeSubscriptionSettings(raw: unknown, server: ServerRow): 
   const tcpRaw = o.tcp && typeof o.tcp === "object" ? (o.tcp as Record<string, unknown>) : {};
   const grpcRaw = o.grpc && typeof o.grpc === "object" ? (o.grpc as Record<string, unknown>) : {};
   const wsRaw = o.ws && typeof o.ws === "object" ? (o.ws as Record<string, unknown>) : {};
+  const xhttpRaw = o.xhttp && typeof o.xhttp === "object" ? (o.xhttp as Record<string, unknown>) : {};
   const muxRaw = o.mux && typeof o.mux === "object" ? (o.mux as Record<string, unknown>) : {};
   const dnsRaw = o.dns && typeof o.dns === "object" ? (o.dns as Record<string, unknown>) : {};
   const sniffRaw = o.sniffing && typeof o.sniffing === "object" ? (o.sniffing as Record<string, unknown>) : {};
@@ -367,7 +498,11 @@ export function normalizeSubscriptionSettings(raw: unknown, server: ServerRow): 
   const address_mode = o.address_mode === "custom" ? "custom" : "host";
   const netRaw = String(o.network ?? base.network).trim().toLowerCase();
   const network: SubscriptionNetwork =
-    netRaw === "grpc" || netRaw === "ws" || netRaw === "xhttp" ? netRaw : "tcp";
+    netRaw === "grpc" || netRaw === "ws" || netRaw === "xhttp"
+      ? netRaw
+      : netRaw === "splithttp" || netRaw === "httpupgrade"
+        ? "xhttp"
+        : "tcp";
   const secRaw = String(o.security ?? base.security).trim().toLowerCase();
   const security: SubscriptionSecurity =
     secRaw === "tls" ? "tls" : secRaw === "none" ? "none" : "reality";
@@ -387,7 +522,16 @@ export function normalizeSubscriptionSettings(raw: unknown, server: ServerRow): 
   const flow = normalizeSubscriptionFlow(
     o.flow !== undefined ? String(o.flow) : vlessRaw.flow !== undefined ? String(vlessRaw.flow) : base.flow,
     security,
+    network,
   );
+
+  const grpcMulti =
+    grpcRaw.multi_mode === true ||
+    grpcRaw.multi_mode === 1 ||
+    grpcRaw.mode === true ||
+    grpcRaw.mode === 1;
+
+  const xhttpPath = String(xhttpRaw.path ?? (network === "xhttp" ? base.xhttp.path : "/")).trim() || "/";
 
   return syncSubscriptionVlessFields({
     address_mode,
@@ -421,11 +565,17 @@ export function normalizeSubscriptionSettings(raw: unknown, server: ServerRow): 
     grpc: {
       service_name: String(grpcRaw.service_name ?? "").trim().slice(0, 120),
       authority: String(grpcRaw.authority ?? "").trim().slice(0, 253),
-      mode: grpcRaw.mode === true || grpcRaw.mode === 1,
+      multi_mode: grpcMulti,
     },
     ws: {
       path: String(wsRaw.path ?? "").trim().slice(0, 512),
       host: String(wsRaw.host ?? "").trim().slice(0, 253),
+    },
+    xhttp: {
+      path: xhttpPath.slice(0, 512),
+      host: String(xhttpRaw.host ?? "").trim().slice(0, 253),
+      mode: normalizeXhttpMode(xhttpRaw.mode),
+      extra: stringifyXhttpExtra(xhttpRaw.extra).slice(0, 4000),
     },
     mux: {
       enabled: muxRaw.enabled === true || muxRaw.enabled === 1,
@@ -544,6 +694,26 @@ export function validateSubscriptionSettings(settings: ServerSubscriptionSetting
   if (!settings.security) errors.push({ field: "security", message: "Выберите security" });
   if (!SUBSCRIPTION_FINGERPRINTS.includes(settings.reality.fingerprint as SubscriptionFingerprint)) {
     errors.push({ field: "reality.fingerprint", message: "Недопустимый fingerprint" });
+  }
+  if (settings.network === "xhttp") {
+    const path = settings.xhttp.path.trim() || "/";
+    if (!path.startsWith("/")) {
+      errors.push({ field: "xhttp.path", message: "XHTTP path должен начинаться с /" });
+    }
+    if (!SUBSCRIPTION_XHTTP_MODES.includes(settings.xhttp.mode)) {
+      errors.push({ field: "xhttp.mode", message: "Недопустимый XHTTP mode" });
+    }
+    const extra = settings.xhttp.extra.trim();
+    if (extra) {
+      try {
+        const o = JSON.parse(extra) as unknown;
+        if (!o || typeof o !== "object" || Array.isArray(o)) {
+          errors.push({ field: "xhttp.extra", message: "extra должен быть JSON-объектом" });
+        }
+      } catch {
+        errors.push({ field: "xhttp.extra", message: "Некорректный JSON в extra" });
+      }
+    }
   }
   const qs = settings.dns.query_strategy;
   if (!["UseIP", "UseIPv4", "UseIPv6", "UseIPv4v6"].includes(qs)) {

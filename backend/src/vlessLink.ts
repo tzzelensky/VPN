@@ -105,6 +105,16 @@ function applyTransportQuery(q: URLSearchParams, settings: ServerSubscriptionSet
     q.set("type", "grpc");
     if (settings.grpc.service_name) q.set("serviceName", settings.grpc.service_name);
     if (settings.grpc.authority) q.set("authority", settings.grpc.authority);
+    if (settings.grpc.multi_mode) q.set("mode", "multi");
+  } else if (settings.network === "xhttp") {
+    q.set("type", "xhttp");
+    const path = settings.xhttp.path.trim() || "/";
+    q.set("path", path);
+    if (settings.xhttp.host.trim()) q.set("host", settings.xhttp.host.trim());
+    const mode = settings.xhttp.mode || "auto";
+    if (mode) q.set("mode", mode);
+    const extra = settings.xhttp.extra.trim();
+    if (extra && extra !== "{}" && extra !== "null") q.set("extra", extra);
   }
 }
 

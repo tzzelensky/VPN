@@ -177,7 +177,7 @@ function DailyGiftResetCountdown({ nextResetAt }: { nextResetAt: string | null }
 }
 
 export default function DailyGiftBlock({ ctrl, gift, subscriptionName, multiSub }: Props) {
-  const { initData, homeSub, refreshProfile, setMsg, setTab } = ctrl;
+  const { initData, homeSub, refreshProfile, setMsg, setTab, previewMode } = ctrl;
   const [phase, setPhase] = useState<"closed" | "opening" | "open">(
     gift.opened && !gift.can_open ? "open" : gift.opened ? "open" : "closed",
   );
@@ -268,6 +268,10 @@ export default function DailyGiftBlock({ ctrl, gift, subscriptionName, multiSub 
   }
 
   async function openGift() {
+    if (previewMode) {
+      setMsg("Превью — получение подарка отключено");
+      return;
+    }
     if (!gift.can_open || busy) return;
     if (!homeSub?.id) {
       setMsg(formatMySubError("subscription_required"));
@@ -339,7 +343,7 @@ export default function DailyGiftBlock({ ctrl, gift, subscriptionName, multiSub 
               type="button"
               className="mn-daily-gift__banner"
               onClick={() => void openGift()}
-              disabled={!gift.can_open || busy}
+              disabled={previewMode || !gift.can_open || busy}
               aria-label="Открыть ежедневный подарок"
             >
               <div className="mn-daily-gift__banner-inner">
@@ -409,7 +413,7 @@ export default function DailyGiftBlock({ ctrl, gift, subscriptionName, multiSub 
                     <PromoCodeLine code={promoCode} copied={copied} onCopy={handleCopyPromo} />
                   ) : null}
                   {failed && gift.can_open ? (
-                    <PrimaryButton fullWidth disabled={busy} onClick={() => void openGift()}>
+                    <PrimaryButton fullWidth disabled={previewMode || busy} onClick={() => void openGift()}>
                       Попробовать снова
                     </PrimaryButton>
                   ) : null}
@@ -428,7 +432,7 @@ export default function DailyGiftBlock({ ctrl, gift, subscriptionName, multiSub 
 
         <SecondaryButton
           fullWidth
-          disabled={reminderBusy}
+          disabled={previewMode || reminderBusy}
           onClick={() => void toggleReminder()}
           className="mn-daily-gift__reminder"
         >

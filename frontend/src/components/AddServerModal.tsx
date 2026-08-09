@@ -182,7 +182,7 @@ export default function AddServerModal({ open, onClose, onSuccess, onToast }: Pr
     <div
       className="modal-backdrop add-server-modal-backdrop"
       role="presentation"
-      onClick={() => !submitting && onClose()}
+      onClick={(e) => e.stopPropagation()}
     >
       <div
         className="modal add-server-modal"

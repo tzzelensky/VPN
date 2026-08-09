@@ -27,13 +27,18 @@ function priceCardProps(
   priceRub: number,
   activeDiscountPercent: number,
   discountedPriceForPlan: (priceRub: number) => number,
+  discountRubLabel?: number,
 ) {
-  if (!activeDiscountPercent) return { price: `${priceRub} ₽` };
-  return {
-    price: `${discountedPriceForPlan(priceRub)} ₽`,
-    oldPrice: `${priceRub} ₽`,
-    discountPercent: activeDiscountPercent,
-  };
+  const discounted = discountedPriceForPlan(priceRub);
+  if (discounted >= priceRub && !activeDiscountPercent) return { price: `${priceRub} ₽` };
+  if (discounted < priceRub) {
+    return {
+      price: `${discounted} ₽`,
+      oldPrice: `${priceRub} ₽`,
+      discountPercent: discountRubLabel && discountRubLabel > 0 ? undefined : activeDiscountPercent || undefined,
+    };
+  }
+  return { price: `${priceRub} ₽` };
 }
 
 type Props = { ctrl: MySubWebAppController };
@@ -98,6 +103,13 @@ export default function PayTabNew({ ctrl }: Props) {
   const topupTargetUnlimited =
     payProduct === "topup" &&
     Boolean(payTargetSub && (payTargetSub.total_gb <= 0 || payTargetSub.stats.unlimited_traffic));
+  const promoPlanIds = promoApplied?.apply_plan_ids ?? [];
+  const visiblePlans =
+    payProduct === "subscription" && promoPlanIds.length > 0
+      ? data.plans.filter((p) => promoPlanIds.includes(p.id))
+      : data.plans;
+  const rubDiscountLabel =
+    promoApplied?.type === "rub" && promoApplied.discount_rub > 0 ? promoApplied.discount_rub : undefined;
   const hasLimitedSubs = data.subscriptions.some((s) => s.total_gb > 0 && !s.stats.unlimited_traffic);
   const limitedSubs = data.subscriptions.filter((s) => s.devices?.enabled);
   const wlAnyCanBuy = data.subscriptions.some((s) => s.whitelist?.can_buy);
@@ -405,7 +417,7 @@ export default function PayTabNew({ ctrl }: Props) {
                 key={p.id}
                 title={p.title.trim() || `Пакет ${p.id}`}
                 meta={formatTopUpMeta(p)}
-                {...priceCardProps(p.price_rub, activeDiscountPercent, discountedPriceForPlan)}
+                {...priceCardProps(p.price_rub, activeDiscountPercent, discountedPriceForPlan, rubDiscountLabel)}
                 selected={payPlanId === p.id}
                 onSelect={() => setPayPlanId(p.id)}
               />
@@ -425,12 +437,12 @@ export default function PayTabNew({ ctrl }: Props) {
                 }}
               />
             ) : null}
-            {data.plans.map((p, i) => (
+            {visiblePlans.map((p, i) => (
               <TariffCard
                 key={p.id}
                 title={p.title.trim() || `Тариф ${p.id}`}
                 meta={formatPlanMeta(p)}
-                {...priceCardProps(p.price_rub, activeDiscountPercent, discountedPriceForPlan)}
+                {...priceCardProps(p.price_rub, activeDiscountPercent, discountedPriceForPlan, rubDiscountLabel)}
                 selected={!payIsTest && payPlanId === p.id}
                 popular={i === 1}
                 onSelect={() => {
@@ -457,7 +469,36 @@ export default function PayTabNew({ ctrl }: Props) {
             <SecondaryButton onClick={() => void applyPromoCode()}>Применить</SecondaryButton>
           </div>
           {promoApplied ? (
-            <p className="mn-feedback ok">Скидка {promoApplied.discount_percent}%. К оплате {finalPrice} ₽</p>
+            <div className="mn-promo-rewards">
+              {promoApplied.discount_rub > 0 ? (
+                <div className="mn-promo-reward-card">
+                  <span className="mn-promo-reward-card__label">Скидка</span>
+                  <span className="mn-promo-reward-card__value">
+                    {promoApplied.type === "percent"
+                      ? `−${promoApplied.discount_percent}%`
+                      : `−${promoApplied.discount_rub} ₽`}
+                  </span>
+                  <span className="mn-promo-reward-card__hint">К оплате {finalPrice} ₽</span>
+                </div>
+              ) : null}
+              {promoApplied.bonus_gb > 0 ? (
+                <div className="mn-promo-reward-card mn-promo-reward-card--gift">
+                  <span className="mn-promo-reward-card__label">Подарок</span>
+                  <span className="mn-promo-reward-card__value">+{promoApplied.bonus_gb} ГБ</span>
+                  <span className="mn-promo-reward-card__hint">После оплаты</span>
+                </div>
+              ) : null}
+              {promoApplied.bonus_days > 0 ? (
+                <div className="mn-promo-reward-card mn-promo-reward-card--gift">
+                  <span className="mn-promo-reward-card__label">Подарок</span>
+                  <span className="mn-promo-reward-card__value">+{promoApplied.bonus_days} дн.</span>
+                  <span className="mn-promo-reward-card__hint">После оплаты</span>
+                </div>
+              ) : null}
+              {promoApplied.discount_rub <= 0 && promoApplied.bonus_gb <= 0 && promoApplied.bonus_days <= 0 ? (
+                <p className="mn-feedback ok">Промокод {promoApplied.code} применён</p>
+              ) : null}
+            </div>
           ) : autoDiscountPercent > 0 ? (
             <p className="mn-feedback ok">Скидка за игру {autoDiscountPercent}%. К оплате {finalPrice} ₽</p>
           ) : promoFeedback ? (
@@ -474,6 +515,11 @@ export default function PayTabNew({ ctrl }: Props) {
             <>
               <s className="mn-price-old">{comboOriginalPrice} ₽</s> <strong>{finalPrice} ₽</strong>
               <span className="mn-price-discount-tag">−{comboDiscountPercent}%</span>
+            </>
+          ) : rubDiscountLabel ? (
+            <>
+              <s className="mn-price-old">{priceBase} ₽</s> <strong>{finalPrice} ₽</strong>
+              <span className="mn-price-discount-tag">−{rubDiscountLabel} ₽</span>
             </>
           ) : activeDiscountPercent ? (
             <>
@@ -509,7 +555,13 @@ export default function PayTabNew({ ctrl }: Props) {
         <div className="mn-upload" style={{ marginTop: "0.85rem" }}>
           <p className="mn-card-title">Прикрепите чек</p>
           <label className="mn-upload__btn">
-            <input type="file" accept="image/*" hidden onChange={(e) => setPayPhoto(e.target.files?.[0] ?? null)} />
+            <input
+              type="file"
+              accept="image/*"
+              hidden
+              disabled={ctrl.previewMode}
+              onChange={(e) => setPayPhoto(e.target.files?.[0] ?? null)}
+            />
             {payPhoto ? "Заменить фото" : "Выбрать фото"}
           </label>
           <p className="mn-muted">{payPhoto ? payPhoto.name : "Файл не выбран"}</p>
@@ -518,6 +570,7 @@ export default function PayTabNew({ ctrl }: Props) {
         <PrimaryButton
           fullWidth
           disabled={
+            ctrl.previewMode ||
             busyPay ||
             (salesDisabledForNew && data.subscriptions.length === 0) ||
             topupTargetUnlimited ||
@@ -532,7 +585,9 @@ export default function PayTabNew({ ctrl }: Props) {
           style={{ marginTop: "0.75rem" }}
           className={payProduct === "combo" ? "mn-combo-submit-btn" : undefined}
         >
-          {busyPay
+          {ctrl.previewMode
+            ? "Превью — оплата отключена"
+            : busyPay
             ? "Отправка…"
             : topupTargetUnlimited
               ? "Безлимит — докупка недоступна"

@@ -87,7 +87,7 @@ function RecipientsPreview({
       </div>
 
       {modalOpen ? (
-        <AdminModalBackdrop onClick={() => setModalOpen(false)}>
+        <AdminModalBackdrop onClose={() => setModalOpen(false)}>
           <div
             className="modal comms-recipients-modal"
             role="dialog"

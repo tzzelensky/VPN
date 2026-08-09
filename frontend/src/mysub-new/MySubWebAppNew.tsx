@@ -12,10 +12,12 @@ import MySubTabPanel from "./components/MySubTabPanel";
 import PrimaryButton from "./components/PrimaryButton";
 import SecondaryButton from "./components/SecondaryButton";
 import type { MySubWebAppController } from "./types";
+import { useMySubPortalRoot } from "./portalContext";
 
-type Props = { ctrl: MySubWebAppController };
+type Props = { ctrl: MySubWebAppController; embedInAdmin?: boolean };
 
-export default function MySubWebAppNew({ ctrl }: Props) {
+export default function MySubWebAppNew({ ctrl, embedInAdmin = false }: Props) {
+  const portalRoot = useMySubPortalRoot();
   const {
     data,
     err,
@@ -57,6 +59,7 @@ export default function MySubWebAppNew({ ctrl }: Props) {
   } = ctrl;
 
   useEffect(() => {
+    if (embedInAdmin) return;
     const root = document.documentElement;
     const body = document.body;
     const prevHtmlOverflow = root.style.overflowX;
@@ -91,7 +94,7 @@ export default function MySubWebAppNew({ ctrl }: Props) {
       root.style.overflowX = prevHtmlOverflow;
       body.style.overflowX = prevBodyOverflow;
     };
-  }, [theme]);
+  }, [theme, embedInAdmin]);
 
   if (err) {
     return (
@@ -407,13 +410,16 @@ export default function MySubWebAppNew({ ctrl }: Props) {
                 </div>
               );
             })(),
-            document.body,
+            portalRoot,
           )
         : null}
 
       {showWhitelistInstruction && data.whitelist?.instruction
         ? createPortal(
-            <div className="mn-modal-backdrop" onClick={() => setShowWhitelistInstruction(false)}>
+            <div
+              className={`mn-modal-backdrop mn-modal-backdrop--portal mn-app mn-app--${theme}${theme === "light" ? " mysub-wrap--light" : ""}`}
+              onClick={() => setShowWhitelistInstruction(false)}
+            >
               <div className="mn-modal" onClick={(e) => e.stopPropagation()}>
                 <div className="mn-modal__head">
                   <h2>{data.whitelist.instruction.title || "Как обновить подписку"}</h2>
@@ -436,7 +442,7 @@ export default function MySubWebAppNew({ ctrl }: Props) {
                 </div>
               </div>
             </div>,
-            document.body,
+            portalRoot,
           )
         : null}
 
@@ -481,7 +487,7 @@ export default function MySubWebAppNew({ ctrl }: Props) {
                 </div>
               </div>
             </div>,
-            document.body,
+            portalRoot,
           )
         : null}
 
@@ -540,56 +546,68 @@ export default function MySubWebAppNew({ ctrl }: Props) {
                 </div>
               </div>
             </div>,
-            document.body,
+            portalRoot,
           )
         : null}
 
-      {dropperPracticeModalOpen ? (
-        <div className="mn-modal-backdrop" onClick={() => setDropperPracticeModalOpen(false)}>
-          <div className="mn-modal" onClick={(e) => e.stopPropagation()}>
-            <div className="mn-modal__head">
-              <h2>Тренировка</h2>
-            </div>
-            <div className="mn-modal__body">
-              <p className="mn-muted">
-                Бесплатный режим без билета и наград. Когда будете готовы — играйте с билетом.
-              </p>
-              <label className="mn-check">
-                <input
-                  type="checkbox"
-                  checked={dropperPracticeSkipNextHint}
-                  onChange={(e) => setDropperPracticeSkipNextHint(e.target.checked)}
-                />
-                Не показывать это окно
-              </label>
-            </div>
-            <div className="mn-modal__foot">
-              <SecondaryButton onClick={() => setDropperPracticeModalOpen(false)}>Отмена</SecondaryButton>
-              <PrimaryButton onClick={confirmDropperPracticePlay}>Играть</PrimaryButton>
-            </div>
-          </div>
-        </div>
-      ) : null}
+      {dropperPracticeModalOpen
+        ? createPortal(
+            <div
+              className={`mn-modal-backdrop mn-modal-backdrop--portal mn-app mn-app--${theme}${theme === "light" ? " mysub-wrap--light" : ""}`}
+              onClick={() => setDropperPracticeModalOpen(false)}
+            >
+              <div className="mn-modal mn-modal--solid" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
+                <div className="mn-modal__head">
+                  <h2>Тренировка</h2>
+                </div>
+                <div className="mn-modal__body">
+                  <p className="mn-muted">
+                    Бесплатный режим без билета и наград. Когда будете готовы — играйте с билетом.
+                  </p>
+                  <label className="mn-check">
+                    <input
+                      type="checkbox"
+                      checked={dropperPracticeSkipNextHint}
+                      onChange={(e) => setDropperPracticeSkipNextHint(e.target.checked)}
+                    />
+                    Не показывать это окно
+                  </label>
+                </div>
+                <div className="mn-modal__foot">
+                  <SecondaryButton onClick={() => setDropperPracticeModalOpen(false)}>Отмена</SecondaryButton>
+                  <PrimaryButton onClick={confirmDropperPracticePlay}>Играть</PrimaryButton>
+                </div>
+              </div>
+            </div>,
+            portalRoot,
+          )
+        : null}
 
-      {dropperInstructionOpen ? (
-        <div className="mn-modal-backdrop" onClick={() => setDropperInstructionOpen(false)}>
-          <div className="mn-modal" onClick={(e) => e.stopPropagation()}>
-            <div className="mn-modal__head">
-              <h2>Как играть</h2>
-            </div>
-            <div className="mn-modal__body">
-              <p className="mn-muted">
-                Ведите пальцем влево и вправо. Пролетайте между препятствиями и приземлитесь на жёлтую полосу.
-              </p>
-            </div>
-            <div className="mn-modal__foot">
-              <PrimaryButton fullWidth onClick={() => setDropperInstructionOpen(false)}>
-                Понятно
-              </PrimaryButton>
-            </div>
-          </div>
-        </div>
-      ) : null}
+      {dropperInstructionOpen
+        ? createPortal(
+            <div
+              className={`mn-modal-backdrop mn-modal-backdrop--portal mn-app mn-app--${theme}${theme === "light" ? " mysub-wrap--light" : ""}`}
+              onClick={() => setDropperInstructionOpen(false)}
+            >
+              <div className="mn-modal mn-modal--solid" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
+                <div className="mn-modal__head">
+                  <h2>Как играть</h2>
+                </div>
+                <div className="mn-modal__body">
+                  <p className="mn-muted">
+                    Ведите пальцем влево и вправо. Пролетайте между препятствиями и приземлитесь на жёлтую полосу.
+                  </p>
+                </div>
+                <div className="mn-modal__foot">
+                  <PrimaryButton fullWidth onClick={() => setDropperInstructionOpen(false)}>
+                    Понятно
+                  </PrimaryButton>
+                </div>
+              </div>
+            </div>,
+            portalRoot,
+          )
+        : null}
     </>
   );
 }

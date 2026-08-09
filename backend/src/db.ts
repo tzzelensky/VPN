@@ -513,7 +513,7 @@ export type PromoCodeRow = {
   id: string;
   name: string;
   code: string;
-  type: "percent" | "rub" | "gb" | "days" | "combo";
+  type: "percent" | "rub" | "gb" | "days";
   discount_percent: number;
   discount_rub: number;
   gift_gb: number;
@@ -521,7 +521,6 @@ export type PromoCodeRow = {
   one_time_per_user: boolean;
   max_uses_total?: number;
   max_uses_per_user: number;
-  min_purchase_rub?: number;
   first_purchase_only: boolean;
   new_users_only: boolean;
   apply_plan_ids?: number[];
@@ -1064,15 +1063,24 @@ function normalizePromoCode(raw: unknown): PromoCodeRow | null {
   const code = normalizePromoCodeText(String(o.code ?? ""));
   if (!id || !code) return null;
   const typeRaw = String(o.type ?? "percent").trim().toLowerCase();
-  const type: PromoCodeRow["type"] =
-    typeRaw === "rub" || typeRaw === "gb" || typeRaw === "days" || typeRaw === "combo" ? (typeRaw as PromoCodeRow["type"]) : "percent";
   const discount_percent = Math.min(100, Math.max(0, Math.floor(Number(o.discount_percent) || 0)));
   const discount_rub = Math.max(0, Math.floor(Number(o.discount_rub) || 0));
   const gift_gb = Math.max(0, Math.floor(Number(o.gift_gb) || 0));
   const gift_days = Math.max(0, Math.floor(Number(o.gift_days) || 0));
+  // Legacy "combo" → dominant single type (combo UI removed).
+  let type: PromoCodeRow["type"] =
+    typeRaw === "rub" || typeRaw === "gb" || typeRaw === "days" || typeRaw === "percent"
+      ? (typeRaw as PromoCodeRow["type"])
+      : "percent";
+  if (typeRaw === "combo") {
+    if (discount_percent > 0) type = "percent";
+    else if (discount_rub > 0) type = "rub";
+    else if (gift_gb > 0) type = "gb";
+    else if (gift_days > 0) type = "days";
+    else type = "percent";
+  }
   const max_uses_total_raw = Math.floor(Number(o.max_uses_total));
   const max_uses_per_user_raw = Math.floor(Number(o.max_uses_per_user));
-  const min_purchase_rub_raw = Math.floor(Number(o.min_purchase_rub));
   const applyPlanIdsIn = Array.isArray(o.apply_plan_ids) ? o.apply_plan_ids : [];
   const applyPlanIds = [...new Set(applyPlanIdsIn.map((x) => Math.floor(Number(x))).filter((x) => Number.isFinite(x) && x > 0))];
   return {
@@ -1087,7 +1095,6 @@ function normalizePromoCode(raw: unknown): PromoCodeRow | null {
     one_time_per_user: o.one_time_per_user === true || o.one_time_per_user === 1 || o.one_time_per_user === "1",
     ...(Number.isFinite(max_uses_total_raw) && max_uses_total_raw >= 1 ? { max_uses_total: max_uses_total_raw } : {}),
     max_uses_per_user: Number.isFinite(max_uses_per_user_raw) && max_uses_per_user_raw >= 1 ? max_uses_per_user_raw : 1,
-    ...(Number.isFinite(min_purchase_rub_raw) && min_purchase_rub_raw > 0 ? { min_purchase_rub: min_purchase_rub_raw } : {}),
     first_purchase_only: o.first_purchase_only === true || o.first_purchase_only === 1 || o.first_purchase_only === "1",
     new_users_only: o.new_users_only === true || o.new_users_only === 1 || o.new_users_only === "1",
     ...(applyPlanIds.length > 0 ? { apply_plan_ids: applyPlanIds } : {}),
@@ -4133,7 +4140,6 @@ export function createPromoCode(input: {
   one_time_per_user: boolean;
   max_uses_total?: number;
   max_uses_per_user?: number;
-  min_purchase_rub?: number;
   first_purchase_only?: boolean;
   new_users_only?: boolean;
   apply_plan_ids?: number[];
@@ -4149,7 +4155,11 @@ export function createPromoCode(input: {
   if (!name) throw new Error("promo_name_required");
   if (!code) throw new Error("promo_code_required");
   if (!/^[\p{L}\p{N}_-]{3,40}$/u.test(code)) throw new Error("promo_code_invalid");
-  const type = input.type ?? "percent";
+  const typeRaw = String(input.type ?? "percent").trim().toLowerCase();
+  const type: PromoCodeRow["type"] =
+    typeRaw === "rub" || typeRaw === "gb" || typeRaw === "days" || typeRaw === "percent"
+      ? (typeRaw as PromoCodeRow["type"])
+      : "percent";
   const discountPercent = Math.min(100, Math.max(0, Math.floor(Number(input.discount_percent) || 0)));
   const discountRub = Math.max(0, Math.floor(Number(input.discount_rub) || 0));
   const giftGb = Math.max(0, Math.floor(Number(input.gift_gb) || 0));
@@ -4158,10 +4168,8 @@ export function createPromoCode(input: {
   if (type === "rub" && discountRub <= 0) throw new Error("promo_discount_rub_invalid");
   if (type === "gb" && giftGb <= 0) throw new Error("promo_gb_invalid");
   if (type === "days" && giftDays <= 0) throw new Error("promo_days_invalid");
-  if (type === "combo" && discountPercent <= 0 && giftGb <= 0 && giftDays <= 0) throw new Error("promo_combo_invalid");
   const maxUsesTotalRaw = Math.floor(Number(input.max_uses_total));
   const maxUsesPerUserRaw = Math.floor(Number(input.max_uses_per_user));
-  const minPurchaseRaw = Math.floor(Number(input.min_purchase_rub));
   if (Number.isFinite(maxUsesTotalRaw) && maxUsesTotalRaw > 0 && maxUsesTotalRaw < 1) throw new Error("promo_max_uses_total_invalid");
   const maxUsesPerUser = Number.isFinite(maxUsesPerUserRaw) && maxUsesPerUserRaw >= 1 ? maxUsesPerUserRaw : 1;
   const applyPlanIdsIn = Array.isArray(input.apply_plan_ids) ? input.apply_plan_ids : [];
@@ -4187,7 +4195,6 @@ export function createPromoCode(input: {
       one_time_per_user: input.one_time_per_user === true,
       ...(Number.isFinite(maxUsesTotalRaw) && maxUsesTotalRaw >= 1 ? { max_uses_total: maxUsesTotalRaw } : {}),
       max_uses_per_user: maxUsesPerUser,
-      ...(Number.isFinite(minPurchaseRaw) && minPurchaseRaw > 0 ? { min_purchase_rub: minPurchaseRaw } : {}),
       first_purchase_only: input.first_purchase_only === true,
       new_users_only: input.new_users_only === true,
       ...(applyPlanIds.length > 0 ? { apply_plan_ids: applyPlanIds } : {}),
@@ -4220,7 +4227,6 @@ export function updatePromoCode(
     one_time_per_user: boolean;
     max_uses_total: number;
     max_uses_per_user: number;
-    min_purchase_rub: number;
     first_purchase_only: boolean;
     new_users_only: boolean;
     apply_plan_ids: number[];
@@ -4243,7 +4249,11 @@ export function updatePromoCode(
     if (!nextCode) throw new Error("promo_code_required");
     if (!/^[\p{L}\p{N}_-]{3,40}$/u.test(nextCode)) throw new Error("promo_code_invalid");
     if (rows.some((r, i) => i !== idx && r.code === nextCode)) throw new Error("promo_code_exists");
-    const nextType = patch.type ?? cur.type;
+    const nextTypeRaw = String(patch.type ?? cur.type).trim().toLowerCase();
+    const nextType: PromoCodeRow["type"] =
+      nextTypeRaw === "rub" || nextTypeRaw === "gb" || nextTypeRaw === "days" || nextTypeRaw === "percent"
+        ? (nextTypeRaw as PromoCodeRow["type"])
+        : "percent";
     const nextDiscountPercent =
       patch.discount_percent !== undefined ? Math.min(100, Math.max(0, Math.floor(Number(patch.discount_percent) || 0))) : cur.discount_percent;
     const nextDiscountRub =
@@ -4254,7 +4264,6 @@ export function updatePromoCode(
     if (nextType === "rub" && nextDiscountRub <= 0) throw new Error("promo_discount_rub_invalid");
     if (nextType === "gb" && nextGiftGb <= 0) throw new Error("promo_gb_invalid");
     if (nextType === "days" && nextGiftDays <= 0) throw new Error("promo_days_invalid");
-    if (nextType === "combo" && nextDiscountPercent <= 0 && nextGiftGb <= 0 && nextGiftDays <= 0) throw new Error("promo_combo_invalid");
     const nextMaxUsesTotalRaw =
       patch.max_uses_total !== undefined ? Math.floor(Number(patch.max_uses_total)) : cur.max_uses_total ?? Number.NaN;
     if (patch.max_uses_total !== undefined && Number.isFinite(nextMaxUsesTotalRaw) && nextMaxUsesTotalRaw < 1) {
@@ -4264,8 +4273,6 @@ export function updatePromoCode(
       patch.max_uses_per_user !== undefined
         ? Math.max(1, Math.floor(Number(patch.max_uses_per_user) || 1))
         : Math.max(1, Math.floor(Number(cur.max_uses_per_user) || 1));
-    const nextMinPurchaseRaw =
-      patch.min_purchase_rub !== undefined ? Math.floor(Number(patch.min_purchase_rub) || 0) : cur.min_purchase_rub ?? 0;
     const applyPlanIdsIn = patch.apply_plan_ids !== undefined ? patch.apply_plan_ids : cur.apply_plan_ids ?? [];
     const applyPlanIds = [...new Set(applyPlanIdsIn.map((x) => Math.floor(Number(x))).filter((x) => Number.isFinite(x) && x > 0))];
     const nextValidUntil =
@@ -4275,7 +4282,7 @@ export function updatePromoCode(
       if (!Number.isFinite(expiryMs) || expiryMs < Date.now()) throw new Error("promo_valid_until_past");
     }
     out = {
-      ...cur,
+      id: cur.id,
       name: nextName,
       code: nextCode,
       type: nextType,
@@ -4286,7 +4293,6 @@ export function updatePromoCode(
       one_time_per_user: patch.one_time_per_user !== undefined ? patch.one_time_per_user === true : cur.one_time_per_user,
       ...(Number.isFinite(nextMaxUsesTotalRaw) && nextMaxUsesTotalRaw >= 1 ? { max_uses_total: nextMaxUsesTotalRaw } : {}),
       max_uses_per_user: nextMaxUsesPerUser,
-      ...(nextMinPurchaseRaw > 0 ? { min_purchase_rub: nextMinPurchaseRaw } : {}),
       first_purchase_only: patch.first_purchase_only !== undefined ? patch.first_purchase_only === true : cur.first_purchase_only,
       new_users_only: patch.new_users_only !== undefined ? patch.new_users_only === true : cur.new_users_only,
       ...(applyPlanIds.length > 0 ? { apply_plan_ids: applyPlanIds } : {}),
@@ -4295,8 +4301,12 @@ export function updatePromoCode(
         : cur.admin_note
           ? { admin_note: cur.admin_note }
           : {}),
+      ...(cur.bound_tg_user_id != null && cur.bound_tg_user_id > 0 ? { bound_tg_user_id: cur.bound_tg_user_id } : {}),
+      ...(cur.source ? { source: cur.source } : {}),
+      ...(cur.source_ref ? { source_ref: cur.source_ref } : {}),
       active: patch.active !== undefined ? patch.active === true : cur.active,
       valid_until: nextValidUntil,
+      created_at: cur.created_at,
       updated_at: new Date().toISOString(),
     };
     rows[idx] = out!;
@@ -4418,6 +4428,8 @@ export function applyPromoCodeForUser(input: {
   tg_user_id: number;
   original_price_rub: number;
   plan_id?: number;
+  /** When apply_plan_ids is set, topup purchases are rejected (filter is for subscription tariffs). */
+  purchase_kind?: "subscription" | "topup";
 }): {
   promo: PromoCodeRow;
   final_price_rub: number;
@@ -4429,24 +4441,21 @@ export function applyPromoCodeForUser(input: {
 } {
   const promo = validatePromoCodeForUser(input.code, input.tg_user_id);
   const original = Math.max(0, Math.floor(Number(input.original_price_rub) || 0));
-  if (promo.min_purchase_rub && original < promo.min_purchase_rub) throw new Error("promo_min_purchase_not_met");
-  if (promo.apply_plan_ids && promo.apply_plan_ids.length > 0 && input.plan_id && !promo.apply_plan_ids.includes(input.plan_id)) {
-    throw new Error("promo_plan_not_allowed");
+  const restrictedPlans = promo.apply_plan_ids ?? [];
+  if (restrictedPlans.length > 0) {
+    if (input.purchase_kind === "topup") throw new Error("promo_plan_not_allowed");
+    if (input.plan_id != null && input.plan_id > 0 && !restrictedPlans.includes(input.plan_id)) {
+      throw new Error("promo_plan_not_allowed");
+    }
   }
   const discountByPercent = Math.max(0, Math.floor((original * promo.discount_percent) / 100));
   const discountByRub = promo.discount_rub;
   const rawDiscount =
-    promo.type === "percent"
-      ? discountByPercent
-      : promo.type === "rub"
-        ? discountByRub
-        : promo.type === "combo"
-          ? Math.max(discountByPercent, discountByRub)
-          : 0;
+    promo.type === "percent" ? discountByPercent : promo.type === "rub" ? discountByRub : 0;
   const final = Math.max(0, original - rawDiscount);
   const discountRub = Math.max(0, original - final);
-  const bonusGb = promo.type === "gb" || promo.type === "combo" ? promo.gift_gb : 0;
-  const bonusDays = promo.type === "days" || promo.type === "combo" ? promo.gift_days : 0;
+  const bonusGb = promo.type === "gb" ? promo.gift_gb : 0;
+  const bonusDays = promo.type === "days" ? promo.gift_days : 0;
   return {
     promo,
     original_price_rub: original,
@@ -4456,6 +4465,32 @@ export function applyPromoCodeForUser(input: {
     bonus_gb: bonusGb,
     bonus_days: bonusDays,
   };
+}
+
+const PROMO_GIFT_DAY_MS = 86_400_000;
+
+/** Credit gift GB/days from a promo onto a user after payment confirm. */
+export function applyPromoBonusesToUser(
+  userId: number,
+  bonusGb: number,
+  bonusDays: number,
+): UserRow | undefined {
+  const uid = Math.floor(Number(userId));
+  const gb = Math.max(0, Math.floor(Number(bonusGb) || 0));
+  const days = Math.max(0, Math.floor(Number(bonusDays) || 0));
+  if (!Number.isFinite(uid) || uid <= 0 || (gb <= 0 && days <= 0)) return getUser(uid);
+  const user = getUser(uid);
+  if (!user) return undefined;
+  const patch: { total_gb?: number; expiry_time?: number } = {};
+  if (gb > 0 && user.total_gb > 0) {
+    patch.total_gb = user.total_gb + gb;
+  }
+  if (days > 0) {
+    const base = Math.max(Number(user.expiry_time) || 0, Date.now());
+    patch.expiry_time = snapExpiryTimeToNoonLocal(base + days * PROMO_GIFT_DAY_MS);
+  }
+  if (patch.total_gb === undefined && patch.expiry_time === undefined) return user;
+  return updateUserRow(uid, patch);
 }
 
 export function listCommunicationSegments(): CommunicationSegmentRow[] {

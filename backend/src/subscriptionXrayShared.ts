@@ -1,9 +1,45 @@
 import type { ServerSubscriptionSettings, DnsQueryStrategy } from "./serverSubscriptionSettings.js";
+import { parseXhttpExtraObject } from "./serverSubscriptionSettings.js";
 import { deriveRealityPublicKeyFromPrivateLocal } from "./vlessLinkHints.js";
 import { generateX25519RealityKeyPair } from "./realityKeygen.js";
 import { streamSettingsOfInbound } from "./vlessLinkHints.js";
 
 export const DEFAULT_SNIFF_DEST_OVERRIDE = ["http", "tls", "quic"] as const;
+
+function buildTransportSettings(settings: ServerSubscriptionSettings): Record<string, unknown> {
+  const network = settings.network;
+  if (network === "tcp") {
+    return { tcpSettings: { header: { type: settings.tcp.header_type || "none" } } };
+  }
+  if (network === "grpc") {
+    return {
+      grpcSettings: {
+        serviceName: settings.grpc.service_name,
+        authority: settings.grpc.authority,
+        multiMode: settings.grpc.multi_mode,
+      },
+    };
+  }
+  if (network === "ws") {
+    return {
+      wsSettings: {
+        path: settings.ws.path,
+        headers: settings.ws.host ? { Host: settings.ws.host } : {},
+      },
+    };
+  }
+  if (network === "xhttp") {
+    const xhttp: Record<string, unknown> = {
+      path: settings.xhttp.path.trim() || "/",
+      host: settings.xhttp.host.trim(),
+      mode: settings.xhttp.mode || "auto",
+    };
+    const extra = parseXhttpExtraObject(settings.xhttp.extra);
+    if (extra) xhttp.extra = extra;
+    return { xhttpSettings: xhttp };
+  }
+  return {};
+}
 
 export function dnsServersBlock(servers: string[]): unknown[] {
   const out: unknown[] = [];
@@ -33,22 +69,7 @@ export function buildServerDnsBlock(settings: ServerSubscriptionSettings): Recor
 export function buildClientStreamSettings(settings: ServerSubscriptionSettings): Record<string, unknown> {
   const network = settings.network;
   const security = settings.security;
-  const stream: Record<string, unknown> = { network, security };
-
-  if (network === "tcp") {
-    stream.tcpSettings = { header: { type: settings.tcp.header_type || "none" } };
-  } else if (network === "grpc") {
-    stream.grpcSettings = {
-      serviceName: settings.grpc.service_name,
-      authority: settings.grpc.authority,
-      mode: settings.grpc.mode,
-    };
-  } else if (network === "ws") {
-    stream.wsSettings = {
-      path: settings.ws.path,
-      headers: settings.ws.host ? { Host: settings.ws.host } : {},
-    };
-  }
+  const stream: Record<string, unknown> = { network, security, ...buildTransportSettings(settings) };
 
   if (security === "reality") {
     stream.realitySettings = {
@@ -116,22 +137,7 @@ export function buildInboundStreamFromSubscription(
 ): Record<string, unknown> {
   const network = settings.network;
   const security = settings.security;
-  const stream: Record<string, unknown> = { network, security };
-
-  if (network === "tcp") {
-    stream.tcpSettings = { header: { type: settings.tcp.header_type || "none" } };
-  } else if (network === "grpc") {
-    stream.grpcSettings = {
-      serviceName: settings.grpc.service_name,
-      authority: settings.grpc.authority,
-      mode: settings.grpc.mode,
-    };
-  } else if (network === "ws") {
-    stream.wsSettings = {
-      path: settings.ws.path,
-      headers: settings.ws.host ? { Host: settings.ws.host } : {},
-    };
-  }
+  const stream: Record<string, unknown> = { network, security, ...buildTransportSettings(settings) };
 
   if (security === "reality") {
     const sni = settings.reality.server_name.trim();

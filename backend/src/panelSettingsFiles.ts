@@ -70,30 +70,7 @@ export function panelAvatarPublicPath(rel: string | null): string | null {
   return `/api/settings/avatar`;
 }
 
-export function validatePanelMenuImage(bytes: Buffer, mime: string): void {
-  if (bytes.length > MAX_AVATAR_BYTES) throw new Error("menu_image_too_large");
-  if (!ALLOWED.has(mime.toLowerCase())) throw new Error("unsupported_menu_image_format");
-}
-
-export function savePanelMenuImage(bytes: Buffer, mime: string): string {
-  validatePanelMenuImage(bytes, mime);
-  const ext = mimeToExt(mime);
-  const rel = `menu-image.${ext}`;
-  const full = path.join(avatarsRoot, rel);
-  fs.mkdirSync(avatarsRoot, { recursive: true });
-  for (const f of fs.readdirSync(avatarsRoot)) {
-    if (f.startsWith("menu-image.")) {
-      try {
-        fs.unlinkSync(path.join(avatarsRoot, f));
-      } catch {
-        /* ignore */
-      }
-    }
-  }
-  fs.writeFileSync(full, bytes);
-  return rel;
-}
-
+/** Удаляет устаревшие файлы статичной картинки меню (заменена генерацией баннера). */
 export function deletePanelMenuImageFiles(): void {
   if (!fs.existsSync(avatarsRoot)) return;
   for (const f of fs.readdirSync(avatarsRoot)) {
@@ -105,16 +82,4 @@ export function deletePanelMenuImageFiles(): void {
       }
     }
   }
-}
-
-export function readPanelMenuImage(relPath: string): { bytes: Buffer; mime: string } | null {
-  const safe = String(relPath ?? "").replace(/\\/g, "/").trim();
-  if (!safe || safe.includes("..") || !safe.startsWith("menu-image.")) return null;
-  const full = path.join(avatarsRoot, safe);
-  if (!fs.existsSync(full)) return null;
-  const bytes = fs.readFileSync(full);
-  const ext = path.extname(full).toLowerCase();
-  const mime =
-    ext === ".png" ? "image/png" : ext === ".webp" ? "image/webp" : "image/jpeg";
-  return { bytes, mime };
 }

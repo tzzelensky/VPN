@@ -1,4 +1,4 @@
-import { Navigate, Route, Routes, useLocation } from "react-router-dom";
+import { Navigate, Route, Routes, useLocation, useParams } from "react-router-dom";
 import { useEffect, useState, type ReactNode } from "react";
 import { authMe } from "./api";
 import GlobalAmbientBackdrop from "./components/GlobalAmbientBackdrop";
@@ -76,6 +76,14 @@ function TabIndexRedirect({ base, defaultTab }: { base: string; defaultTab: stri
   return (
     <Navigate to={{ pathname: `${base}/${defaultTab}`, search: location.search }} replace />
   );
+}
+
+/** Старые URL `/dropper-game` → `/roulette-game`; вкладки dropper/general → roulette. */
+function LegacyDropperGameRedirect() {
+  const { tab } = useParams();
+  const location = useLocation();
+  const keep = tab === "roulette" || tab === "tickets" || tab === "reports" ? tab : "roulette";
+  return <Navigate to={{ pathname: `/roulette-game/${keep}`, search: location.search }} replace />;
 }
 
 function tabbedRoutes(
@@ -167,7 +175,9 @@ export default function App() {
             </AuthRoute>
           }
         />
-        {tabbedRoutes("/dropper-game", "general", loggedIn, <DropperGamePage onLogout={logout} />)}
+        {tabbedRoutes("/roulette-game", "roulette", loggedIn, <DropperGamePage onLogout={logout} />)}
+        <Route path="/dropper-game" element={<Navigate to="/roulette-game/roulette" replace />} />
+        <Route path="/dropper-game/:tab" element={<LegacyDropperGameRedirect />} />
         {tabbedRoutes("/device-limit", "settings", loggedIn, <DeviceLimitPage onLogout={logout} />)}
         <Route
           path="/daily-gift"

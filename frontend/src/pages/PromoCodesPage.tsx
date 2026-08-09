@@ -45,7 +45,6 @@ export default function PromoCodesPage({ onLogout }: { onLogout: () => void }) {
   const [oneTime, setOneTime] = useState(true);
   const [maxUsesTotal, setMaxUsesTotal] = useState("");
   const [maxUsesPerUser, setMaxUsesPerUser] = useState(1);
-  const [minPurchaseRub, setMinPurchaseRub] = useState("");
   const [firstPurchaseOnly, setFirstPurchaseOnly] = useState(false);
   const [newUsersOnly, setNewUsersOnly] = useState(false);
   const [applyPlanIds, setApplyPlanIds] = useState<number[]>([]);
@@ -102,7 +101,6 @@ export default function PromoCodesPage({ onLogout }: { onLogout: () => void }) {
     setOneTime(true);
     setMaxUsesTotal("");
     setMaxUsesPerUser(1);
-    setMinPurchaseRub("");
     setFirstPurchaseOnly(false);
     setNewUsersOnly(false);
     setApplyPlanIds([]);
@@ -135,11 +133,9 @@ export default function PromoCodesPage({ onLogout }: { onLogout: () => void }) {
     if (promoType === "rub" && discountRub <= 0) next.discount_rub = "Сумма скидки должна быть больше 0.";
     if (promoType === "gb" && giftGb <= 0) next.gift_gb = "ГБ должны быть больше 0.";
     if (promoType === "days" && giftDays <= 0) next.gift_days = "Дни должны быть больше 0.";
-    if (promoType === "combo" && discountPercent <= 0 && giftGb <= 0 && giftDays <= 0) next.combo = "Для комбинированного типа задайте хотя бы один бонус.";
     if (validUntilMs > 0 && validUntilMs < Date.now()) next.valid_until = "Дата окончания не может быть в прошлом.";
     if (maxUsesTotal.trim() && Number(maxUsesTotal) < 1) next.max_uses_total = "Лимит применений должен быть >= 1.";
     if (maxUsesPerUser < 1) next.max_uses_per_user = "Максимум на пользователя должен быть >= 1.";
-    if (minPurchaseRub.trim() && Number(minPurchaseRub) < 0) next.min_purchase_rub = "Минимальная сумма не может быть отрицательной.";
     return next;
   }
 
@@ -164,7 +160,6 @@ export default function PromoCodesPage({ onLogout }: { onLogout: () => void }) {
         one_time_per_user: oneTime,
         max_uses_total: maxUsesTotal.trim() ? Math.max(1, Math.floor(Number(maxUsesTotal) || 1)) : undefined,
         max_uses_per_user: Math.max(1, Math.floor(Number(maxUsesPerUser) || 1)),
-        min_purchase_rub: minPurchaseRub.trim() ? Math.max(0, Math.floor(Number(minPurchaseRub) || 0)) : undefined,
         first_purchase_only: firstPurchaseOnly,
         new_users_only: newUsersOnly,
         apply_plan_ids: applyPlanIds,
@@ -222,7 +217,9 @@ export default function PromoCodesPage({ onLogout }: { onLogout: () => void }) {
     setEditPromoId(p.id);
     setName(p.name);
     setCode(p.code);
-    setPromoType(p.type ?? "percent");
+    setPromoType(
+      p.type === "rub" || p.type === "gb" || p.type === "days" || p.type === "percent" ? p.type : "percent",
+    );
     setDiscountPercent(p.discount_percent ?? 0);
     setDiscountRub(p.discount_rub ?? 0);
     setGiftGb(p.gift_gb ?? 0);
@@ -230,7 +227,6 @@ export default function PromoCodesPage({ onLogout }: { onLogout: () => void }) {
     setOneTime(p.one_time_per_user);
     setMaxUsesTotal(p.max_uses_total ? String(p.max_uses_total) : "");
     setMaxUsesPerUser(p.max_uses_per_user ?? 1);
-    setMinPurchaseRub(p.min_purchase_rub ? String(p.min_purchase_rub) : "");
     setFirstPurchaseOnly(Boolean(p.first_purchase_only));
     setNewUsersOnly(Boolean(p.new_users_only));
     setApplyPlanIds(p.apply_plan_ids ?? []);
@@ -313,19 +309,20 @@ export default function PromoCodesPage({ onLogout }: { onLogout: () => void }) {
 
   const discountPreview = useMemo(() => {
     if (!shop) return [];
-    return shop.plans.map((p) => {
-      const byPercent = Math.floor((p.price_rub * Math.max(0, discountPercent)) / 100);
-      const byRub = Math.max(0, discountRub);
-      const discount =
-        promoType === "percent" ? byPercent : promoType === "rub" ? byRub : promoType === "combo" ? Math.max(byPercent, byRub) : 0;
-      return {
-        id: p.id,
-        title: `Тариф ${p.total_gb <= 0 ? "Безлимит" : `${p.total_gb}ГБ`} / ${p.days} дней`,
-        oldPrice: p.price_rub,
-        newPrice: Math.max(0, p.price_rub - discount),
-      };
-    });
-  }, [shop, promoType, discountPercent, discountRub]);
+    return shop.plans
+      .filter((p) => applyPlanIds.length === 0 || applyPlanIds.includes(p.id))
+      .map((p) => {
+        const byPercent = Math.floor((p.price_rub * Math.max(0, discountPercent)) / 100);
+        const byRub = Math.max(0, discountRub);
+        const discount = promoType === "percent" ? byPercent : promoType === "rub" ? byRub : 0;
+        return {
+          id: p.id,
+          title: `Тариф ${p.total_gb <= 0 ? "Безлимит" : `${p.total_gb}ГБ`} / ${p.days} дней`,
+          oldPrice: p.price_rub,
+          newPrice: Math.max(0, p.price_rub - discount),
+        };
+      });
+  }, [shop, promoType, discountPercent, discountRub, applyPlanIds]);
 
   return (
     <DashboardLayout onLogout={onLogout}>
@@ -391,38 +388,36 @@ export default function PromoCodesPage({ onLogout }: { onLogout: () => void }) {
                 <option value="rub">Скидка в ₽</option>
                 <option value="gb">Подарок ГБ</option>
                 <option value="days">Подарок дней</option>
-                <option value="combo">Комбинированный</option>
               </select>
             </div>
-            {promoType === "percent" || promoType === "combo" ? (
+            {promoType === "percent" ? (
               <div className="form-field">
                 <label>Скидка, %</label>
                 <input inputMode="numeric" value={discountPercent} onChange={(e) => setDiscountPercent(Math.max(0, Math.floor(Number(e.target.value) || 0)))} />
                 {errors.discount_percent ? <p className="field-hint promo-field-error">{errors.discount_percent}</p> : null}
               </div>
             ) : null}
-            {promoType === "rub" || promoType === "combo" ? (
+            {promoType === "rub" ? (
               <div className="form-field">
                 <label>Скидка, ₽</label>
                 <input inputMode="numeric" value={discountRub} onChange={(e) => setDiscountRub(Math.max(0, Math.floor(Number(e.target.value) || 0)))} />
                 {errors.discount_rub ? <p className="field-hint promo-field-error">{errors.discount_rub}</p> : null}
               </div>
             ) : null}
-            {promoType === "gb" || promoType === "combo" ? (
+            {promoType === "gb" ? (
               <div className="form-field">
                 <label>Подарок ГБ</label>
                 <input inputMode="numeric" value={giftGb} onChange={(e) => setGiftGb(Math.max(0, Math.floor(Number(e.target.value) || 0)))} />
                 {errors.gift_gb ? <p className="field-hint promo-field-error">{errors.gift_gb}</p> : null}
               </div>
             ) : null}
-            {promoType === "days" || promoType === "combo" ? (
+            {promoType === "days" ? (
               <div className="form-field">
                 <label>Подарок дней</label>
                 <input inputMode="numeric" value={giftDays} onChange={(e) => setGiftDays(Math.max(0, Math.floor(Number(e.target.value) || 0)))} />
                 {errors.gift_days ? <p className="field-hint promo-field-error">{errors.gift_days}</p> : null}
               </div>
             ) : null}
-            {errors.combo ? <p className="field-hint promo-field-error">{errors.combo}</p> : null}
             <div className="form-field">
               <label>Максимальное количество применений всего</label>
               <input value={maxUsesTotal} onChange={(e) => setMaxUsesTotal(e.target.value.replace(/[^\d]/g, ""))} placeholder="без ограничения" />
@@ -432,10 +427,6 @@ export default function PromoCodesPage({ onLogout }: { onLogout: () => void }) {
               <label>Максимум применений на пользователя</label>
               <input inputMode="numeric" value={maxUsesPerUser} onChange={(e) => setMaxUsesPerUser(Math.max(1, Math.floor(Number(e.target.value) || 1)))} />
               {errors.max_uses_per_user ? <p className="field-hint promo-field-error">{errors.max_uses_per_user}</p> : null}
-            </div>
-            <div className="form-field">
-              <label>Минимальная сумма покупки, ₽</label>
-              <input value={minPurchaseRub} onChange={(e) => setMinPurchaseRub(e.target.value.replace(/[^\d]/g, ""))} placeholder="если применимо" />
             </div>
             <div className="form-field shop-toggle-row">
               <div>
@@ -500,7 +491,7 @@ export default function PromoCodesPage({ onLogout }: { onLogout: () => void }) {
 
             <div className="form-field form-field-span-2">
               <label>Предпросмотр применения</label>
-              {promoType === "percent" || promoType === "rub" || promoType === "combo" ? (
+              {promoType === "percent" || promoType === "rub" ? (
                 <div className="referral-discount-cards">
                   {discountPreview.map((p) => (
                     <div key={p.id} className="referral-discount-card">
@@ -514,10 +505,27 @@ export default function PromoCodesPage({ onLogout }: { onLogout: () => void }) {
                   ))}
                 </div>
               ) : null}
-              {promoType === "gb" ? <p className="field-hint">Пользователь получит +{giftGb} ГБ</p> : null}
-              {promoType === "days" ? <p className="field-hint">Пользователь получит +{giftDays} дней</p> : null}
-              {promoType === "combo" ? (
-                <p className="field-hint">Пользователь получит: скидка {discountPercent}% / +{giftGb} ГБ / +{giftDays} дней</p>
+              {promoType === "gb" ? (
+                <div className="referral-discount-cards">
+                  <div className="referral-discount-card">
+                    <div className="referral-discount-card-title">Подарок трафика</div>
+                    <div className="referral-discount-card-price">
+                      <span className="referral-price-new">+{giftGb} ГБ</span>
+                    </div>
+                    <p className="field-hint">Начислится после подтверждения оплаты выбранного тарифа.</p>
+                  </div>
+                </div>
+              ) : null}
+              {promoType === "days" ? (
+                <div className="referral-discount-cards">
+                  <div className="referral-discount-card">
+                    <div className="referral-discount-card-title">Подарок срока</div>
+                    <div className="referral-discount-card-price">
+                      <span className="referral-price-new">+{giftDays} дней</span>
+                    </div>
+                    <p className="field-hint">Начислится после подтверждения оплаты выбранного тарифа.</p>
+                  </div>
+                </div>
               ) : null}
             </div>
 
@@ -548,7 +556,6 @@ export default function PromoCodesPage({ onLogout }: { onLogout: () => void }) {
                 <option value="rub">Скидка ₽</option>
                 <option value="gb">ГБ</option>
                 <option value="days">Дни</option>
-                <option value="combo">Комбинированный</option>
               </select>
               <select value={sortBy} onChange={(e) => setSortBy(e.target.value as typeof sortBy)}>
                 <option value="new">Новые сверху</option>
@@ -583,7 +590,8 @@ export default function PromoCodesPage({ onLogout }: { onLogout: () => void }) {
                               <span className="promo-card-code mono">({p.code})</span>
                             </div>
                             <div className="promo-card-meta">
-                              Тип: {p.type} • бонус: {p.type === "percent" ? `${p.discount_percent}%` : p.type === "rub" ? `${p.discount_rub} ₽` : p.type === "gb" ? `+${p.gift_gb} ГБ` : p.type === "days" ? `+${p.gift_days} дней` : `${p.discount_percent}% +${p.gift_gb}ГБ +${p.gift_days}д`}
+                              Тип: {p.type} • бонус: {p.type === "percent" ? `${p.discount_percent}%` : p.type === "rub" ? `${p.discount_rub} ₽` : p.type === "gb" ? `+${p.gift_gb} ГБ` : `+${p.gift_days} дней`}
+                              {(p.apply_plan_ids?.length ?? 0) > 0 ? ` • тарифы: ${p.apply_plan_ids!.join(", ")}` : ""}
                             </div>
                             <div className="promo-card-meta">
                               Статус: {status === "active" ? "активен" : status === "inactive" ? "выключен" : status === "expired" ? "истек" : "лимит исчерпан"} • применений: {p.usages_count} / {p.max_uses_total ?? "∞"}

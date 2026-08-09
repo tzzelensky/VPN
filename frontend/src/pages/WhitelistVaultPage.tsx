@@ -4,6 +4,7 @@ import DashboardLayout from "../components/DashboardLayout";
 import PanelTabs from "../components/PanelTabs";
 import PageLoadingState from "../components/PageLoadingState";
 import Spinner from "../components/Spinner";
+import { useModalEscape } from "../hooks/useModalEscape";
 import {
   bulkDeleteWhitelistVaultKeys,
   bulkRenameWhitelistVaultKeys,
@@ -161,6 +162,67 @@ export default function WhitelistVaultPage({ onLogout }: { onLogout: () => void 
   const [formGroupRemoveOnUnavailable, setFormGroupRemoveOnUnavailable] = useState(false);
   const [formGroupChecksBeforeRemove, setFormGroupChecksBeforeRemove] = useState(3);
   const [assignedUsersOpen, setAssignedUsersOpen] = useState(false);
+
+  useModalEscape(() => {
+    if (assignedUsersOpen) {
+      setAssignedUsersOpen(false);
+      return;
+    }
+    if (bsUsersModalOpen) {
+      setBsUsersModalOpen(false);
+      return;
+    }
+    if (historyKey) {
+      setHistoryKey(null);
+      return;
+    }
+    if (settingsOpen) {
+      setSettingsOpen(false);
+      return;
+    }
+    if (jsonImportOpen) {
+      setJsonImportOpen(false);
+      return;
+    }
+    if (importOpen) {
+      setImportOpen(false);
+      return;
+    }
+    if (viewKey) {
+      setViewKey(null);
+      return;
+    }
+    if (editKey) {
+      setEditKey(null);
+      return;
+    }
+    if (editGroup) {
+      setEditGroup(null);
+      return;
+    }
+    if (addOpen) {
+      setAddOpen(false);
+      return;
+    }
+    if (groupMergeOpen) {
+      setGroupMergeOpen(false);
+      return;
+    }
+    if (bulkRenameOpen) setBulkRenameOpen(false);
+  }, Boolean(
+    assignedUsersOpen ||
+      bsUsersModalOpen ||
+      historyKey ||
+      settingsOpen ||
+      jsonImportOpen ||
+      importOpen ||
+      viewKey ||
+      editKey ||
+      editGroup ||
+      addOpen ||
+      groupMergeOpen ||
+      bulkRenameOpen,
+  ));
 
   const showToast = useCallback((type: "ok" | "err", text: string) => {
     setToast({ type, text });

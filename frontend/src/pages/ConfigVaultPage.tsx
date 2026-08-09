@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import DashboardLayout from "../components/DashboardLayout";
 import PageLoadingState from "../components/PageLoadingState";
 import DualListPicker, { type DualListItem } from "../components/DualListPicker";
+import { useModalEscape } from "../hooks/useModalEscape";
 import {
   bulkAssignConfigVaultKeys,
   bulkRenameConfigVaultKeys,
@@ -86,6 +87,7 @@ export default function ConfigVaultPage({ onLogout }: { onLogout: () => void }) 
   const [jsonImportOpen, setJsonImportOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
+  const [exportMode, setExportMode] = useState<"all" | "active" | "subscriptions" | "available">("all");
 
   const [viewKey, setViewKey] = useState<ConfigVaultKeyDto | null>(null);
   const [viewFullUri, setViewFullUri] = useState(false);
@@ -119,6 +121,53 @@ export default function ConfigVaultPage({ onLogout }: { onLogout: () => void }) 
   const [selectedKeyIds, setSelectedKeyIds] = useState<number[]>([]);
   const [bulkRenameOpen, setBulkRenameOpen] = useState(false);
   const [bulkRemark, setBulkRemark] = useState("");
+
+  useModalEscape(() => {
+    if (usersPickerOpen || subscriptionTargetsOpen) return;
+    if (historyKey) {
+      setHistoryKey(null);
+      return;
+    }
+    if (exportOpen) {
+      setExportOpen(false);
+      return;
+    }
+    if (settingsOpen) {
+      setSettingsOpen(false);
+      return;
+    }
+    if (jsonImportOpen) {
+      setJsonImportOpen(false);
+      return;
+    }
+    if (importOpen) {
+      setImportOpen(false);
+      return;
+    }
+    if (viewKey) {
+      setViewKey(null);
+      return;
+    }
+    if (editKey) {
+      setEditKey(null);
+      return;
+    }
+    if (addOpen) {
+      setAddOpen(false);
+      return;
+    }
+    if (bulkRenameOpen) setBulkRenameOpen(false);
+  }, Boolean(
+    historyKey ||
+      exportOpen ||
+      settingsOpen ||
+      jsonImportOpen ||
+      importOpen ||
+      viewKey ||
+      editKey ||
+      addOpen ||
+      bulkRenameOpen,
+  ));
 
   const showToast = useCallback((type: "ok" | "err", text: string) => {
     setToast({ type, text });
@@ -625,7 +674,15 @@ export default function ConfigVaultPage({ onLogout }: { onLogout: () => void }) 
           >
             Настройки автопроверки
           </button>
-          <button type="button" className="btn" disabled={busy} onClick={() => setExportOpen(true)}>
+          <button
+            type="button"
+            className="btn"
+            disabled={busy}
+            onClick={() => {
+              setExportMode("all");
+              setExportOpen(true);
+            }}
+          >
             Экспорт
           </button>
         </div>
@@ -1227,45 +1284,72 @@ export default function ConfigVaultPage({ onLogout }: { onLogout: () => void }) 
 
       {exportOpen && (
         <div className="modal-backdrop">
-          <div className="modal modal--sm vault-modal">
+          <div
+            className="modal modal--sm vault-modal vault-export-modal"
+            role="dialog"
+            aria-labelledby="vault-export-title"
+          >
             <div className="modal-head">
-              <h2>Экспорт</h2>
-              <button type="button" className="modal-close" onClick={() => setExportOpen(false)}>
+              <div>
+                <h2 id="vault-export-title">Экспорт конфигов</h2>
+                <p className="vault-export-modal__sub">Один TXT-файл со ссылками выбранной группы</p>
+              </div>
+              <button type="button" className="modal-close" onClick={() => setExportOpen(false)} aria-label="Закрыть">
                 ×
               </button>
             </div>
-            <div className="modal-body">
-              <p className="vault-warn-sm">
-                Экспорт содержит рабочие ссылки доступа. Не передавайте файл посторонним.
-              </p>
-              {(
-                [
-                  ["all", "Все ключи"],
-                  ["active", "Только активные"],
-                  ["subscriptions", "В подписках"],
-                  ["available", "Доступные"],
-                ] as const
-              ).map(([mode, label]) => (
-                <div key={mode} className="vault-export-row">
-                  <span>{label}</span>
-                  <a
-                    className="btn btn-sm"
-                    href={configVaultExportUrl(mode, "txt")}
-                    download
-                    onClick={() => setExportOpen(false)}
-                  >
-                    TXT
-                  </a>
-                  <a
-                    className="btn btn-sm"
-                    href={configVaultExportUrl(mode, "json")}
-                    download
-                    onClick={() => setExportOpen(false)}
-                  >
-                    JSON
-                  </a>
+            <div className="modal-body vault-export-modal__body">
+              <div className="vault-export-warn" role="note">
+                <span className="vault-export-warn__icon" aria-hidden>
+                  !
+                </span>
+                <div>
+                  <strong>Конфиденциально</strong>
+                  <p>Файл содержит рабочие ссылки доступа. Не передавайте его посторонним.</p>
                 </div>
-              ))}
+              </div>
+              <p className="vault-export-modal__label">Что выгрузить</p>
+              <div className="vault-export-modes" role="radiogroup" aria-label="Группа ключей">
+                {(
+                  [
+                    ["all", "Все ключи", "Полный список из хранилища"],
+                    ["active", "Только активные", "Без отключённых ключей"],
+                    ["subscriptions", "В подписках", "Уже добавленные в подписки"],
+                    ["available", "Доступные", "Проверка прошла успешно"],
+                  ] as const
+                ).map(([mode, label, hint]) => {
+                  const selected = exportMode === mode;
+                  return (
+                    <button
+                      key={mode}
+                      type="button"
+                      role="radio"
+                      aria-checked={selected}
+                      className={`vault-export-mode${selected ? " is-selected" : ""}`}
+                      onClick={() => setExportMode(mode)}
+                    >
+                      <span className="vault-export-mode__radio" aria-hidden />
+                      <span className="vault-export-mode__text">
+                        <span className="vault-export-mode__title">{label}</span>
+                        <span className="vault-export-mode__hint">{hint}</span>
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+            <div className="modal-footer vault-export-modal__footer">
+              <button type="button" className="ghost" onClick={() => setExportOpen(false)}>
+                Отмена
+              </button>
+              <a
+                className="btn primary vault-export-download"
+                href={configVaultExportUrl(exportMode)}
+                download
+                onClick={() => setExportOpen(false)}
+              >
+                Скачать TXT
+              </a>
             </div>
           </div>
         </div>

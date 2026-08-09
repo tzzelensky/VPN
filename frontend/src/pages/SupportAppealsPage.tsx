@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import DashboardLayout from "../components/DashboardLayout";
 import PageLoadingState from "../components/PageLoadingState";
 import Spinner from "../components/Spinner";
+import { useModalEscape } from "../hooks/useModalEscape";
 import {
   completeSupportAppeal,
   deleteSupportAppeal,
@@ -101,6 +102,18 @@ export default function SupportAppealsPage({ onLogout }: { onLogout: () => void 
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [msg, setMsg] = useState<{ type: "ok" | "err"; text: string } | null>(null);
 
+  useModalEscape(() => {
+    if (photoViewer) {
+      setPhotoViewer(null);
+      return;
+    }
+    if (completeAppeal && !completeBusy) {
+      setCompleteAppeal(null);
+      return;
+    }
+    if (viewAppeal) setViewAppeal(null);
+  }, Boolean(photoViewer || completeAppeal || viewAppeal));
+
   const refresh = useCallback(async () => {
     setLoading(true);
     setMsg(null);
@@ -122,10 +135,6 @@ export default function SupportAppealsPage({ onLogout }: { onLogout: () => void 
   useEffect(() => {
     if (!photoViewer) return;
     function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") {
-        setPhotoViewer(null);
-        return;
-      }
       if (e.key === "ArrowLeft") {
         setPhotoViewer((v) => (v && v.index > 0 ? { ...v, index: v.index - 1 } : v));
       }
@@ -430,8 +439,8 @@ export default function SupportAppealsPage({ onLogout }: { onLogout: () => void 
       </section>
 
       {viewAppeal ? (
-        <div className="modal-backdrop" onClick={() => setViewAppeal(null)}>
-          <div className="modal appeals-view-modal" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-backdrop">
+          <div className="modal appeals-view-modal">
             <div className="modal-head">
               <h2>Обращение</h2>
               <button type="button" className="ghost modal-close" onClick={() => setViewAppeal(null)}>
@@ -476,8 +485,8 @@ export default function SupportAppealsPage({ onLogout }: { onLogout: () => void 
       ) : null}
 
       {completeAppeal ? (
-        <div className="modal-backdrop" onClick={() => !completeBusy && setCompleteAppeal(null)}>
-          <div className="modal appeals-complete-modal" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-backdrop">
+          <div className="modal appeals-complete-modal">
             <div className="modal-head">
               <h2>Завершить обращение</h2>
               <button type="button" className="ghost modal-close" disabled={completeBusy} onClick={() => setCompleteAppeal(null)}>
@@ -528,8 +537,8 @@ export default function SupportAppealsPage({ onLogout }: { onLogout: () => void 
       ) : null}
 
       {photoViewer ? (
-        <div className="modal-backdrop appeals-photo-backdrop" onClick={() => setPhotoViewer(null)}>
-          <div className="appeals-photo-viewer" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-backdrop appeals-photo-backdrop">
+          <div className="appeals-photo-viewer">
             <button type="button" className="ghost appeals-photo-viewer-close" aria-label="Закрыть" onClick={() => setPhotoViewer(null)}>
               ×
             </button>

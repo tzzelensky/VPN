@@ -17,6 +17,8 @@ export type MySubWebAppController = {
   applyMySubTheme: (theme: MySubTheme) => void;
   initData: string;
   setData: Dispatch<SetStateAction<MySubProfileDto | null>>;
+  /** Режим просмотра в админке: мутации отключены. */
+  previewMode?: boolean;
 
   homeSub: MySubProfileDto["subscriptions"][number] | null;
   homeSubId: number;
@@ -61,7 +63,17 @@ export type MySubWebAppController = {
 
   promoCodeInput: string;
   setPromoCodeInput: (v: string) => void;
-  promoApplied: { code: string; discount_percent: number } | null;
+  promoApplied: {
+    code: string;
+    type: "percent" | "rub" | "gb" | "days";
+    discount_percent: number;
+    discount_rub: number;
+    bonus_gb: number;
+    bonus_days: number;
+    final_price_rub: number;
+    original_price_rub: number;
+    apply_plan_ids?: number[];
+  } | null;
   promoFeedback: { type: "ok" | "err"; text: string } | null;
   applyPromoCode: () => Promise<void>;
   activeDiscountPercent: number;

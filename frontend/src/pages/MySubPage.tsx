@@ -136,7 +136,17 @@ export default function MySubPage() {
   const [friendRewardId, setFriendRewardId] = useState("");
   const [friendRewardBusy, setFriendRewardBusy] = useState(false);
   const [promoCodeInput, setPromoCodeInput] = useState("");
-  const [promoApplied, setPromoApplied] = useState<{ code: string; discount_percent: number } | null>(null);
+  const [promoApplied, setPromoApplied] = useState<{
+    code: string;
+    type: "percent" | "rub" | "gb" | "days";
+    discount_percent: number;
+    discount_rub: number;
+    bonus_gb: number;
+    bonus_days: number;
+    final_price_rub: number;
+    original_price_rub: number;
+    apply_plan_ids?: number[];
+  } | null>(null);
   const [promoFeedback, setPromoFeedback] = useState<{ type: "ok" | "err"; text: string } | null>(null);
   const [dropperSession, setDropperSession] = useState<{ sessionId: string; seed: number; practice?: boolean } | null>(
     null,
@@ -423,6 +433,19 @@ export default function MySubPage() {
     }
   }, [promoCodeInput, promoApplied]);
 
+  useEffect(() => {
+    if (!promoApplied?.apply_plan_ids?.length) return;
+    if (payProduct !== "subscription" || payIsTest) {
+      setPromoApplied(null);
+      setPromoFeedback({ type: "err", text: "Промокод действует только для выбранных тарифов подписки." });
+      return;
+    }
+    if (!promoApplied.apply_plan_ids.includes(payPlanId)) {
+      setPromoApplied(null);
+      setPromoFeedback({ type: "err", text: "Промокод нельзя применить к выбранному тарифу." });
+    }
+  }, [payPlanId, payProduct, payIsTest, promoApplied]);
+
   async function copySubscription(url: string) {
     setMsg("");
     try {
@@ -633,10 +656,19 @@ export default function MySubPage() {
         init_data: initData,
         code,
         original_price_rub: priceBase,
+        plan_id: payProduct === "topup" ? selectedTopUpPlan?.id : selectedPlan?.id,
+        purchase_kind: payProduct === "topup" ? "topup" : "subscription",
       });
       setPromoApplied({
         code: calc.promo.code,
+        type: calc.promo.type,
         discount_percent: calc.discount_percent,
+        discount_rub: calc.discount_rub,
+        bonus_gb: calc.bonus_gb,
+        bonus_days: calc.bonus_days,
+        final_price_rub: calc.final_price_rub,
+        original_price_rub: calc.original_price_rub,
+        apply_plan_ids: calc.promo.apply_plan_ids,
       });
       setPromoFeedback(null);
     } catch (e) {
@@ -646,16 +678,33 @@ export default function MySubPage() {
       else if (m.includes("promo_not_found")) setPromoFeedback({ type: "err", text: "Промокод не найден." });
       else if (m.includes("promo_inactive")) setPromoFeedback({ type: "err", text: "Этот промокод сейчас неактивен." });
       else if (m.includes("promo_expired")) setPromoFeedback({ type: "err", text: "Срок действия этого промокода истек." });
-      else if (m.includes("promo_new_users_only")) {
+      else if (m.includes("promo_plan_not_allowed")) {
+        setPromoFeedback({ type: "err", text: "Промокод нельзя применить к выбранному тарифу." });
+      } else if (m.includes("promo_new_users_only")) {
         setPromoFeedback({ type: "err", text: "Промокод только для новых пользователей без подписки." });
       } else setPromoFeedback({ type: "err", text: "Не удалось применить промокод." });
     }
   }
 
   const autoDiscountPercent = !payIsTest && !promoApplied ? data?.roulette_purchase_discount?.discount_percent ?? 0 : 0;
-  const activeDiscountPercent = promoApplied?.discount_percent ?? autoDiscountPercent;
+  const activeDiscountPercent = promoApplied
+    ? promoApplied.type === "percent"
+      ? promoApplied.discount_percent
+      : promoApplied.discount_rub > 0 && promoApplied.original_price_rub > 0
+        ? Math.round((promoApplied.discount_rub / promoApplied.original_price_rub) * 100)
+        : 0
+    : autoDiscountPercent;
 
   const discountedPriceForPlan = (priceRub: number) => {
+    if (promoApplied) {
+      if (promoApplied.type === "rub") {
+        return Math.max(0, priceRub - promoApplied.discount_rub);
+      }
+      if (promoApplied.type === "percent") {
+        return Math.max(0, Math.floor(priceRub - (priceRub * promoApplied.discount_percent) / 100));
+      }
+      return priceRub;
+    }
     if (!activeDiscountPercent) return priceRub;
     return Math.max(0, Math.floor(priceRub - (priceRub * activeDiscountPercent) / 100));
   };
@@ -1624,10 +1673,39 @@ export default function MySubPage() {
                             Применить промокод
                           </button>
                           {promoApplied && (payProduct === "topup" ? selectedTopUpPlan : selectedPlan) ? (
-                            <p className="mysub-promo-feedback ok">
-                              Скидка применилась! К оплате {discountedPriceForPlan((payProduct === "topup" ? selectedTopUpPlan! : selectedPlan!).price_rub)}{" "}
-                              руб
-                            </p>
+                            <div className="mysub-promo-rewards">
+                              {promoApplied.discount_rub > 0 ? (
+                                <div className="mysub-promo-reward-card">
+                                  <span className="mysub-promo-reward-label">Скидка</span>
+                                  <strong>
+                                    {promoApplied.type === "percent"
+                                      ? `−${promoApplied.discount_percent}%`
+                                      : `−${promoApplied.discount_rub} ₽`}
+                                  </strong>
+                                  <span>
+                                    К оплате{" "}
+                                    {discountedPriceForPlan(
+                                      (payProduct === "topup" ? selectedTopUpPlan! : selectedPlan!).price_rub,
+                                    )}{" "}
+                                    ₽
+                                  </span>
+                                </div>
+                              ) : null}
+                              {promoApplied.bonus_gb > 0 ? (
+                                <div className="mysub-promo-reward-card gift">
+                                  <span className="mysub-promo-reward-label">Подарок</span>
+                                  <strong>+{promoApplied.bonus_gb} ГБ</strong>
+                                  <span>После оплаты</span>
+                                </div>
+                              ) : null}
+                              {promoApplied.bonus_days > 0 ? (
+                                <div className="mysub-promo-reward-card gift">
+                                  <span className="mysub-promo-reward-label">Подарок</span>
+                                  <strong>+{promoApplied.bonus_days} дн.</strong>
+                                  <span>После оплаты</span>
+                                </div>
+                              ) : null}
+                            </div>
                           ) : autoDiscountPercent > 0 && (payProduct === "topup" ? selectedTopUpPlan : selectedPlan) ? (
                             <p className="mysub-promo-feedback ok">
                               Применена автоскидка {autoDiscountPercent}%. К оплате{" "}
@@ -1763,6 +1841,19 @@ export default function MySubPage() {
                             ...s,
                             ...(patch.tickets != null ? { tickets: patch.tickets } : {}),
                             ...(patch.gb_piggy !== undefined ? { gb_piggy: patch.gb_piggy } : {}),
+                            ...(patch.remaining_days !== undefined || patch.remaining_gb !== undefined
+                              ? {
+                                  stats: {
+                                    ...s.stats,
+                                    ...(patch.remaining_days !== undefined
+                                      ? { remaining_days: patch.remaining_days }
+                                      : {}),
+                                    ...(patch.remaining_gb !== undefined
+                                      ? { remaining_gb: patch.remaining_gb }
+                                      : {}),
+                                  },
+                                }
+                              : {}),
                           },
                     );
                     const totalTickets = subs.reduce((sum, s) => sum + (s.tickets ?? 0), 0);

@@ -133,6 +133,23 @@ export function buildSubscriptionPreviewSummary(
     spiderX: settings.reality.spider_x,
     network: settings.network,
     security: settings.security,
+    transport:
+      settings.network === "grpc"
+        ? {
+            serviceName: settings.grpc.service_name,
+            authority: settings.grpc.authority,
+            multiMode: settings.grpc.multi_mode,
+          }
+        : settings.network === "ws"
+          ? { path: settings.ws.path, host: settings.ws.host }
+          : settings.network === "xhttp"
+            ? {
+                path: settings.xhttp.path,
+                host: settings.xhttp.host,
+                mode: settings.xhttp.mode,
+                extra: settings.xhttp.extra || null,
+              }
+            : { headerType: settings.tcp.header_type },
     allowInsecure: settings.reality.allow_insecure,
     show: settings.reality.show,
     mux: settings.mux,

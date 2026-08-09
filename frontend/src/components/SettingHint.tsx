@@ -1,17 +1,69 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
-type PopoverPos = { top: number; left: number; placement: "above" | "below" };
+type PopoverPos = {
+  top: number;
+  left: number;
+  placement: "above" | "below";
+  arrowLeft: number;
+  width: number;
+};
 
-function computePopoverPos(anchor: HTMLElement): PopoverPos {
+const VIEW_MARGIN = 8;
+const GAP = 10;
+const MAX_WIDTH = 300;
+const ARROW_EDGE = 14;
+
+function computePopoverPos(anchor: HTMLElement, popoverHeight = 96): PopoverPos {
   const rect = anchor.getBoundingClientRect();
-  const width = Math.min(280, window.innerWidth - 16);
-  const left = Math.max(8, Math.min(rect.left, window.innerWidth - width - 8));
-  const spaceBelow = window.innerHeight - rect.bottom;
-  const spaceAbove = rect.top;
-  const placement = spaceBelow >= 100 || spaceBelow >= spaceAbove ? "below" : "above";
-  const top = placement === "below" ? rect.bottom + 8 : rect.top - 8;
-  return { top, left, placement };
+  const width = Math.min(MAX_WIDTH, window.innerWidth - VIEW_MARGIN * 2);
+  const anchorCenterX = rect.left + rect.width / 2;
+
+  // Держим попап у кнопки, сдвигаем только чтобы не уехать за край экрана.
+  let left = anchorCenterX - width / 2;
+  left = Math.max(VIEW_MARGIN, Math.min(left, window.innerWidth - width - VIEW_MARGIN));
+
+  const arrowLeft = Math.max(
+    ARROW_EDGE,
+    Math.min(anchorCenterX - left, width - ARROW_EDGE),
+  );
+
+  const spaceBelow = window.innerHeight - rect.bottom - GAP;
+  const spaceAbove = rect.top - GAP;
+  const placement =
+    spaceBelow >= Math.min(popoverHeight, 110) || spaceBelow >= spaceAbove ? "below" : "above";
+
+  let top: number;
+  if (placement === "below") {
+    top = rect.bottom + GAP;
+    const maxTop = window.innerHeight - VIEW_MARGIN - Math.min(popoverHeight, spaceBelow);
+    if (top > maxTop && spaceAbove > spaceBelow) {
+      // мало места снизу — перекидываем вверх
+      top = Math.max(VIEW_MARGIN, rect.top - GAP - popoverHeight);
+      return { top, left, placement: "above", arrowLeft, width };
+    }
+  } else {
+    top = rect.top - GAP - popoverHeight;
+    if (top < VIEW_MARGIN) top = VIEW_MARGIN;
+  }
+
+  return { top, left, placement, arrowLeft, width };
+}
+
+function HintIcon() {
+  return (
+    <svg className="setting-hint-btn__icon" viewBox="0 0 16 16" width="14" height="14" aria-hidden>
+      <circle cx="8" cy="8" r="6.25" fill="none" stroke="currentColor" strokeWidth="1.4" />
+      <circle cx="8" cy="5.1" r="1" fill="currentColor" />
+      <path
+        d="M8 7.35v4.1"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
 }
 
 export function SettingHint({ text }: { text: string }) {
@@ -19,53 +71,70 @@ export function SettingHint({ text }: { text: string }) {
   const [pos, setPos] = useState<PopoverPos | null>(null);
   const id = useId();
   const btnRef = useRef<HTMLButtonElement>(null);
+  const popRef = useRef<HTMLSpanElement>(null);
 
   useLayoutEffect(() => {
     if (!open || !btnRef.current) {
       setPos(null);
       return;
     }
+
     const update = () => {
-      if (btnRef.current) setPos(computePopoverPos(btnRef.current));
+      if (!btnRef.current) return;
+      const measured = popRef.current?.offsetHeight ?? 96;
+      setPos(computePopoverPos(btnRef.current, measured));
     };
+
     update();
+    // второй проход после отрисовки — точная высота, стрелка к кнопке
+    requestAnimationFrame(update);
+
     window.addEventListener("resize", update);
     window.addEventListener("scroll", update, true);
     return () => {
       window.removeEventListener("resize", update);
       window.removeEventListener("scroll", update, true);
     };
-  }, [open]);
+  }, [open, text]);
 
   useEffect(() => {
     if (!open) return;
     const close = (e: MouseEvent) => {
       const t = e.target;
       if (t instanceof Node && btnRef.current?.contains(t)) return;
-      const pop = document.getElementById(id);
+      const pop = popRef.current ?? document.getElementById(id);
       if (pop && t instanceof Node && pop.contains(t)) return;
       setOpen(false);
     };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
     document.addEventListener("mousedown", close);
-    return () => document.removeEventListener("mousedown", close);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", close);
+      document.removeEventListener("keydown", onKey);
+    };
   }, [open, id]);
 
   const popover =
     open && pos
       ? createPortal(
           <span
+            ref={popRef}
             id={id}
             className={`setting-hint-popover setting-hint-popover--${pos.placement}`}
             role="tooltip"
             style={{
               position: "fixed",
-              top: pos.placement === "below" ? pos.top : undefined,
-              bottom: pos.placement === "above" ? window.innerHeight - pos.top : undefined,
+              top: pos.top,
               left: pos.left,
-              width: "min(280px, calc(100vw - 16px))",
+              width: pos.width,
+              ["--hint-arrow-left" as string]: `${pos.arrowLeft}px`,
             }}
           >
-            {text}
+            <span className="setting-hint-popover__arrow" aria-hidden />
+            <span className="setting-hint-popover__text">{text}</span>
           </span>,
           document.body,
         )
@@ -77,13 +146,14 @@ export function SettingHint({ text }: { text: string }) {
         <button
           ref={btnRef}
           type="button"
-          className="setting-hint-btn"
+          className={`setting-hint-btn${open ? " is-open" : ""}`}
           aria-label="Что делает эта настройка"
           aria-expanded={open}
           aria-controls={open ? id : undefined}
+          title="Подсказка"
           onClick={() => setOpen((v) => !v)}
         >
-          i
+          <HintIcon />
         </button>
       </span>
       {popover}

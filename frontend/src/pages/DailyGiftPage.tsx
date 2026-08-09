@@ -153,8 +153,6 @@ export default function DailyGiftPage({ onLogout }: { onLogout: () => void }) {
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [confirmClose, setConfirmClose] = useState(false);
   const prizeDirtyRef = useRef("");
-  const [bannerDraft, setBannerDraft] = useState("");
-
   const [scheduleDay, setScheduleDay] = useState("");
   const [schedulePrizeId, setSchedulePrizeId] = useState("");
 
@@ -177,7 +175,6 @@ export default function DailyGiftPage({ onLogout }: { onLogout: () => void }) {
     try {
       const next = await loadDailyGiftAdmin();
       setData(next);
-      setBannerDraft(next.config.banner_image_url ?? "");
     } catch (e) {
       setMsg({ type: "err", text: String(e) });
     } finally {
@@ -498,23 +495,6 @@ export default function DailyGiftPage({ onLogout }: { onLogout: () => void }) {
                   ))}
                 </select>
                 <p className="field-hint">{modeHint}</p>
-              </div>
-
-              <div className="form-field daily-gift-field-narrow">
-                <label>URL баннера</label>
-                <input
-                  type="url"
-                  placeholder="https://example.com/banner.png"
-                  value={bannerDraft}
-                  onChange={(e) => setBannerDraft(e.target.value)}
-                  onBlur={() => void onSaveConfig({ banner_image_url: bannerDraft.trim() || null })}
-                />
-                <p className="field-hint">Если поле пустое, используется стандартное изображение подарка</p>
-                {bannerDraft.trim() ? (
-                  <div className="daily-gift-banner-preview">
-                    <img src={bannerDraft.trim()} alt="" onError={(e) => (e.currentTarget.style.display = "none")} />
-                  </div>
-                ) : null}
               </div>
 
               <div className="daily-gift-stat-grid">
@@ -971,8 +951,8 @@ export default function DailyGiftPage({ onLogout }: { onLogout: () => void }) {
       </div>
 
       {editPrize ? (
-        <div className="modal-backdrop daily-gift-modal-backdrop" onClick={requestCloseModal}>
-          <div className="daily-gift-modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
+        <div className="modal-backdrop daily-gift-modal-backdrop">
+          <div className="daily-gift-modal" role="dialog" aria-modal="true">
             <header className="daily-gift-modal__header">
               <div>
                 <h3>{editPrize.id ? "Редактировать подарок" : "Новый подарок"}</h3>

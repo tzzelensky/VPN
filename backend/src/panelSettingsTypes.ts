@@ -16,7 +16,7 @@ export type PanelSectionKey =
   | "config_vault"
   | "whitelist_vault"
   | "telegram_proxies"
-  | "dropper_game"
+  | "roulette_game"
   | "device_limit"
   | "daily_gift";
 
@@ -48,6 +48,8 @@ export type PanelSettings = {
     timezone: string;
     /** Новый дизайн Telegram Mini App для пользователей. */
     webAppNewDesign: boolean;
+    /** Показывать функционал «Превью WebApp» в админ-панели. */
+    webAppPreviewEnabled: boolean;
   };
   sections: Record<PanelSectionKey, boolean>;
   /** Порядок пунктов меню (перетаскивание в настройках «Разделы»). */
@@ -64,8 +66,6 @@ export type PanelSettings = {
     login2faEnabled: boolean;
     /** HEX цвета кнопок бота (в API — primary / success / danger). */
     buttonColors: TelegramButtonColors;
-    /** Относительный путь к картинке главного меню бота (panel-avatars/menu-image.*). */
-    menuImagePath: string | null;
     /** Показывать кнопку «Спросить AI» в боте (нужен ещё Gemini API key). */
     aiAssistantEnabled: boolean;
     /** Модель Gemini, например gemini-2.5-flash-lite. */
@@ -76,6 +76,8 @@ export type PanelSettings = {
     confirmDangerousActions: boolean;
     autoLogoutMinutes: number | null;
     showDiagnosticDetails: boolean;
+    /** Регулировка потраченных ГБ слайдером на странице пользователей. */
+    manualTrafficAdjust: boolean;
   };
   maintenance: {
     enabled: boolean;
@@ -122,7 +124,7 @@ export const PANEL_SECTION_META: Array<{
     label: "Прокси",
     description: "Развертывание и управление прокси для Telegram на добавленных серверах",
   },
-  { key: "dropper_game", path: "/dropper-game", label: "Игра", description: "Мини-игра в боте" },
+  { key: "roulette_game", path: "/roulette-game", label: "Рулетка", description: "Рулетка, билеты и отчёты в WebApp" },
   {
     key: "device_limit",
     path: "/device-limit",
@@ -145,7 +147,9 @@ export function normalizeSectionOrder(raw: unknown): PanelSectionKey[] {
   const seen = new Set<PanelSectionKey>();
   const out: PanelSectionKey[] = [];
   for (const item of raw) {
-    const k = String(item).trim() as PanelSectionKey;
+    let key = String(item).trim();
+    if (key === "dropper_game") key = "roulette_game";
+    const k = key as PanelSectionKey;
     if (!all.includes(k) || seen.has(k)) continue;
     seen.add(k);
     out.push(k);
@@ -212,6 +216,7 @@ export function defaultPanelSettings(): PanelSettings {
       showHints: true,
       timezone: "Asia/Yekaterinburg",
       webAppNewDesign: false,
+      webAppPreviewEnabled: true,
     },
     sections,
     sectionOrder: [...DEFAULT_SECTION_ORDER],
@@ -225,7 +230,6 @@ export function defaultPanelSettings(): PanelSettings {
       testMode: false,
       login2faEnabled: true,
       buttonColors: { ...DEFAULT_TELEGRAM_BUTTON_COLORS },
-      menuImagePath: null,
       aiAssistantEnabled: true,
       geminiModel: "gemini-2.5-flash-lite",
     },
@@ -234,6 +238,7 @@ export function defaultPanelSettings(): PanelSettings {
       confirmDangerousActions: true,
       autoLogoutMinutes: null,
       showDiagnosticDetails: true,
+      manualTrafficAdjust: false,
     },
     maintenance: { enabled: false },
     vpnDisplay: { serverOrder: [], entryOrder: [] },

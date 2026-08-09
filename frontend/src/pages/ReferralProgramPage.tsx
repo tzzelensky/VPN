@@ -4,6 +4,7 @@ import PanelTabs from "../components/PanelTabs";
 import DualListPicker from "../components/DualListPicker";
 import PageLoadingState from "../components/PageLoadingState";
 import Spinner from "../components/Spinner";
+import { useModalEscape } from "../hooks/useModalEscape";
 import {
   grantReferralAdminGift,
   listUsers,
@@ -16,8 +17,6 @@ import {
   loadSubscriptionShop,
   referralEventsExportUrl,
   referralEventsXlsxExportUrl,
-  referralReportExportUrl,
-  referralReportXlsxExportUrl,
   saveReferralProgram,
   type ReferralEventDto,
   type ReferralMetaDto,
@@ -91,6 +90,7 @@ export default function ReferralProgramPage({ onLogout }: { onLogout: () => void
   const [giftComment, setGiftComment] = useState("");
   const [giftConfirmOpen, setGiftConfirmOpen] = useState(false);
   const [giftBusy, setGiftBusy] = useState(false);
+  useModalEscape(() => setGiftConfirmOpen(false), giftConfirmOpen && !giftBusy);
   const grantGiftLock = useRef(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -312,14 +312,6 @@ export default function ReferralProgramPage({ onLogout }: { onLogout: () => void
     );
   }
 
-  function exportReport() {
-    window.open(referralReportExportUrl(), "_blank");
-  }
-
-  function exportReportXlsx() {
-    window.open(referralReportXlsxExportUrl(), "_blank");
-  }
-
   return (
     <DashboardLayout onLogout={onLogout}>
       <section className="panel users-hero-panel">
@@ -413,12 +405,6 @@ export default function ReferralProgramPage({ onLogout }: { onLogout: () => void
             <section className="panel referral-report-panel">
               <div className="referral-report-toolbar">
                 <h2 className="referral-section-title">Отчёт по реферальной программе</h2>
-                <button type="button" className="ghost" onClick={exportReport}>
-                  Экспорт CSV
-                </button>
-                <button type="button" className="ghost" onClick={exportReportXlsx}>
-                  Экспорт XLSX
-                </button>
               </div>
               {reportRows.length === 0 ? (
                 <p className="sub referral-empty">Пока нет приглашений и подарков.</p>
@@ -456,7 +442,6 @@ export default function ReferralProgramPage({ onLogout }: { onLogout: () => void
                   </table>
                 </div>
               )}
-              <p className="field-hint">Файл CSV можно открыть в Excel. Формат XLSX — через импорт CSV.</p>
             </section>
           ) : null}
 
@@ -813,13 +798,12 @@ export default function ReferralProgramPage({ onLogout }: { onLogout: () => void
       )}
 
       {giftConfirmOpen ? (
-        <div className="modal-backdrop" role="presentation" onClick={() => setGiftConfirmOpen(false)}>
+        <div className="modal-backdrop" role="presentation">
           <div
             className="modal referral-gift-confirm-modal"
             role="dialog"
             aria-modal="true"
             aria-labelledby="gift-confirm-title"
-            onClick={(ev) => ev.stopPropagation()}
           >
             <h2 id="gift-confirm-title">Подтверждение</h2>
             <p>

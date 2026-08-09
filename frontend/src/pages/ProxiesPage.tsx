@@ -766,7 +766,8 @@ export default function ProxiesPage({ onLogout }: { onLogout: () => void }) {
             )}
           {formType === "mtproto" && (
             <p className="proxy-form-hint">
-              MTProto FakeTLS (secret ee + hex). В ссылке t.me secret передаётся в hex, не base64.
+              По умолчанию FakeTLS (secret ee + SNI, движок mtg). Режим dd без TLS поддерживается, но маскировка
+              слабее. В ссылке t.me secret — hex, не base64. Предпочтительный порт — 443.
             </p>
           )}
           {formType === "socks5" && (
@@ -1043,8 +1044,8 @@ export default function ProxiesPage({ onLogout }: { onLogout: () => void }) {
           )}
           {viewProxy.type === "mtproto" && viewProxy.last_error?.includes("simple-run") && (
             <p className="proxy-form-hint proxy-form-hint--warn" style={{ marginTop: "0.75rem" }}>
-              Прокси развёрнут в устаревшем режиме. Откройте «Редактировать» и сохраните без изменений — или удалите и
-              создайте заново, чтобы применить новый конфиг mtg.
+              Unit в режиме mtg simple-run устарел. Откройте «Редактировать» и сохраните без изменений — или удалите и
+              создайте заново, чтобы применить актуальный FakeTLS-конфиг mtg.
             </p>
           )}
           {viewProxyLogs && (

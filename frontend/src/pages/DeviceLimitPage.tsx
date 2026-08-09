@@ -961,7 +961,7 @@ export default function DeviceLimitPage({ onLogout }: { onLogout: () => void }) 
         ) : null}
 
         {atLimitModalOpen ? (
-          <AdminModalBackdrop className="device-limit-modal-backdrop" onClick={() => setAtLimitModalOpen(false)}>
+          <AdminModalBackdrop className="device-limit-modal-backdrop" onClose={() => setAtLimitModalOpen(false)}>
             <div className="modal card device-limit-modal device-limit-at-limit-modal" onClick={(e) => e.stopPropagation()}>
               <h3>Пользователи на лимите</h3>
               <p className="sub">
@@ -1021,7 +1021,7 @@ export default function DeviceLimitPage({ onLogout }: { onLogout: () => void }) 
         ) : null}
 
         {devicesModal ? (
-          <AdminModalBackdrop className="device-limit-modal-backdrop" onClick={() => setDevicesModal(null)}>
+          <AdminModalBackdrop className="device-limit-modal-backdrop" onClose={() => setDevicesModal(null)}>
             <div className="modal card device-limit-modal" onClick={(e) => e.stopPropagation()}>
               <h3>{devicesModal.subscription_name}</h3>
               <p className="sub">

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   AVATAR_CROP_OUTPUT,
   AVATAR_CROP_VIEWPORT,
@@ -7,6 +8,7 @@ import {
   readFileAsDataUrl,
   renderAvatarCrop,
 } from "../avatarCrop";
+import { useModalEscape } from "../hooks/useModalEscape";
 
 type Props = {
   open: boolean;
@@ -31,6 +33,10 @@ export default function AvatarCropModal({ open, initialSrc, busy, onClose, onSav
     setOffsetX(0);
     setOffsetY(0);
   }, []);
+
+  useModalEscape(() => {
+    if (!busy) onClose();
+  }, open);
 
   useEffect(() => {
     if (!open) {
@@ -124,15 +130,9 @@ export default function AvatarCropModal({ open, initialSrc, busy, onClose, onSav
   const imgLeft = AVATAR_CROP_VIEWPORT / 2 - displayW / 2 + offsetX;
   const imgTop = AVATAR_CROP_VIEWPORT / 2 - displayH / 2 + offsetY;
 
-  return (
-    <div
-      className="modal-backdrop modal-backdrop--nested avatar-crop-backdrop"
-      role="presentation"
-      onClick={(ev) => {
-        if (ev.target === ev.currentTarget && !busy) onClose();
-      }}
-    >
-      <div className="modal modal--sm avatar-crop-modal" role="dialog" aria-labelledby="avatar-crop-title" onClick={(e) => e.stopPropagation()}>
+  return createPortal(
+    <div className="modal-backdrop modal-backdrop--nested avatar-crop-backdrop" role="presentation">
+      <div className="modal modal--sm avatar-crop-modal" role="dialog" aria-labelledby="avatar-crop-title">
         <div className="modal-head">
           <h2 id="avatar-crop-title">Аватарка</h2>
           <button type="button" className="modal-close ghost" onClick={onClose} disabled={busy} aria-label="Закрыть">
@@ -203,6 +203,7 @@ export default function AvatarCropModal({ open, initialSrc, busy, onClose, onSav
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

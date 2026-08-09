@@ -16,6 +16,7 @@
     "express": "^4.21.2",
     "express-session": "^1.18.1",
     "google-auth-library": "^10.6.2",
+    "sharp": "^0.35.3",
     "ssh2": "^1.16.0",
     "swagger-ui-express": "^5.0.1",
     "uuid": "^11.0.5",

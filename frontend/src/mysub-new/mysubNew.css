@@ -678,6 +678,47 @@
   margin: 0;
 }
 
+.mn-promo-rewards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(9.5rem, 1fr));
+  gap: 0.55rem;
+  margin-top: 0.7rem;
+}
+
+.mn-promo-reward-card {
+  border-radius: 14px;
+  padding: 0.75rem 0.85rem;
+  background: linear-gradient(145deg, rgba(34, 197, 94, 0.14), rgba(34, 197, 94, 0.04));
+  border: 1px solid rgba(34, 197, 94, 0.28);
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.mn-promo-reward-card--gift {
+  background: linear-gradient(145deg, rgba(59, 130, 246, 0.16), rgba(59, 130, 246, 0.04));
+  border-color: rgba(59, 130, 246, 0.28);
+}
+
+.mn-promo-reward-card__label {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  opacity: 0.72;
+  font-weight: 600;
+}
+
+.mn-promo-reward-card__value {
+  font-size: 1.15rem;
+  font-weight: 800;
+  line-height: 1.2;
+}
+
+.mn-promo-reward-card__hint {
+  font-size: 0.78rem;
+  opacity: 0.7;
+}
+
 .mn-feedback.ok {
   color: #16a34a;
   margin: 0.5rem 0 0;
@@ -1003,8 +1044,19 @@
 }
 
 .mn-modal-backdrop--portal {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  width: 100dvw;
+  min-height: 100vh;
+  min-height: 100dvh;
+  z-index: 240;
   align-items: center;
   justify-items: center;
+  margin: 0;
+  padding: max(1rem, env(safe-area-inset-top, 0px)) max(1rem, env(safe-area-inset-right, 0px))
+    max(1rem, env(safe-area-inset-bottom, 0px)) max(1rem, env(safe-area-inset-left, 0px));
+  box-sizing: border-box;
 }
 
 .mn-modal {
@@ -1355,27 +1407,93 @@
   align-items: center;
 }
 
-/* Модалки рулетки поверх нижней навигации (контент z-index:1, nav z-index:30) */
-.mn-app:has(.roulette-game .modal-backdrop) .mn-app__content {
-  z-index: 40;
+/* Портал модалок рулетки — на весь экран, вне transform у свайпа вкладок */
+.roulette-modal-portal.modal-backdrop {
+  position: fixed !important;
+  inset: 0 !important;
+  width: 100vw;
+  width: 100dvw;
+  min-height: 100vh;
+  min-height: 100dvh;
+  z-index: 240 !important;
+  margin: 0 !important;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: max(1rem, env(safe-area-inset-top, 0px)) max(1rem, env(safe-area-inset-right, 0px))
+    max(1rem, env(safe-area-inset-bottom, 0px)) max(1rem, env(safe-area-inset-left, 0px));
+  box-sizing: border-box;
+  background: rgba(15, 23, 42, 0.55);
+  overflow-y: auto;
 }
 
-.mn-app .roulette-game__history-modal {
-  max-height: calc(100dvh - var(--mn-nav-h) - 2.5rem);
+.roulette-modal-portal .modal,
+.roulette-modal-portal .mysub-modal {
+  overflow: hidden;
+  border-radius: 22px;
+  margin: auto;
+  width: min(420px, 100%);
+  background: #ffffff;
+  border: 1px solid var(--mn-border, rgba(148, 163, 184, 0.25));
+  box-shadow: 0 18px 48px rgba(15, 23, 42, 0.22);
+  color: var(--mn-text, #0f172a);
+}
+
+.mn-app--dark.roulette-modal-portal .modal,
+.mn-app--dark.roulette-modal-portal .mysub-modal {
+  background: #1e293b;
+}
+
+.roulette-modal-portal .modal-head,
+.roulette-modal-portal .modal-footer {
+  border-color: var(--mn-border, rgba(148, 163, 184, 0.25));
+}
+
+.roulette-modal-portal .modal-footer {
+  margin-left: 0;
+  margin-right: 0;
+  margin-top: 0;
+}
+
+.roulette-modal-portal .roulette-game__modal-footer {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.55rem;
+  justify-content: stretch;
+  align-items: stretch;
+}
+
+.roulette-modal-portal .roulette-game__modal-footer--stack {
   display: flex;
   flex-direction: column;
-  margin-bottom: 0;
 }
 
-.mn-app .roulette-game__history-modal-body {
+.roulette-modal-portal .roulette-game__modal-footer > button,
+.roulette-modal-portal .roulette-game__success-footer > button {
+  width: 100%;
+  min-width: 0 !important;
+  max-width: none;
+  margin: 0;
+  min-height: 2.6rem;
+}
+
+.roulette-modal-portal .roulette-game__success-footer {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.roulette-modal-portal .roulette-game__history-modal {
+  max-height: calc(100dvh - 2.5rem);
+  display: flex;
+  flex-direction: column;
+}
+
+.roulette-modal-portal .roulette-game__history-modal-body {
   flex: 1 1 auto;
   min-height: 0;
   max-height: none;
-}
-
-.mn-app .roulette-game__history-modal .modal-footer {
-  flex-shrink: 0;
-  padding-bottom: 0.25rem;
+  overflow-y: auto;
 }
 
 .mn-app .roulette-game .modal,
@@ -1385,6 +1503,7 @@
   border-radius: 22px;
   box-shadow: var(--mn-shadow);
   color: var(--mn-text);
+  overflow: hidden;
 }
 
 .mn-app--dark .roulette-game .modal,

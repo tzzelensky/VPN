@@ -27,7 +27,6 @@ import {
   checkRemotePortInUse,
   deployTelegramProxyOnServer,
   fetchTelegramProxyServiceLogs,
-  generateMtprotoDdSecret,
   generateMtprotoSecret,
   isMtprotoDdSecret,
   generateProxyCredentials,
@@ -50,7 +49,8 @@ export function isTelegramProxyCheckAllRunning(): boolean {
 }
 
 const DEFAULT_PORTS: Record<TelegramProxyType, number> = {
-  mtproto: 8443,
+  /** FakeTLS эффективнее на 443; при занятости suggestFreePort ищет следующий свободный. */
+  mtproto: 443,
   socks5: 1080,
   http: 8080,
 };
@@ -258,10 +258,10 @@ export async function createTelegramProxy(input: CreateProxyInput) {
   let auth_enabled = input.auth_enabled !== false;
 
   if (type === "mtproto") {
-    if (!secret && autoGen) secret = generateMtprotoDdSecret();
+    if (!secret && autoGen) secret = generateMtprotoSecret();
     if (!secret) throw new Error("Для MTProto нужен secret");
     if (!isValidMtprotoSecret(secret) && !isMtprotoDdSecret(secret)) {
-      throw new Error("Secret MTProto невалиден: нужен dd (32 hex) или ee (FakeTLS + домен)");
+      throw new Error("Secret MTProto невалиден: нужен ee (FakeTLS + домен) или dd (32 hex)");
     }
     auth_enabled = true;
   } else {

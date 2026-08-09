@@ -29,6 +29,8 @@ export function resolvePurchasePrice(input: {
   new_subscription_name?: string;
   allow_referral?: boolean;
   allow_roulette?: boolean;
+  plan_id?: number;
+  purchase_kind?: "subscription" | "topup";
 }): PurchasePriceResolution {
   const original = Math.max(0, Math.floor(input.original_price_rub));
   const cleanPromo = String(input.promo_code ?? "").trim().replace(/\s+/g, "");
@@ -38,6 +40,8 @@ export function resolvePurchasePrice(input: {
       code: cleanPromo,
       tg_user_id: input.tg_user_id,
       original_price_rub: original,
+      plan_id: input.plan_id,
+      purchase_kind: input.purchase_kind,
     });
     return {
       original_price_rub: original,
@@ -93,15 +97,46 @@ export function resolvePurchasePrice(input: {
   };
 }
 
+export function formatPromoRewardSummaryHtml(calc: {
+  discount_rub: number;
+  bonus_gb: number;
+  bonus_days: number;
+  promo: { type: string; code: string };
+}): string {
+  const parts: string[] = [];
+  if (calc.discount_rub > 0) {
+    if (calc.promo.type === "rub") parts.push(`скидка <b>${calc.discount_rub} ₽</b>`);
+    else parts.push(`скидка <b>${calc.discount_rub} ₽</b>`);
+  }
+  if (calc.bonus_gb > 0) parts.push(`подарок <b>+${calc.bonus_gb} ГБ</b>`);
+  if (calc.bonus_days > 0) parts.push(`подарок <b>+${calc.bonus_days} дн.</b>`);
+  if (parts.length === 0) return `Промокод <b>${escHtml(calc.promo.code)}</b> применён.`;
+  return `Промокод <b>${escHtml(calc.promo.code)}</b>: ${parts.join(", ")}.`;
+}
+
 export function formatPurchasePriceUserLines(
   res: PurchasePriceResolution,
   opts?: { promoCode?: string },
 ): string {
   if (res.promo_calc) {
     const code = opts?.promoCode?.trim() || res.promo_calc.promo.code;
+    const giftBits: string[] = [];
+    if (res.promo_calc.bonus_gb > 0) giftBits.push(`+${res.promo_calc.bonus_gb} ГБ`);
+    if (res.promo_calc.bonus_days > 0) giftBits.push(`+${res.promo_calc.bonus_days} дн.`);
+    const giftLine =
+      giftBits.length > 0 ? `<b>Бонус после оплаты:</b> ${giftBits.map((g) => `<b>${escHtml(g)}</b>`).join(" · ")}\n` : "";
+    if (res.discount_percent > 0 || res.final_price_rub < res.original_price_rub) {
+      return (
+        `<b>Скидка применилась!</b> ${formatPromoRewardSummaryHtml(res.promo_calc)}\n` +
+        `<b>Сумма к оплате:</b> <s>${res.original_price_rub} ₽</s> <b>${res.final_price_rub} ₽</b>\n` +
+        giftLine +
+        `\n`
+      );
+    }
     return (
-      `<b>Скидка применилась! Стоимость ${res.final_price_rub} руб</b>\n` +
-      `<b>Сумма к оплате:</b> <s>${res.original_price_rub} ₽</s> <b>${res.final_price_rub} ₽</b> (промокод ${escHtml(code)})\n\n`
+      `<b>Промокод ${escHtml(code)} применён!</b>\n` +
+      giftLine +
+      `<b>Сумма к оплате:</b> <b>${res.original_price_rub} ₽</b>\n\n`
     );
   }
   if (res.roulette_discount) {

@@ -95,8 +95,8 @@ router.get("/suggest-port", async (req, res) => {
 });
 
 router.get("/generate-secret", (req, res) => {
-  const mode = String(req.query.mode ?? "dd").trim().toLowerCase();
-  res.json({ secret: mode === "ee" ? generateMtprotoSecret() : generateMtprotoDdSecret() });
+  const mode = String(req.query.mode ?? "ee").trim().toLowerCase();
+  res.json({ secret: mode === "dd" ? generateMtprotoDdSecret() : generateMtprotoSecret() });
 });
 
 router.post("/check-all", (_req, res) => {

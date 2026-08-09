@@ -465,7 +465,7 @@ export function buildDailyGiftWebAppState(tgUserId: number, userId?: number): Da
     reminder_enabled: reminder,
     day_key: dayKey,
     empty_message: hasPrize ? null : "Подарок скоро появится",
-    banner_image_url: cfg.banner_image_url,
+    banner_image_url: null,
     prize_preview: prize
       ? {
           id: prize.id,

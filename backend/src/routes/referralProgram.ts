@@ -17,7 +17,6 @@ import {
   getReferralMeta,
   referralEventsToLegacyLines,
   referralSettingsHistoryForClient,
-  reportToCsv,
   type ReferralEventKind,
 } from "../referralProgramService.js";
 
@@ -144,50 +143,6 @@ router.get("/export/events.xlsx", (req, res) => {
   const buf = XLSX.write(wb, { type: "buffer", bookType: "xlsx" });
   res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
   res.setHeader("Content-Disposition", 'attachment; filename="referral-events.xlsx"');
-  res.send(buf);
-});
-
-router.get("/export/report.csv", (_req, res) => {
-  res.setHeader("Content-Type", "text/csv; charset=utf-8");
-  res.setHeader("Content-Disposition", 'attachment; filename="referral-report.csv"');
-  res.send(reportToCsv(buildReferralReport()));
-});
-
-router.get("/export/report.xlsx", (_req, res) => {
-  const rows = buildReferralReport();
-  const header = [
-    "Пригласивший",
-    "Приглашенный",
-    "Дата приглашения",
-    "Купил",
-    "Скидка %",
-    "Награда пригласившему",
-    "Награда приглашенному",
-    "Статус",
-    "Дата начисления",
-  ];
-
-  const aoa: unknown[][] = [
-    header,
-    ...rows.map((r) => [
-      r.inviter_name,
-      r.invitee_name,
-      r.invited_at,
-      r.purchased ? "да" : "нет",
-      r.discount_percent,
-      r.inviter_reward,
-      r.invitee_reward,
-      r.status,
-      r.rewarded_at ?? "",
-    ]),
-  ];
-
-  const ws = XLSX.utils.aoa_to_sheet(aoa);
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, "Report");
-  const buf = XLSX.write(wb, { type: "buffer", bookType: "xlsx" });
-  res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
-  res.setHeader("Content-Disposition", 'attachment; filename="referral-report.xlsx"');
   res.send(buf);
 });
 

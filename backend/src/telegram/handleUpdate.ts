@@ -343,7 +343,7 @@ function guestWelcomeHtml(from: TgUser): string {
 
 async function sendMainMenuLinked(chatId: number, from: TgUser): Promise<void> {
   const f = menuFlags(from.id);
-  await sendBotMenuMessage(chatId, linkedWelcomeHtml(from), linkedMenuMarkup(f));
+  await sendBotMenuMessage(chatId, linkedWelcomeHtml(from), linkedMenuMarkup(f), from);
 }
 
 /** /start и «Меню»: без привязки — экран покупки; с привязкой — основное меню. */
@@ -372,15 +372,21 @@ async function sendWelcome(chatId: number, from: TgUser): Promise<void> {
     await sendMainMenuLinked(chatId, from);
     return;
   }
+  // Welcome-серия — фоновые сообщения, но меню гостю всё равно показываем.
   if (isWelcomeSeriesTriggerActive()) {
-    triggerOnGuestStart(chatId, from.id, from.username);
-    return;
+    try {
+      triggerOnGuestStart(chatId, from.id, from.username);
+    } catch (e) {
+      console.error("[telegram] welcome series trigger failed:", e instanceof Error ? e.message : e);
+    }
   }
   const sales = getSubscriptionShop().sales_disabled;
   await sendBotMenuMessage(
     chatId,
     guestWelcomeHtml(from),
     guestMenuMarkup(sales, isTestSubscriptionEligible(from.id)),
+    from,
+    "welcome",
   );
 }
 
@@ -484,20 +490,39 @@ export async function handleTelegramUpdate(body: unknown): Promise<void> {
         code: promoCodeRaw,
         tg_user_id: from.id,
         original_price_rub: samplePrice,
+        purchase_kind: ctx?.flow === "topup" ? "topup" : "subscription",
       });
       promoAwaitByChat.delete(chatId);
       const canonical = calc.promo.code;
+      const rewardParts: string[] = [];
+      if (calc.discount_rub > 0) {
+        rewardParts.push(
+          calc.promo.type === "rub"
+            ? `−${calc.discount_rub} ₽`
+            : `−${calc.discount_percent}% (−${calc.discount_rub} ₽)`,
+        );
+      }
+      if (calc.bonus_gb > 0) rewardParts.push(`+${calc.bonus_gb} ГБ`);
+      if (calc.bonus_days > 0) rewardParts.push(`+${calc.bonus_days} дн.`);
+      const rewardLine =
+        rewardParts.length > 0
+          ? `\n\n🎁 <b>Вознаграждение:</b> ${rewardParts.map((p) => `<b>${escHtml(p)}</b>`).join(" · ")}`
+          : "";
+      const planHint =
+        (calc.promo.apply_plan_ids?.length ?? 0) > 0
+          ? "\n\nПромокод действует только для выбранных тарифов — они показаны ниже."
+          : "";
       if (ctx?.flow === "topup") {
         setPromoPendingCodeForChat(chatId, canonical);
         await sendTelegramHtml(
           chatId,
-          "Скидка применилась! Стоимость пакетов докупки пересчитана.",
+          `<b>Промокод применён!</b>${rewardLine}${planHint}\n\nСтоимость пакетов докупки пересчитана.`,
           gbTopUpPlansKeyboardPromo(chatId, from.id, ctx.target_user_id),
         );
       } else {
         await sendTelegramHtml(
           chatId,
-          "Скидка применилась! Стоимость тарифа пересчитана.",
+          `<b>Промокод применён!</b>${rewardLine}${planHint}\n\nВыберите тариф:`,
           vpnPlansKeyboardPromo(canonical, from.id, ctx?.target_user_id),
         );
       }
@@ -527,6 +552,15 @@ export async function handleTelegramUpdate(body: unknown): Promise<void> {
         await sendTelegramHtml(
           chatId,
           "Этот промокод только для новых пользователей без подписки (тестовая подписка не считается).",
+          backHomeRow(),
+        );
+        promoAwaitByChat.delete(chatId);
+        return;
+      }
+      if (msg === "promo_plan_not_allowed") {
+        await sendTelegramHtml(
+          chatId,
+          "Этот промокод действует только для выбранных тарифов подписки.",
           backHomeRow(),
         );
         promoAwaitByChat.delete(chatId);
@@ -840,6 +874,7 @@ async function handleCallback(q: CallbackQuery, rawUpdate?: unknown): Promise<vo
     }
 
     if (data === "appeal_start") {
+      clearAiChatSession(chatId);
       await answerAndDismiss(q, rawUpdate);
       await startSupportAppealCompose(chatId, q.from);
       return;
@@ -860,6 +895,7 @@ async function handleCallback(q: CallbackQuery, rawUpdate?: unknown): Promise<vo
     if (data === "stats") data = "sub";
 
     if (data === "pay") {
+      clearAiChatSession(chatId);
       await answerAndDismiss(q, rawUpdate);
       if (linked.length > 0) {
         await sendTelegramHtml(
@@ -949,6 +985,7 @@ async function handleCallback(q: CallbackQuery, rawUpdate?: unknown): Promise<vo
     }
 
     if (data === "wlmenu") {
+      clearAiChatSession(chatId);
       await answerAndDismiss(q, rawUpdate);
       await sendWhitelistPurchaseMenu(chatId, fromId);
       return;
@@ -1157,6 +1194,7 @@ async function handleCallback(q: CallbackQuery, rawUpdate?: unknown): Promise<vo
     }
 
     if (data === "sub") {
+      clearAiChatSession(chatId);
       await answerAndDismiss(q, rawUpdate);
       if (linked.length === 0) {
         await sendTelegramHtml(

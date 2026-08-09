@@ -44,6 +44,7 @@ import {
   subscriptionSettingsFromLegacyServer,
   subscriptionSettingsFromRemoteConfig,
   subscriptionSettingsToApi,
+  subscriptionTransportLegacyHints,
   syncSubscriptionVlessFields,
   validateSubscriptionSettings,
   type ServerSubscriptionSettings,
@@ -595,6 +596,7 @@ router.patch("/:id(\\d+)/subscription-settings", async (req, res) => {
       sub_reality_sid: synced.reality.short_id,
       sub_reality_spx: synced.reality.spider_x,
       sub_allow_insecure: synced.reality.allow_insecure ? 1 : 0,
+      ...subscriptionTransportLegacyHints(synced),
     });
 
     let serverApply: {

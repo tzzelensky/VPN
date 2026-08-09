@@ -1,6 +1,6 @@
 /** Звук прокрута рулетки (тики + лёгкий свист), Web Audio API. */
 
-const SPIN_MS = 4000;
+const SPIN_MS = 2000;
 
 function getAudioContext(): AudioContext | null {
   try {

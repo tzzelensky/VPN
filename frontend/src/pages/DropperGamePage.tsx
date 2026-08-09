@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { subscriptionLabel } from "../subscriptionLabel";
 import DashboardLayout from "../components/DashboardLayout";
 import PanelTabs from "../components/PanelTabs";
@@ -12,8 +12,6 @@ import {
 import {
   grantDropperGameTickets,
   listUsers,
-  loadDropperGameConfig,
-  loadDropperGameReport,
   loadGameSettings,
   loadRouletteReport,
   loadRouletteStats,
@@ -21,13 +19,10 @@ import {
   normalizeRouletteChances,
   rouletteTicketPurchasesExportCsvUrl,
   resetAllDropperGameTickets,
-  saveDropperGameConfig,
   saveGameSettings,
   saveRoulettePrizes,
   setDropperUserTicketsPool,
   testRouletteSpin,
-  type DropperAdminReportDto,
-  type DropperGameConfigDto,
   type GameSettingsDto,
   type RoulettePrizeAdminDto,
   type RouletteStatsDto,
@@ -39,10 +34,11 @@ import {
 import { usePanelTabParam } from "../lib/panelTabRoute";
 
 const TICKETS_PAGE_SIZE = 12;
-const ADMIN_TABS = ["general", "dropper", "roulette", "tickets", "reports"] as const;
+const ADMIN_TABS = ["roulette", "tickets", "reports"] as const;
+type RouletteActiveGameUi = Extract<WebAppActiveGame, "none" | "roulette">;
 
 export default function DropperGamePage({ onLogout }: { onLogout: () => void }) {
-  const { tab: adminTab, setTab: setAdminTab } = usePanelTabParam("/dropper-game", ADMIN_TABS);
+  const { tab: adminTab, setTab: setAdminTab } = usePanelTabParam("/roulette-game", ADMIN_TABS);
   const [gameSettings, setGameSettings] = useState<GameSettingsDto | null>(null);
   const [roulettePrizes, setRoulettePrizes] = useState<RoulettePrizeAdminDto[]>([]);
   const [rouletteStats, setRouletteStats] = useState<RouletteStatsDto | null>(null);
@@ -61,8 +57,6 @@ export default function DropperGamePage({ onLogout }: { onLogout: () => void }) 
   const [purchaseFilterUser, setPurchaseFilterUser] = useState("");
   const [purchaseFilterPayment, setPurchaseFilterPayment] = useState("");
   const [purchaseFilterStatus, setPurchaseFilterStatus] = useState("");
-  const [cfg, setCfg] = useState<DropperGameConfigDto | null>(null);
-  const [report, setReport] = useState<DropperAdminReportDto | null>(null);
   const [users, setUsers] = useState<UserDto[]>([]);
   const [selectedUserIds, setSelectedUserIds] = useState<number[]>([]);
   const [grantTickets, setGrantTickets] = useState(1);
@@ -76,32 +70,35 @@ export default function DropperGamePage({ onLogout }: { onLogout: () => void }) 
   const [ticketsListSearch, setTicketsListSearch] = useState("");
   const [ticketsPage, setTicketsPage] = useState(1);
   const [msg, setMsg] = useState<{ type: "ok" | "err"; text: string } | null>(null);
-  const [flightDurDraft, setFlightDurDraft] = useState("");
-  const [flightDurFocused, setFlightDurFocused] = useState(false);
-
-  useEffect(() => {
-    if (!flightDurFocused && cfg) setFlightDurDraft(String(cfg.flight_duration_sec));
-  }, [cfg, flightDurFocused]);
+  const dropperClearedRef = useRef(false);
 
   const refresh = useCallback(async () => {
     setLoading(true);
     setMsg(null);
     try {
-      const [c, r, u, gs, rs, tp] = await Promise.all([
-        loadDropperGameConfig(),
-        loadDropperGameReport(),
+      const [u, gs, rs, tp] = await Promise.all([
         listUsers(),
         loadGameSettings(),
         loadRouletteStats(),
         loadRouletteTicketPurchases({ limit: "200" }),
       ]);
-      setCfg(c);
-      setReport(r);
       setUsers(u);
-      setGameSettings(gs);
+      const active: RouletteActiveGameUi = gs.active_game === "roulette" ? "roulette" : "none";
+      setGameSettings({ ...gs, active_game: active });
       setRoulettePrizes(gs.prizes ?? []);
       setRouletteStats(rs);
       setTicketPurchases(tp.rows);
+      if (gs.active_game === "dropper" && !dropperClearedRef.current) {
+        dropperClearedRef.current = true;
+        try {
+          const next = await saveGameSettings({ active_game: "none" });
+          const cleared: RouletteActiveGameUi = next.active_game === "roulette" ? "roulette" : "none";
+          setGameSettings({ ...next, active_game: cleared });
+          setRoulettePrizes(next.prizes ?? []);
+        } catch {
+          /* local UI already shows none; user can save */
+        }
+      }
     } catch (e) {
       setMsg({ type: "err", text: String(e) });
     } finally {
@@ -112,36 +109,6 @@ export default function DropperGamePage({ onLogout }: { onLogout: () => void }) 
   useEffect(() => {
     void refresh();
   }, [refresh]);
-
-  function clampFlightSec(raw: string, fallback: number): number {
-    const n = Math.floor(Number(String(raw).replace(/[^\d]/g, "")) || fallback);
-    return Math.max(15, Math.min(180, n));
-  }
-
-  function clampSpeedMult(n: number): number {
-    return Math.max(0.25, Math.min(4, Math.round(n * 100) / 100));
-  }
-
-  async function onSaveGameSettings() {
-    if (!gameSettings) return;
-    setSaving(true);
-    setMsg(null);
-    try {
-      const next = await saveGameSettings({
-        active_game: gameSettings.active_game,
-        tickets_per_purchase: gameSettings.tickets_per_purchase,
-      });
-      setGameSettings(next);
-      setRoulettePrizes(next.prizes ?? []);
-      const c = await loadDropperGameConfig();
-      setCfg(c);
-      setMsg({ type: "ok", text: "Настройки игр сохранены." });
-    } catch (e) {
-      setMsg({ type: "err", text: String(e) });
-    } finally {
-      setSaving(false);
-    }
-  }
 
   const ticketShop = gameSettings?.ticket_shop;
 
@@ -201,7 +168,8 @@ export default function DropperGamePage({ onLogout }: { onLogout: () => void }) 
     setMsg(null);
     try {
       const next = await saveGameSettings({ ticket_shop: ticketShop });
-      setGameSettings(next);
+      const cleared: RouletteActiveGameUi = next.active_game === "roulette" ? "roulette" : "none";
+      setGameSettings({ ...next, active_game: cleared });
       setTicketShopErrors({});
       setMsg({ type: "ok", text: "Настройки покупки билетов сохранены." });
     } catch (e) {
@@ -252,17 +220,37 @@ export default function DropperGamePage({ onLogout }: { onLogout: () => void }) 
     setTicketPurchases(tp.rows);
   }
 
-  async function onSaveRoulettePrizes() {
+  /** Primary Save on roulette tab: game settings + ticket shop + prizes. */
+  async function onSaveRouletteTab() {
+    if (!gameSettings) return;
+    if (ticketShop) {
+      const errors = validateTicketShopLocal(ticketShop);
+      if (Object.keys(errors).length > 0) {
+        setTicketShopErrors(errors);
+        setMsg({ type: "err", text: "Исправьте ошибки в настройках покупки билетов." });
+        return;
+      }
+    }
+    setSaving(true);
     setPrizeSaving(true);
     setMsg(null);
     try {
+      const active: RouletteActiveGameUi = gameSettings.active_game === "roulette" ? "roulette" : "none";
+      const next = await saveGameSettings({
+        active_game: active,
+        tickets_per_purchase: gameSettings.tickets_per_purchase,
+        ...(ticketShop ? { ticket_shop: ticketShop } : {}),
+      });
       const saved = await saveRoulettePrizes(roulettePrizes);
+      const cleared: RouletteActiveGameUi = next.active_game === "roulette" ? "roulette" : "none";
+      setGameSettings({ ...next, active_game: cleared, prizes: saved.prizes, chance_sum: saved.chance_sum });
       setRoulettePrizes(saved.prizes);
-      setGameSettings((prev) => (prev ? { ...prev, prizes: saved.prizes, chance_sum: saved.chance_sum } : prev));
-      setMsg({ type: "ok", text: "Призы рулетки сохранены." });
+      setTicketShopErrors({});
+      setMsg({ type: "ok", text: "Настройки рулетки и призы сохранены." });
     } catch (e) {
       setMsg({ type: "err", text: String(e) });
     } finally {
+      setSaving(false);
       setPrizeSaving(false);
     }
   }
@@ -288,31 +276,6 @@ export default function DropperGamePage({ onLogout }: { onLogout: () => void }) 
     }
   }
 
-  async function onSave() {
-    if (!cfg || !gameSettings) return;
-    setSaving(true);
-    setMsg(null);
-    try {
-      const flightSec = clampFlightSec(flightDurDraft, cfg.flight_duration_sec);
-      const speedMult = clampSpeedMult(Number(cfg.flight_speed_mult) || 1);
-      setFlightDurDraft(String(flightSec));
-      const game = gameSettings.active_game ?? (cfg.enabled ? "dropper" : "none");
-      const next = await saveDropperGameConfig({
-        ...cfg,
-        enabled: game === "dropper",
-        tickets_per_purchase: gameSettings.tickets_per_purchase,
-        flight_duration_sec: flightSec,
-        flight_speed_mult: speedMult,
-      });
-      setCfg(next);
-      setMsg({ type: "ok", text: "Настройки игры сохранены." });
-    } catch (e) {
-      setMsg({ type: "err", text: String(e) });
-    } finally {
-      setSaving(false);
-    }
-  }
-
   async function onGrant() {
     const ids = [...new Set(selectedUserIds.filter((n) => n > 0))];
     const t = Math.max(0, Math.floor(grantTickets));
@@ -330,8 +293,6 @@ export default function DropperGamePage({ onLogout }: { onLogout: () => void }) 
       const gr = await grantDropperGameTickets({ user_ids: ids, tickets: t });
       const u = await listUsers();
       setUsers(u);
-      const r = await loadDropperGameReport();
-      setReport(r);
       setMsg({
         type: "ok",
         text: `Начислено по ${gr.tickets_each} билет(ов) каждой из ${gr.unique_pools} подписок (отмечено строк: ${gr.selected_rows}).`,
@@ -395,11 +356,7 @@ export default function DropperGamePage({ onLogout }: { onLogout: () => void }) 
   }
 
   async function onResetAllTickets() {
-    if (
-      !window.confirm(
-        "Обнулить билеты «Дроппер» у всех клиентов? Это действие нельзя отменить.",
-      )
-    ) {
+    if (!window.confirm("Обнулить билеты рулетки у всех клиентов? Это действие нельзя отменить.")) {
       return;
     }
     setResettingTickets(true);
@@ -416,7 +373,7 @@ export default function DropperGamePage({ onLogout }: { onLogout: () => void }) 
     }
   }
 
-  if (loading || !cfg || !gameSettings) {
+  if (loading || !gameSettings) {
     return (
       <DashboardLayout onLogout={onLogout}>
         <section className="panel">
@@ -426,34 +383,37 @@ export default function DropperGamePage({ onLogout }: { onLogout: () => void }) 
     );
   }
 
-  const activeGame = gameSettings?.active_game ?? (cfg?.enabled ? "dropper" : "none");
-  const chanceSum = gameSettings?.chance_sum ?? roulettePrizes.filter((p) => p.active && !p.archived).reduce((s, p) => s + p.chance_percent, 0);
+  const activeGame: RouletteActiveGameUi = gameSettings.active_game === "roulette" ? "roulette" : "none";
+  const chanceSum = gameSettings.chance_sum ?? roulettePrizes.filter((p) => p.active && !p.archived).reduce((s, p) => s + p.chance_percent, 0);
 
   return (
     <DashboardLayout onLogout={onLogout}>
       <section className="panel users-hero-panel">
         <div className="users-hero-top">
           <div>
-            <h1>Игра</h1>
-            <p className="sub users-hero-sub">Дроппер, рулетка, билеты и отчёты в WebApp.</p>
+            <h1>Рулетка</h1>
+            <p className="sub users-hero-sub">Настройки рулетки, билеты и отчёты в WebApp.</p>
           </div>
           <div className="users-hero-actions">
             <button type="button" className="ghost" disabled={loading || saving} onClick={() => void refresh()}>
               Обновить
             </button>
-            <button type="button" className="primary" disabled={saving || prizeSaving} onClick={() => {
-              if (adminTab === "general") void onSaveGameSettings();
-              else if (adminTab === "roulette") void onSaveRoulettePrizes();
-              else void onSave();
-            }}>
-              {saving ? (
-                <>
-                  <Spinner /> Сохранение…
-                </>
-              ) : (
-                "Сохранить"
-              )}
-            </button>
+            {adminTab === "roulette" ? (
+              <button
+                type="button"
+                className="primary"
+                disabled={saving || prizeSaving}
+                onClick={() => void onSaveRouletteTab()}
+              >
+                {saving || prizeSaving ? (
+                  <>
+                    <Spinner /> Сохранение…
+                  </>
+                ) : (
+                  "Сохранить"
+                )}
+              </button>
+            ) : null}
           </div>
         </div>
         {msg ? <div className={`flash ${msg.type === "ok" ? "ok" : "err"}`}>{msg.text}</div> : null}
@@ -461,8 +421,6 @@ export default function DropperGamePage({ onLogout }: { onLogout: () => void }) 
 
       <PanelTabs
         tabs={[
-          { id: "general", label: "Общие" },
-          { id: "dropper", label: "Дроппер" },
           { id: "roulette", label: "Рулетка" },
           { id: "tickets", label: "Билеты" },
           { id: "reports", label: "Отчёты" },
@@ -471,27 +429,24 @@ export default function DropperGamePage({ onLogout }: { onLogout: () => void }) 
         onChange={setAdminTab}
       />
 
-      {adminTab === "general" && gameSettings ? (
+      {adminTab === "roulette" ? (
       <section className="panel">
-        <div className="referral-program-form user-form-grid">
+        <div className="referral-program-form user-form-grid" style={{ marginBottom: "1rem" }}>
           <div className="form-field form-field-span-2">
-            <label>Игры в WebApp</label>
-            <p className="field-hint">Можно включить только одну игру одновременно.</p>
+            <label>Игра в WebApp</label>
+            <p className="field-hint">Включить или выключить рулетку в Mini App.</p>
             <div className="game-admin-segment">
-              {(["none", "dropper", "roulette"] as WebAppActiveGame[]).map((g) => (
+              {(["none", "roulette"] as RouletteActiveGameUi[]).map((g) => (
                 <button
                   key={g}
                   type="button"
                   className={activeGame === g ? "primary" : "ghost"}
                   onClick={() => setGameSettings({ ...gameSettings, active_game: g })}
                 >
-                  {g === "none" ? "Выключено" : g === "dropper" ? "Дроппер" : "Рулетка"}
+                  {g === "none" ? "Выключено" : "Рулетка"}
                 </button>
               ))}
             </div>
-            <p className="field-hint" style={{ marginTop: "0.65rem" }}>
-              Одновременно может работать только одна игра. При включении рулетки дроппер будет выключен.
-            </p>
           </div>
           <div className="form-field form-field-span-2">
             <label>Выдавать билетов за покупку</label>
@@ -505,141 +460,10 @@ export default function DropperGamePage({ onLogout }: { onLogout: () => void }) 
                 })
               }
             />
-            <p className="field-hint">1 билет = 1 попытка в дроппере или 1 прокрут рулетки.</p>
+            <p className="field-hint">1 билет = 1 прокрут рулетки.</p>
           </div>
         </div>
-      </section>
-      ) : null}
 
-      {adminTab === "dropper" && cfg ? (
-      <section className="panel">
-        <div className="referral-program-form user-form-grid">
-          <div className="form-field form-field-span-2 shop-toggle-row">
-            <div>
-              <label>Дроппер включён</label>
-              <p className="field-hint" style={{ marginTop: "0.25rem" }}>
-                {activeGame === "dropper" ? "Активная игра в WebApp." : "Включите «Дроппер» во вкладке «Общие»."}
-              </p>
-            </div>
-            <button
-              type="button"
-              className={`toggle ${activeGame === "dropper" ? "on" : ""}`}
-              aria-pressed={activeGame === "dropper"}
-              disabled
-            />
-          </div>
-          <div className="form-field form-field-span-2 shop-toggle-row">
-            <div>
-              <label>Смерть от удара о бок препятствия</label>
-              <p className="field-hint" style={{ marginTop: "0.25rem" }}>
-                Если выключено, боковое касание платформы не убивает: персонаж скользит вдоль края. Падение сверху на
-                препятствие по-прежнему считается проигрышем.
-              </p>
-            </div>
-            <button
-              type="button"
-              className={`toggle ${cfg.side_hit_death_enabled ? "on" : ""}`}
-              aria-pressed={cfg.side_hit_death_enabled}
-              onClick={() => setCfg({ ...cfg, side_hit_death_enabled: !cfg.side_hit_death_enabled })}
-            />
-          </div>
-          <div className="form-field form-field-span-2">
-            <label>Базовая длительность полёта, сек (15–180), при множителе скорости 1</label>
-            <input
-              type="range"
-              min={15}
-              max={180}
-              step={1}
-              value={cfg.flight_duration_sec}
-              onChange={(e) => {
-                const n = Number(e.target.value);
-                setCfg({ ...cfg, flight_duration_sec: n });
-                setFlightDurDraft(String(n));
-              }}
-              style={{ width: "100%", maxWidth: "420px", display: "block", marginTop: "0.35rem" }}
-            />
-            <input
-              inputMode="numeric"
-              aria-label="Точное значение секунд"
-              value={flightDurDraft}
-              onFocus={() => setFlightDurFocused(true)}
-              onChange={(e) => setFlightDurDraft(e.target.value.replace(/[^\d]/g, ""))}
-              onBlur={() => {
-                setFlightDurFocused(false);
-                const n = clampFlightSec(flightDurDraft, cfg.flight_duration_sec);
-                setCfg({ ...cfg, flight_duration_sec: n });
-                setFlightDurDraft(String(n));
-              }}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") (e.target as HTMLInputElement).blur();
-              }}
-              style={{ marginTop: "0.5rem", maxWidth: "120px" }}
-            />
-            <p className="field-hint">
-              Ползунок или ввод числа (15–180 при уходе с поля или по «Сохранить»). Это{" "}
-              <strong>реальное время раунда</strong> до финиша по вертикали — не зависит от множителя ниже.
-            </p>
-          </div>
-          <div className="form-field form-field-span-2">
-            <label>
-              Скорость падения (×{cfg.flight_speed_mult.toFixed(2).replace(/\.?0+$/, "")}) — 1 норма; меньше медленнее,
-              больше быстрее
-            </label>
-            <input
-              type="range"
-              min={0.25}
-              max={4}
-              step={0.05}
-              value={cfg.flight_speed_mult}
-              onChange={(e) =>
-                setCfg({ ...cfg, flight_speed_mult: clampSpeedMult(Number(e.target.value)) })
-              }
-              style={{ width: "100%", maxWidth: "420px", display: "block", marginTop: "0.35rem" }}
-            />
-            <input
-              type="number"
-              inputMode="decimal"
-              min={0.25}
-              max={4}
-              step={0.05}
-              value={cfg.flight_speed_mult}
-              onChange={(e) => {
-                const x = Number(e.target.value);
-                if (!Number.isFinite(x)) return;
-                setCfg({ ...cfg, flight_speed_mult: clampSpeedMult(x) });
-              }}
-              style={{ marginTop: "0.5rem", maxWidth: "120px" }}
-            />
-            <p className="field-hint">
-              Ориентир: до финиша ≈{" "}
-              <strong>
-                {(cfg.flight_duration_sec / Math.max(0.25, cfg.flight_speed_mult)).toFixed(1)}
-              </strong>{" "}
-              с. Управление влево-вправо фиксированное; античит на сервере по этому времени.
-            </p>
-          </div>
-          <div className="form-field">
-            <label>Награда за победу, ГБ</label>
-            <input
-              inputMode="numeric"
-              value={cfg.reward_gb}
-              onChange={(e) => setCfg({ ...cfg, reward_gb: Math.max(0, Math.floor(Number(e.target.value) || 0)) })}
-            />
-          </div>
-          <div className="form-field">
-            <label>Награда за победу, дней подписки</label>
-            <input
-              inputMode="numeric"
-              value={cfg.reward_days}
-              onChange={(e) => setCfg({ ...cfg, reward_days: Math.max(0, Math.floor(Number(e.target.value) || 0)) })}
-            />
-          </div>
-        </div>
-      </section>
-      ) : null}
-
-      {adminTab === "roulette" ? (
-      <section className="panel">
         <h2 className="user-modal-section-title">Рулетка</h2>
         <p className="field-hint">
           {activeGame === "roulette"
@@ -682,7 +506,8 @@ export default function DropperGamePage({ onLogout }: { onLogout: () => void }) 
                       setMsg(null);
                       try {
                         const next = await saveGameSettings({ ui_mode: opt.id });
-                        setGameSettings(next);
+                        const cleared: RouletteActiveGameUi = next.active_game === "roulette" ? "roulette" : "none";
+                        setGameSettings({ ...next, active_game: cleared });
                         setRoulettePrizes(next.prizes ?? []);
                         setMsg({
                           type: "ok",
@@ -813,7 +638,7 @@ export default function DropperGamePage({ onLogout }: { onLogout: () => void }) 
 
         <div className="panel" style={{ marginTop: "1.25rem", padding: "1rem" }}>
           <h3 className="user-modal-section-title">Покупка билетов за ресурсы подписки</h3>
-          <p className="field-hint">Только для рулетки. Дроппер эту механику не использует.</p>
+          <p className="field-hint">Покупка билетов за дни подписки или ГБ трафика.</p>
           {ticketShop ? (
             <div className="form-grid" style={{ marginTop: "0.75rem" }}>
               <div className="form-field">
@@ -1007,7 +832,7 @@ export default function DropperGamePage({ onLogout }: { onLogout: () => void }) 
       <section className="panel">
         <h2 className="user-modal-section-title">Билеты по клиентам</h2>
         <p className="field-hint" style={{ marginTop: 0, marginBottom: "0.75rem" }}>
-          У каждой подписки свой счётчик билетов. Победы по одному Telegram считаются общими.
+          У каждой подписки свой счётчик билетов.
         </p>
         <div className="form-field" style={{ marginBottom: "0.65rem" }}>
           <label htmlFor="dropper-tickets-search">Поиск по имени клиента</label>
@@ -1184,7 +1009,7 @@ export default function DropperGamePage({ onLogout }: { onLogout: () => void }) 
         </div>
         <div className="users-hero-actions" style={{ marginTop: "0.5rem", flexWrap: "wrap" }}>
           <button type="button" className="primary" disabled={granting || resettingTickets} onClick={() => void onGrant()}>
-            {granting ? "Выдача…" : "Выдать билеты на игру"}
+            {granting ? "Выдача…" : "Выдать билеты"}
           </button>
           <button
             type="button"
@@ -1200,23 +1025,6 @@ export default function DropperGamePage({ onLogout }: { onLogout: () => void }) 
       ) : null}
 
       {adminTab === "reports" ? (
-      <>
-      <section className="panel">
-        <h2 className="user-modal-section-title">Отчёт — дроппер</h2>
-        {report ? (
-          <ul style={{ margin: 0, paddingLeft: "1.2rem", lineHeight: 1.6 }}>
-            <li>Всего игр (записей): {report.total_plays}</li>
-            <li>Побед: {report.total_wins}</li>
-            <li>Поражений: {report.total_loses}</li>
-            <li>Уникальных игроков: {report.unique_players}</li>
-            <li>Уникальных победителей: {report.unique_winners}</li>
-            <li>Выбрали подарок «ГБ»: {report.gifts_gb_choices}</li>
-            <li>Выбрали подарок «дни»: {report.gifts_days_choices}</li>
-          </ul>
-        ) : (
-          <p className="sub">Нет данных.</p>
-        )}
-      </section>
       <section className="panel">
         <h2 className="user-modal-section-title">Отчёт — рулетка</h2>
         <div className="form-grid" style={{ marginBottom: "0.75rem" }}>
@@ -1334,7 +1142,6 @@ export default function DropperGamePage({ onLogout }: { onLogout: () => void }) 
           <p className="sub">Прокрутов пока нет.</p>
         )}
       </section>
-      </>
       ) : null}
     </DashboardLayout>
   );

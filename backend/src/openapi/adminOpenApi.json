@@ -4316,6 +4316,46 @@
         }
       }
     },
+    "/api/mysub/admin/webapp-profile/{tgId}": {
+      "get": {
+        "tags": [
+          "MySub (WebApp)"
+        ],
+        "summary": "`GET /api/mysub/admin/webapp-profile/{tgId}`",
+        "description": "**HTTP:** `GET /api/mysub/admin/webapp-profile/{tgId}`\n\n**Файл:** `mySub.ts`",
+        "responses": {
+          "200": {
+            "description": "Успех"
+          },
+          "400": {
+            "description": "Неверный запрос",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Не авторизован",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Не найдено"
+          },
+          "500": {
+            "description": "Ошибка сервера"
+          }
+        }
+      }
+    },
     "/api/mysub/webapp/daily-gift/claim": {
       "post": {
         "tags": [
@@ -6082,96 +6122,6 @@
         ],
         "summary": "Экспорт событий реферальной программы в Excel.",
         "description": "Экспорт событий реферальной программы в Excel.\n\n**HTTP:** `GET /api/referral-program/export/events.xlsx`\n\n**Файл:** `referralProgram.ts`\n\n**Требуется сессия** (cookie `tzadmin.sid`)",
-        "responses": {
-          "200": {
-            "description": "Успех"
-          },
-          "400": {
-            "description": "Неверный запрос",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Не авторизован",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Не найдено"
-          },
-          "500": {
-            "description": "Ошибка сервера"
-          }
-        },
-        "security": [
-          {
-            "sessionCookie": []
-          }
-        ]
-      }
-    },
-    "/api/referral-program/export/report.csv": {
-      "get": {
-        "tags": [
-          "Referral program"
-        ],
-        "summary": "Экспорт отчёта реферальной программы в CSV.",
-        "description": "Экспорт отчёта реферальной программы в CSV.\n\n**HTTP:** `GET /api/referral-program/export/report.csv`\n\n**Файл:** `referralProgram.ts`\n\n**Требуется сессия** (cookie `tzadmin.sid`)",
-        "responses": {
-          "200": {
-            "description": "Успех"
-          },
-          "400": {
-            "description": "Неверный запрос",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Не авторизован",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Не найдено"
-          },
-          "500": {
-            "description": "Ошибка сервера"
-          }
-        },
-        "security": [
-          {
-            "sessionCookie": []
-          }
-        ]
-      }
-    },
-    "/api/referral-program/export/report.xlsx": {
-      "get": {
-        "tags": [
-          "Referral program"
-        ],
-        "summary": "Экспорт отчёта реферальной программы в Excel.",
-        "description": "Экспорт отчёта реферальной программы в Excel.\n\n**HTTP:** `GET /api/referral-program/export/report.xlsx`\n\n**Файл:** `referralProgram.ts`\n\n**Требуется сессия** (cookie `tzadmin.sid`)",
         "responses": {
           "200": {
             "description": "Успех"
@@ -8902,147 +8852,6 @@
         ]
       }
     },
-    "/api/settings/telegram-menu-image": {
-      "delete": {
-        "tags": [
-          "Settings"
-        ],
-        "summary": "`DELETE /api/settings/telegram-menu-image`",
-        "description": "**HTTP:** `DELETE /api/settings/telegram-menu-image`\n\n**Файл:** `settings.ts`\n\n**Требуется сессия**",
-        "responses": {
-          "200": {
-            "description": "Успех"
-          },
-          "400": {
-            "description": "Неверный запрос",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Не авторизован",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Не найдено"
-          },
-          "500": {
-            "description": "Ошибка сервера"
-          }
-        },
-        "security": [
-          {
-            "sessionCookie": []
-          }
-        ]
-      },
-      "get": {
-        "tags": [
-          "Settings"
-        ],
-        "summary": "`GET /api/settings/telegram-menu-image`",
-        "description": "**HTTP:** `GET /api/settings/telegram-menu-image`\n\n**Файл:** `settings.ts`\n\n**Требуется сессия**",
-        "responses": {
-          "200": {
-            "description": "Успех"
-          },
-          "400": {
-            "description": "Неверный запрос",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Не авторизован",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Не найдено"
-          },
-          "500": {
-            "description": "Ошибка сервера"
-          }
-        },
-        "security": [
-          {
-            "sessionCookie": []
-          }
-        ]
-      },
-      "post": {
-        "tags": [
-          "Settings"
-        ],
-        "summary": "`POST /api/settings/telegram-menu-image`",
-        "description": "**HTTP:** `POST /api/settings/telegram-menu-image`\n\n**Файл:** `settings.ts`\n\n**Требуется сессия**",
-        "responses": {
-          "200": {
-            "description": "Успех"
-          },
-          "400": {
-            "description": "Неверный запрос",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Не авторизован",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Не найдено"
-          },
-          "500": {
-            "description": "Ошибка сервера"
-          }
-        },
-        "security": [
-          {
-            "sessionCookie": []
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "additionalProperties": true
-              }
-            }
-          }
-        }
-      }
-    },
     "/api/settings/telegram/test-bot": {
       "post": {
         "tags": [
@@ -10913,8 +10722,8 @@
         "tags": [
           "Telegram proxies"
         ],
-        "summary": "Генерирует секрет MTProto (режим dd или ee).",
-        "description": "Генерирует секрет MTProto (режим dd или ee).\n\n**HTTP:** `GET /api/telegram-proxies/generate-secret`\n\n**Файл:** `telegramProxies.ts`\n\n**Требуется сессия** (cookie `tzadmin.sid`)",
+        "summary": "Генерирует секрет MTProto (по умолчанию ee FakeTLS; mode=dd для Obfuscated2).",
+        "description": "Генерирует секрет MTProto (по умолчанию ee FakeTLS; mode=dd для Obfuscated2).\n\n**HTTP:** `GET /api/telegram-proxies/generate-secret`\n\n**Файл:** `telegramProxies.ts`\n\n**Требуется сессия** (cookie `tzadmin.sid`)",
         "responses": {
           "200": {
             "description": "Успех"
@@ -11814,6 +11623,61 @@
         ],
         "summary": "Обнуляет счётчики трафика клиента на серверах и в БД.",
         "description": "Обнуляет счётчики трафика клиента на серверах и в БД.\n\n**HTTP:** `POST /api/users/{id}/reset-traffic`\n\n**Файл:** `users.ts`\n\n**Требуется сессия** (cookie `tzadmin.sid`)",
+        "responses": {
+          "200": {
+            "description": "Успех"
+          },
+          "400": {
+            "description": "Неверный запрос",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Не авторизован",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Не найдено"
+          },
+          "500": {
+            "description": "Ошибка сервера"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/users/{id}/set-traffic": {
+      "post": {
+        "tags": [
+          "Users"
+        ],
+        "summary": "`POST /api/users/{id}/set-traffic`",
+        "description": "**HTTP:** `POST /api/users/{id}/set-traffic`\n\n**Файл:** `users.ts`\n\n**Требуется сессия**",
         "responses": {
           "200": {
             "description": "Успех"

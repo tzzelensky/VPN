@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useModalEscape } from "../hooks/useModalEscape";
 import { subscriptionLabel } from "../subscriptionLabel";
 
 export type ClientPickerUser = {
@@ -71,11 +72,13 @@ export default function ClientPickerModal({
     onClose();
   }
 
+  useModalEscape(onClose, open);
+
   if (!open) return null;
 
   return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal comms-picker-modal" onClick={(e) => e.stopPropagation()}>
+    <div className="modal-backdrop">
+      <div className="modal comms-picker-modal">
         <div className="modal-head">
           <h2>Выбор клиентов</h2>
           <button type="button" className="ghost modal-close" onClick={onClose}>

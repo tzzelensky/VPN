@@ -180,7 +180,8 @@ export function normalizeDailyGiftConfig(raw: unknown): DailyGiftConfig {
     selection_mode: normalizeDailyGiftSelectionMode(o.selection_mode),
     queue_prize_ids: queue,
     queue_index: Math.max(0, Math.floor(Number(o.queue_index ?? d.queue_index) || 0)),
-    banner_image_url: o.banner_image_url ? String(o.banner_image_url).trim() || null : null,
+    // Legacy field kept nullable for backward compat; always normalized to null.
+    banner_image_url: null,
     reset_hour: Math.min(23, Math.max(0, Math.floor(Number(o.reset_hour ?? d.reset_hour) || d.reset_hour))),
     reset_minute: Math.min(59, Math.max(0, Math.floor(Number(o.reset_minute ?? d.reset_minute) || d.reset_minute))),
     notify_hour: Math.min(23, Math.max(0, Math.floor(Number(o.notify_hour ?? d.notify_hour) || d.notify_hour))),
