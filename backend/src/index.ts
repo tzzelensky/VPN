@@ -29,6 +29,7 @@ import { initPanelSettings } from "./panelSettings.js";
 import { getDeviceLimitSettings, setDeviceLimitSettings } from "./deviceLimitStore.js";
 import settingsRouter from "./routes/settings.js";
 import panelUpdatesRouter from "./routes/panelUpdates.js";
+import panelHttpsRouter from "./routes/panelHttps.js";
 import {
   getTelegramBotToken,
   getTelegramWebhookSecret,
@@ -171,6 +172,7 @@ app.use("/api/users", usersRouter);
 app.use("/api/communications", communicationsRouter);
 app.use("/api/settings", settingsRouter);
 app.use("/api/settings/updates", panelUpdatesRouter);
+app.use("/api/settings/https", panelHttpsRouter);
 app.use("/api/subscription-shop", subscriptionShopRouter);
 app.use("/api/referral-program", referralProgramRouter);
 app.use("/api/promo-codes", promoCodesRouter);

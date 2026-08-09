@@ -6,6 +6,7 @@ import { usePanelUpdates } from "../../../panelUpdatesContext";
 import { FieldLabel } from "../../SettingHint";
 import SettingsToggleRow from "../../SettingsToggleRow";
 import SettingsCard from "../SettingsCard";
+import EnableHttpsModal from "../EnableHttpsModal";
 import type { MsgState, PatchDraft } from "../types";
 
 export default function SystemTab({
@@ -35,6 +36,7 @@ export default function SystemTab({
   const [newPassword, setNewPassword] = useState("");
   const [newPassword2, setNewPassword2] = useState("");
   const [pwdBusy, setPwdBusy] = useState(false);
+  const [httpsModalOpen, setHttpsModalOpen] = useState(false);
 
   const {
     info: updateInfo,
@@ -305,6 +307,18 @@ export default function SystemTab({
           <p className="sub">Загрузка…</p>
         )}
 
+        <div className="panel-https-block">
+          <div className="panel-https-block__text">
+            <strong>HTTPS‑шифрование</strong>
+            <p className="field-hint">
+              Получить бесплатный сертификат Let's Encrypt и включить https:// для домена панели.
+            </p>
+          </div>
+          <button type="button" className="primary" onClick={() => setHttpsModalOpen(true)}>
+            Подключить HTTPS шифрование
+          </button>
+        </div>
+
         <div className={`panel-updates-block ${updateAvailable ? "panel-updates-block--available" : ""}`}>
           <div className="panel-updates-head">
             <strong>Обновления</strong>
@@ -409,6 +423,8 @@ export default function SystemTab({
           Скопировать диагностику
         </button>
       </SettingsCard>
+
+      <EnableHttpsModal open={httpsModalOpen} onClose={() => setHttpsModalOpen(false)} />
     </div>
   );
 }

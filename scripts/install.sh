@@ -372,8 +372,10 @@ EOF
   # Self-update из панели: vpnadm может перезапустить только этот сервис
   cat >/etc/sudoers.d/vpn-admin-panel <<EOF
 ${APP_USER} ALL=(root) NOPASSWD: /bin/systemctl restart vpn-admin-api, /bin/systemctl reload vpn-admin-api, /bin/systemctl status vpn-admin-api, /usr/bin/systemctl restart vpn-admin-api, /usr/bin/systemctl reload vpn-admin-api, /usr/bin/systemctl status vpn-admin-api
+${APP_USER} ALL=(root) NOPASSWD: ${APP_ROOT}/scripts/enable-https.sh
 EOF
   chmod 440 /etc/sudoers.d/vpn-admin-panel
+  chmod 755 "${APP_ROOT}/scripts/enable-https.sh" 2>/dev/null || true
   ok "Сервис vpn-admin-api запущен"
 }
 

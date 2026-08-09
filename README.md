@@ -143,7 +143,7 @@ curl -s http://127.0.0.1:4000/api/health
 | Забыли пароль | Смотрите `ADMIN_PASSWORD=` в `/opt/vpn-admin/backend/.env`, затем `systemctl restart vpn-admin-api`. Или смените в **Настройки → Система** |
 | Код в Telegram / 2FA | По умолчанию 2FA выключена. Включается в **Настройки → Бот** после токена бота |
 | Сразу выкидывает после входа (`unauthorized`) | Часто `COOKIE_SECURE=1` при открытии по `http://`. В `.env` поставьте `COOKIE_SECURE=0` или `auto`, `systemctl restart vpn-admin-api`. Открывайте тот URL, что показал install (после certbot — `https://`) |
-| HTTPS / SSL handshake error | Переустановите или: `certbot certonly --webroot -w /var/www/certbot -d ДОМЕН` и обновите nginx из свежего `install.sh` |
+| HTTPS / SSL handshake error | В панели: **Настройки → Система → Подключить HTTPS шифрование**. Или: `certbot certonly --webroot -w /var/www/certbot -d ДОМЕН` и обновите nginx из свежего `install.sh` / `scripts/enable-https.sh` |
 | После клона нет папки `backend` | Клонировали без точки в конце — см. раздел в [DEPLOY.md](DEPLOY.md) |
 
 ---

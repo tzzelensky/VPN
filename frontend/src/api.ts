@@ -87,6 +87,41 @@ export async function applyPanelUpdates(): Promise<{
   return handle(res);
 }
 
+export type PanelHttpsStatusDto = {
+  ok: boolean;
+  domain: string | null;
+  httpsEnabled: boolean;
+  certExists: boolean;
+  envHttps: boolean;
+  requestHttps: boolean;
+  canEnable: boolean;
+  httpsUrl: string | null;
+  httpUrl: string | null;
+  message: string;
+};
+
+export async function fetchPanelHttpsStatus(): Promise<PanelHttpsStatusDto> {
+  const res = await fetch("/api/settings/https/status", { credentials: "include" });
+  return handle(res);
+}
+
+export async function enablePanelHttps(domain?: string): Promise<{
+  ok: true;
+  domain: string;
+  httpsUrl: string;
+  message: string;
+  restarting?: boolean;
+  log?: string;
+}> {
+  const res = await fetch("/api/settings/https/enable", {
+    method: "POST",
+    credentials: "include",
+    headers: jsonHeaders,
+    body: JSON.stringify(domain ? { domain } : {}),
+  });
+  return handle(res);
+}
+
 export type ServerDto = {
   id: number;
   name: string;
