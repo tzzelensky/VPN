@@ -159,6 +159,28 @@ EOF
 
 clear_443_conflicts
 
+# Если :443 уже держит не nginx (часто xray) — HTTPS панели не заработает.
+assert_443_free_or_nginx() {
+  local holders
+  holders="$(ss -tlnp 2>/dev/null | grep -E ':443\b' || true)"
+  if [[ -z "$holders" ]]; then
+    return 0
+  fi
+  if echo "$holders" | grep -qi 'nginx'; then
+    # nginx уже слушает — ок (перезапишем конфиг и reload)
+    return 0
+  fi
+  echo "$holders"
+  die "Порт 443 занят НЕ nginx (см. строку выше). Обычно это Xray/Reality.
+Освободите 443 для панели, например:
+  1) В конфиге Xray смените inbound port 443 → 8443 (или другой)
+  2) systemctl restart xray   # или ваш unit (xray / tzadmin-xray)
+  3) bash $0 --domain ${DOMAIN}
+Либо уберите Xray с этого VPS — панель и VPN-нода лучше на разных машинах."
+}
+
+assert_443_free_or_nginx
+
 log "Готовим HTTP для ACME (${DOMAIN})…"
 cat >/etc/nginx/sites-available/${NGINX_SITE} <<EOF
 server {
@@ -229,6 +251,13 @@ nginx -t
 systemctl reload nginx
 # Полный restart надёжнее reload, если 443 был занят кривым listener
 systemctl restart nginx
+
+# После restart nginx обязан держать 443
+holders="$(ss -tlnp 2>/dev/null | grep -E ':443\b' || true)"
+if ! echo "$holders" | grep -qi 'nginx'; then
+  echo "$holders"
+  die "После restart nginx порт 443 всё ещё не у nginx. Освободите 443 от Xray/другого процесса и повторите."
+fi
 
 PUBLIC_BASE="https://${DOMAIN}"
 ENV_FILE="${APP_ROOT}/backend/.env"
