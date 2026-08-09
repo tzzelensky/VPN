@@ -49,6 +49,13 @@ bash <(curl -fsSL https://raw.githubusercontent.com/tzzelensky/VPN/main/scripts/
 
 После установки откройте в браузере адрес, который вывел скрипт, и войдите **логином и паролем** (двухфакторка через Telegram по умолчанию **выключена**).
 
+Если ставили сразу после удаления и видите `getcwd` / `uv_cwd` — вы остались в удалённом каталоге. Сделайте:
+
+```bash
+cd /
+bash <(curl -fsSL https://raw.githubusercontent.com/tzzelensky/VPN/main/scripts/install.sh) -- ваш.домен
+```
+
 ---
 
 ## Полное удаление

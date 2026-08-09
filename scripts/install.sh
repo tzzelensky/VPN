@@ -24,6 +24,19 @@ ok() { echo -e "${GREEN}[ok]${NC} $*"; }
 warn() { echo -e "${YELLOW}[!]${NC} $*"; }
 die() { echo -e "${RED}[ошибка]${NC} $*" >&2; exit 1; }
 
+# После uninstall cwd часто остаётся в удалённом /opt/vpn-admin — git/npm тогда падают с uv_cwd.
+ensure_safe_cwd() {
+  if ! pwd >/dev/null 2>&1 || [[ ! -d "$(pwd 2>/dev/null || echo /)" ]]; then
+    cd / || true
+  fi
+  # На всякий случай всегда уходим из каталога установки
+  case "$(pwd 2>/dev/null || echo)" in
+    "${APP_ROOT}"|"${APP_ROOT}"/*|"/opt/vpn-admin"|"/opt/vpn-admin"/*)
+      cd / || true
+      ;;
+  esac
+}
+
 need_root() {
   if [[ "$(id -u)" -ne 0 ]]; then
     die "Запустите скрипт от root: sudo bash $0   или   bash <(curl ...) от root"
@@ -193,7 +206,7 @@ install_packages() {
     curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
     apt-get install -y nodejs
   fi
-  ok "Node $(node -v), npm $(npm -v)"
+  ok "Node $(node -v), npm $(cd / && npm -v)"
 }
 
 ensure_user() {
@@ -489,11 +502,13 @@ print_summary() {
 }
 
 main() {
+  ensure_safe_cwd
   parse_args "$@"
   need_root
   detect_os
   ask_domain
   confirm_install
+  ensure_safe_cwd
   install_packages
   ensure_user
   setup_dirs_and_repo

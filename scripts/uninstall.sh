@@ -23,6 +23,17 @@ ok() { echo -e "${GREEN}[ok]${NC} $*"; }
 warn() { echo -e "${YELLOW}[!]${NC} $*"; }
 die() { echo -e "${RED}[ошибка]${NC} $*" >&2; exit 1; }
 
+ensure_safe_cwd() {
+  if ! pwd >/dev/null 2>&1; then
+    cd / || true
+  fi
+  case "$(pwd 2>/dev/null || echo)" in
+    "${APP_ROOT_DEFAULT}"|"${APP_ROOT_DEFAULT}"/*|"/opt/vpn-admin"|"/opt/vpn-admin"/*|"/home/${APP_USER}/vpn-admin-app"|"/home/${APP_USER}/vpn-admin-app"/*)
+      cd / || true
+      ;;
+  esac
+}
+
 need_root() {
   if [[ "$(id -u)" -ne 0 ]]; then
     die "Запустите скрипт от root: sudo bash $0   или   bash <(curl ...) от root"
@@ -209,6 +220,8 @@ main() {
   need_root
   parse_args "$@"
   confirm
+  # Уходим из /opt/vpn-admin до удаления каталога, иначе shell «ломает» cwd
+  ensure_safe_cwd
 
   echo
   echo -e "${BOLD}Удаление панели…${NC}"
@@ -218,12 +231,13 @@ main() {
   remove_nginx
   remove_app_trees
   remove_user
+  ensure_safe_cwd
 
   echo
   echo -e "${GREEN}${BOLD}Панель полностью удалена.${NC}"
   echo "  Node.js / Nginx / UFW оставлены на системе."
-  echo "  Повторная установка:"
-  echo "    bash <(curl -fsSL https://raw.githubusercontent.com/tzzelensky/VPN/main/scripts/install.sh)"
+  echo "  Повторная установка (сначала cd /, если были в /opt/vpn-admin):"
+  echo "    cd / && bash <(curl -fsSL https://raw.githubusercontent.com/tzzelensky/VPN/main/scripts/install.sh)"
 }
 
 main "$@"
