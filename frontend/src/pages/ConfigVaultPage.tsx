@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import DashboardLayout from "../components/DashboardLayout";
 import PageLoadingState from "../components/PageLoadingState";
 import DualListPicker, { type DualListItem } from "../components/DualListPicker";
+import VaultKeyJsonPanel from "../components/VaultKeyJsonPanel";
 import { useModalEscape } from "../hooks/useModalEscape";
 import {
   bulkAssignConfigVaultKeys,
@@ -92,6 +93,9 @@ export default function ConfigVaultPage({ onLogout }: { onLogout: () => void }) 
   const [viewKey, setViewKey] = useState<ConfigVaultKeyDto | null>(null);
   const [viewFullUri, setViewFullUri] = useState(false);
   const [viewRawUri, setViewRawUri] = useState<string | null>(null);
+  const [viewTab, setViewTab] = useState<"overview" | "json">("overview");
+  const [viewProfileJson, setViewProfileJson] = useState<Record<string, unknown> | null>(null);
+  const [viewJsonLoading, setViewJsonLoading] = useState(false);
 
   const [editKey, setEditKey] = useState<ConfigVaultKeyDto | null>(null);
   const [historyKey, setHistoryKey] = useState<ConfigVaultKeyDto | null>(null);
@@ -240,9 +244,17 @@ export default function ConfigVaultPage({ onLogout }: { onLogout: () => void }) 
     setViewKey(k);
     setViewFullUri(false);
     setViewRawUri(k.raw_uri ?? null);
-    if (!k.raw_uri) {
-      const r = await runBusy(() => fetchConfigVaultKeyRaw(k.id));
+    setViewTab("overview");
+    setViewProfileJson(null);
+    setViewJsonLoading(true);
+    try {
+      const r = await fetchConfigVaultKeyRaw(k.id);
       if (r?.key.raw_uri) setViewRawUri(r.key.raw_uri);
+      setViewProfileJson(r?.profile_json ?? null);
+    } catch (e) {
+      showToast("err", parseErr(e));
+    } finally {
+      setViewJsonLoading(false);
     }
   }
 
@@ -1009,44 +1021,75 @@ export default function ConfigVaultPage({ onLogout }: { onLogout: () => void }) 
               </button>
             </div>
             <div className="modal-body">
-              <p>
-                <span className="muted">Ключ: </span>
-                <code className="vault-uri">
-                  {viewFullUri && viewRawUri ? viewRawUri : maskSecret(viewKey.masked_uri)}
-                </code>
-              </p>
-              {!viewFullUri && (
-                <button type="button" className="btn btn-sm" onClick={revealFull}>
-                  Показать полностью
+              <div className="vault-view-tabs" role="tablist">
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={viewTab === "overview"}
+                  className={viewTab === "overview" ? "active" : ""}
+                  onClick={() => setViewTab("overview")}
+                >
+                  Обзор
                 </button>
-              )}
-              {viewRawUri && (
-                <button type="button" className="btn btn-sm" onClick={() => copyUri(viewRawUri)}>
-                  Скопировать ключ
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={viewTab === "json"}
+                  className={viewTab === "json" ? "active" : ""}
+                  onClick={() => setViewTab("json")}
+                >
+                  JSON
                 </button>
+              </div>
+              {viewTab === "overview" ? (
+                <>
+                  <p>
+                    <span className="muted">Ключ: </span>
+                    <code className="vault-uri">
+                      {viewFullUri && viewRawUri ? viewRawUri : maskSecret(viewKey.masked_uri)}
+                    </code>
+                  </p>
+                  {!viewFullUri && (
+                    <button type="button" className="btn btn-sm" onClick={revealFull}>
+                      Показать полностью
+                    </button>
+                  )}
+                  {viewRawUri && (
+                    <button type="button" className="btn btn-sm" onClick={() => copyUri(viewRawUri)}>
+                      Скопировать ключ
+                    </button>
+                  )}
+                  <dl className="vault-dl">
+                    <dt>Статус</dt>
+                    <dd>{STATUS_LABEL[viewKey.last_check_status]}</dd>
+                    <dt>Последняя проверка</dt>
+                    <dd>{formatDt(viewKey.last_check_at)}</dd>
+                    <dt>Задержка</dt>
+                    <dd>{viewKey.last_check_latency_ms != null ? `${viewKey.last_check_latency_ms} мс` : "—"}</dd>
+                    <dt>Ошибка</dt>
+                    <dd>{viewKey.last_error ?? "—"}</dd>
+                    <dt>В подписках</dt>
+                    <dd>{viewKey.added_to_subscriptions ? "Да" : "Нет"}</dd>
+                    {viewKey.added_to_subscriptions && (
+                      <>
+                        <dt>Кому в подписках</dt>
+                        <dd>{viewKey.subscription_label ?? "Всем подпискам"}</dd>
+                      </>
+                    )}
+                    <dt>Активен</dt>
+                    <dd>{viewKey.active ? "Да" : "Нет"}</dd>
+                    <dt>Уведомления</dt>
+                    <dd>{viewKey.notify_on_fail ? "Включены" : "Выключены"}</dd>
+                  </dl>
+                </>
+              ) : (
+                <VaultKeyJsonPanel
+                  profileJson={viewProfileJson}
+                  loading={viewJsonLoading}
+                  onCopied={() => showToast("ok", "JSON скопирован")}
+                  onCopyError={() => showToast("err", "Не удалось скопировать")}
+                />
               )}
-              <dl className="vault-dl">
-                <dt>Статус</dt>
-                <dd>{STATUS_LABEL[viewKey.last_check_status]}</dd>
-                <dt>Последняя проверка</dt>
-                <dd>{formatDt(viewKey.last_check_at)}</dd>
-                <dt>Задержка</dt>
-                <dd>{viewKey.last_check_latency_ms != null ? `${viewKey.last_check_latency_ms} мс` : "—"}</dd>
-                <dt>Ошибка</dt>
-                <dd>{viewKey.last_error ?? "—"}</dd>
-                <dt>В подписках</dt>
-                <dd>{viewKey.added_to_subscriptions ? "Да" : "Нет"}</dd>
-                {viewKey.added_to_subscriptions && (
-                  <>
-                    <dt>Кому в подписках</dt>
-                    <dd>{viewKey.subscription_label ?? "Всем подпискам"}</dd>
-                  </>
-                )}
-                <dt>Активен</dt>
-                <dd>{viewKey.active ? "Да" : "Нет"}</dd>
-                <dt>Уведомления</dt>
-                <dd>{viewKey.notify_on_fail ? "Включены" : "Выключены"}</dd>
-              </dl>
             </div>
             <div className="modal-footer">
               <button type="button" className="btn" disabled={busy} onClick={() => void checkOne(viewKey)}>

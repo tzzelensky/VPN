@@ -5,6 +5,7 @@ import {
   parseWhitelistJsonImport,
   validateWhitelistKeyInput,
 } from "../configVaultUri.js";
+import { shareLinkToHappProfile } from "../happSubscriptionJson.js";
 import {
   bulkAssignWhitelistVaultKeys,
   bulkDeleteWhitelistVaultKeys,
@@ -526,7 +527,25 @@ router.get("/:id", (req, res) => {
     res.status(404).json({ error: "Ключ не найден" });
     return;
   }
-  res.json({ key: whitelistKeyForApi(k, true), parsed: parseProxyUri(k.raw_uri) });
+  let profile_json: Record<string, unknown> | null = null;
+  if (typeof k.client_json === "string" && k.client_json.trim()) {
+    try {
+      const parsed = JSON.parse(k.client_json) as unknown;
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        profile_json = parsed as Record<string, unknown>;
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+  if (!profile_json) {
+    profile_json = shareLinkToHappProfile(k.raw_uri);
+  }
+  res.json({
+    key: whitelistKeyForApi(k, true),
+    parsed: parseProxyUri(k.raw_uri),
+    profile_json,
+  });
 });
 
 router.patch("/:id", (req, res) => {

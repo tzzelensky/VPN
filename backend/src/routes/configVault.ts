@@ -17,6 +17,7 @@ import {
 } from "../configVaultDb.js";
 import { getConfigVaultOverview, runConfigVaultCheckForKey, startConfigVaultCheckAllBackground } from "../configVaultService.js";
 import { parseProxyUri, validateConfigVaultKeyInput, parseConfigVaultJsonImport } from "../configVaultUri.js";
+import { shareLinkToHappProfile } from "../happSubscriptionJson.js";
 import { getPanelSettings } from "../panelSettings.js";
 import { requireAuth } from "../middleware/requireAuth.js";
 
@@ -246,7 +247,11 @@ router.get("/:id", (req, res) => {
     return;
   }
   // Полный URI только для авторизованного просмотра/редактирования одного ключа.
-  res.json({ key: vaultKeyForApi(k, true), parsed: parseProxyUri(k.raw_uri) });
+  res.json({
+    key: vaultKeyForApi(k, true),
+    parsed: parseProxyUri(k.raw_uri),
+    profile_json: shareLinkToHappProfile(k.raw_uri),
+  });
 });
 
 router.patch("/:id", (req, res) => {

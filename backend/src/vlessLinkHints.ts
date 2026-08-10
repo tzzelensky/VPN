@@ -115,7 +115,7 @@ function firstStr(v: unknown): string {
   return "";
 }
 
-function firstRealityShortId(rs: Record<string, unknown>): string {
+export function firstRealityShortId(rs: Record<string, unknown>): string {
   const one = str(rs.shortId);
   if (one) return one;
   const raw = rs.shortIds;

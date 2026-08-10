@@ -331,7 +331,11 @@ router.post("/:id/connect-hysteria2", async (req, res) => {
   }
 
   try {
-    const dep = await deployOrSyncHysteria2(sshCfg(row), row, log);
+    const alreadyDeployed = row.hysteria2_deployed === 1;
+    const dep = await deployOrSyncHysteria2(sshCfg(row), row, log, {
+      rotatePort: alreadyDeployed,
+      forceRedeploy: alreadyDeployed,
+    });
     if (!dep.ok) {
       updateServer(id, { last_error: dep.detail });
       if (stream) {
@@ -350,7 +354,13 @@ router.post("/:id/connect-hysteria2", async (req, res) => {
       last_ssh_ok: 1,
       last_error: null,
     });
-    const payload = { ok: true, detail: `Hysteria2 на порту UDP ${dep.port}`, port: dep.port };
+    const payload = {
+      ok: true,
+      detail: alreadyDeployed
+        ? `Hysteria2 обновлён: новый порт UDP ${dep.port}`
+        : `Hysteria2 на порту UDP ${dep.port}`,
+      port: dep.port,
+    };
     if (stream) {
       ndjsonLine(res, { type: "done", ...payload });
       return res.end();

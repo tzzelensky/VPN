@@ -1502,12 +1502,12 @@ export function whitelistKeyForApi(
   };
   if (!includeRaw) {
     delete base.raw_uri;
-    delete base.parsed_uuid;
+    // parsed_uuid оставляем — нужен для поиска ключей БС по UUID из JSON
     delete base.parsed_public_key;
     delete base.parsed_short_id;
+    // client_json тяжёлый — в списке не отдаём
+    delete base.client_json;
   }
-  // client_json тяжёлый — в списке не отдаём (нужен только при редактировании).
-  delete base.client_json;
   return base;
 }
 

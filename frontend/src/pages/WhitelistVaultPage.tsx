@@ -4,6 +4,7 @@ import DashboardLayout from "../components/DashboardLayout";
 import PanelTabs from "../components/PanelTabs";
 import PageLoadingState from "../components/PageLoadingState";
 import Spinner from "../components/Spinner";
+import VaultKeyJsonPanel from "../components/VaultKeyJsonPanel";
 import { useModalEscape } from "../hooks/useModalEscape";
 import {
   bulkDeleteWhitelistVaultKeys,
@@ -124,6 +125,9 @@ export default function WhitelistVaultPage({ onLogout }: { onLogout: () => void 
   const [viewKey, setViewKey] = useState<WhitelistVaultKeyDto | null>(null);
   const [viewFullUri, setViewFullUri] = useState(false);
   const [viewRawUri, setViewRawUri] = useState<string | null>(null);
+  const [viewTab, setViewTab] = useState<"overview" | "json">("overview");
+  const [viewProfileJson, setViewProfileJson] = useState<Record<string, unknown> | null>(null);
+  const [viewJsonLoading, setViewJsonLoading] = useState(false);
 
   const [editKey, setEditKey] = useState<WhitelistVaultKeyDto | null>(null);
   const [bsUsersModalOpen, setBsUsersModalOpen] = useState(false);
@@ -264,7 +268,20 @@ export default function WhitelistVaultPage({ onLogout }: { onLogout: () => void 
     const q = search.trim().toLowerCase();
     let out = list.filter((k) => {
       if (!q) return true;
-      return k.name.toLowerCase().includes(q) || k.masked_uri.toLowerCase().includes(q);
+      const uuid = (k.parsed_uuid ?? "").toLowerCase();
+      const address = (k.parsed_address ?? "").toLowerCase();
+      const port = k.parsed_port != null ? String(k.parsed_port) : "";
+      const hostPort = address && port ? `${address}:${port}` : "";
+      const sni = (k.parsed_sni ?? "").toLowerCase();
+      return (
+        k.name.toLowerCase().includes(q) ||
+        k.masked_uri.toLowerCase().includes(q) ||
+        uuid.includes(q) ||
+        address.includes(q) ||
+        (port !== "" && port.includes(q)) ||
+        hostPort.includes(q) ||
+        sni.includes(q)
+      );
     });
     if (filter === "assigned") out = out.filter((k) => (k.assigned_users_count ?? 0) > 0);
     else if (filter === "unassigned") out = out.filter((k) => (k.assigned_users_count ?? 0) === 0);
@@ -335,9 +352,17 @@ export default function WhitelistVaultPage({ onLogout }: { onLogout: () => void 
     setViewKey(k);
     setViewFullUri(false);
     setViewRawUri(k.raw_uri ?? null);
-    if (!k.raw_uri) {
-      const r = await runBusy(() => fetchWhitelistVaultKeyRaw(k.id));
+    setViewTab("overview");
+    setViewProfileJson(null);
+    setViewJsonLoading(true);
+    try {
+      const r = await fetchWhitelistVaultKeyRaw(k.id);
       if (r?.key.raw_uri) setViewRawUri(r.key.raw_uri);
+      setViewProfileJson(r?.profile_json ?? null);
+    } catch (e) {
+      showToast("err", parseErr(e));
+    } finally {
+      setViewJsonLoading(false);
     }
   }
 
@@ -1213,7 +1238,7 @@ export default function WhitelistVaultPage({ onLogout }: { onLogout: () => void 
         <div className="vault-filters">
           <input
             className="input"
-            placeholder="Поиск по названию или части ключа"
+            placeholder="Поиск: название, UUID, IP, порт, host:port, SNI"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
@@ -1591,38 +1616,69 @@ export default function WhitelistVaultPage({ onLogout }: { onLogout: () => void 
               </button>
             </div>
             <div className="modal-body">
-              <p>
-                <span className="muted">Ключ: </span>
-                <code className="vault-uri">
-                  {viewFullUri && viewRawUri ? viewRawUri : maskSecret(viewKey.masked_uri)}
-                </code>
-              </p>
-              {!viewFullUri && (
-                <button type="button" className="btn btn-sm" onClick={revealFull}>
-                  Показать полностью
+              <div className="vault-view-tabs" role="tablist">
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={viewTab === "overview"}
+                  className={viewTab === "overview" ? "active" : ""}
+                  onClick={() => setViewTab("overview")}
+                >
+                  Обзор
                 </button>
-              )}
-              {viewRawUri && (
-                <button type="button" className="btn btn-sm" onClick={() => copyUri(viewRawUri)}>
-                  Скопировать ключ
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={viewTab === "json"}
+                  className={viewTab === "json" ? "active" : ""}
+                  onClick={() => setViewTab("json")}
+                >
+                  JSON
                 </button>
+              </div>
+              {viewTab === "overview" ? (
+                <>
+                  <p>
+                    <span className="muted">Ключ: </span>
+                    <code className="vault-uri">
+                      {viewFullUri && viewRawUri ? viewRawUri : maskSecret(viewKey.masked_uri)}
+                    </code>
+                  </p>
+                  {!viewFullUri && (
+                    <button type="button" className="btn btn-sm" onClick={revealFull}>
+                      Показать полностью
+                    </button>
+                  )}
+                  {viewRawUri && (
+                    <button type="button" className="btn btn-sm" onClick={() => copyUri(viewRawUri)}>
+                      Скопировать ключ
+                    </button>
+                  )}
+                  <dl className="vault-dl">
+                    <dt>Статус</dt>
+                    <dd>{STATUS_LABEL[viewKey.last_check_status]}</dd>
+                    <dt>Последняя проверка</dt>
+                    <dd>{formatDt(viewKey.last_check_at)}</dd>
+                    <dt>Задержка</dt>
+                    <dd>{viewKey.last_check_latency_ms != null ? `${viewKey.last_check_latency_ms} мс` : "—"}</dd>
+                    <dt>Ошибка</dt>
+                    <dd>{viewKey.last_error ?? "—"}</dd>
+                    <dt>В продаже</dt>
+                    <dd>{viewKey.include_in_sale ? "Да" : "Нет"}</dd>
+                    <dt>Активен</dt>
+                    <dd>{viewKey.active ? "Да" : "Нет"}</dd>
+                    <dt>Уведомления</dt>
+                    <dd>{viewKey.notify_on_fail ? "Включены" : "Выключены"}</dd>
+                  </dl>
+                </>
+              ) : (
+                <VaultKeyJsonPanel
+                  profileJson={viewProfileJson}
+                  loading={viewJsonLoading}
+                  onCopied={() => showToast("ok", "JSON скопирован")}
+                  onCopyError={() => showToast("err", "Не удалось скопировать")}
+                />
               )}
-              <dl className="vault-dl">
-                <dt>Статус</dt>
-                <dd>{STATUS_LABEL[viewKey.last_check_status]}</dd>
-                <dt>Последняя проверка</dt>
-                <dd>{formatDt(viewKey.last_check_at)}</dd>
-                <dt>Задержка</dt>
-                <dd>{viewKey.last_check_latency_ms != null ? `${viewKey.last_check_latency_ms} мс` : "—"}</dd>
-                <dt>Ошибка</dt>
-                <dd>{viewKey.last_error ?? "—"}</dd>
-                <dt>В продаже</dt>
-                <dd>{viewKey.include_in_sale ? "Да" : "Нет"}</dd>
-                <dt>Активен</dt>
-                <dd>{viewKey.active ? "Да" : "Нет"}</dd>
-                <dt>Уведомления</dt>
-                <dd>{viewKey.notify_on_fail ? "Включены" : "Выключены"}</dd>
-              </dl>
             </div>
             <div className="modal-footer">
               <button type="button" className="btn" disabled={busy} onClick={() => void checkOne(viewKey)}>

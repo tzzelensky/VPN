@@ -8,6 +8,7 @@ import {
   labelFromProxyUri,
 } from "./extraVless.js";
 import { formatSubscriptionNodeName } from "./subscriptionNodeName.js";
+import { firstRealityShortId } from "./vlessLinkHints.js";
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -69,7 +70,7 @@ export function parseVlessUri(raw: string): ParsedVlessParams | null {
     const shortId = (q.get("sid") || "").trim();
     const encryption = (q.get("encryption") || "none").trim() || "none";
     const alpn = (q.get("alpn") || "").trim();
-    const path = (q.get("path") || "").trim();
+    const path = (q.get("path") || q.get("serviceName") || "").trim();
     const host = (q.get("host") || "").trim();
     const mode = (q.get("mode") || "").trim();
     const allowInsecure =
@@ -383,7 +384,7 @@ function buildVlessUriFromOutbound(
     const sni = String(rs?.serverName ?? rs?.servername ?? "").trim();
     const fp = String(rs?.fingerprint ?? "").trim();
     const pbk = String(rs?.publicKey ?? "").trim();
-    const sid = String(rs?.shortId ?? rs?.shortid ?? "").trim();
+    const sid = rs ? firstRealityShortId(rs) : "";
     if (sni) q.set("sni", sni);
     if (fp) q.set("fp", fp);
     if (pbk) q.set("pbk", pbk);

@@ -3377,7 +3377,11 @@ export function configVaultExportUrl(mode: "all" | "active" | "subscriptions" | 
   return `/api/config-vault/export?mode=${mode}&format=txt`;
 }
 
-export async function fetchConfigVaultKeyRaw(id: number): Promise<{ key: ConfigVaultKeyDto; parsed: Record<string, unknown> | null }> {
+export async function fetchConfigVaultKeyRaw(id: number): Promise<{
+  key: ConfigVaultKeyDto;
+  parsed: Record<string, unknown> | null;
+  profile_json?: Record<string, unknown> | null;
+}> {
   const res = await fetch(`/api/config-vault/${id}`, { credentials: "include" });
   return handleVault(res);
 }
@@ -3389,6 +3393,12 @@ export type WhitelistVaultKeyDto = {
   name: string;
   raw_uri?: string;
   masked_uri: string;
+  /** VLESS UUID из JSON/URI — для поиска в списке БС */
+  parsed_uuid?: string | null;
+  /** Хост / порт / SNI — отличают ключи с одним UUID */
+  parsed_address?: string | null;
+  parsed_port?: number | null;
+  parsed_sni?: string | null;
   source_type: "manual_vless" | "json_import";
   active: boolean;
   include_in_sale?: boolean;
@@ -3741,7 +3751,11 @@ export async function listWhitelistVaultChecks(
 
 export async function fetchWhitelistVaultKeyRaw(
   id: number,
-): Promise<{ key: WhitelistVaultKeyDto; parsed: Record<string, unknown> | null }> {
+): Promise<{
+  key: WhitelistVaultKeyDto;
+  parsed: Record<string, unknown> | null;
+  profile_json?: Record<string, unknown> | null;
+}> {
   const res = await fetch(`/api/whitelist-vault/${id}`, { credentials: "include" });
   return handleVault(res);
 }

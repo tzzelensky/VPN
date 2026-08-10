@@ -25,6 +25,16 @@ function shellQuote(s: string): string {
   return `'${String(s).replace(/'/g, `'\\''`)}'`;
 }
 
+/** Случайный UDP-порт HY2 (не совпадает с текущим). */
+export function pickHysteria2UdpPort(exclude?: number): number {
+  const ex = Math.floor(Number(exclude) || 0);
+  for (let i = 0; i < 48; i++) {
+    const p = 20000 + Math.floor(Math.random() * 40000); // 20000–59999
+    if (p >= 1024 && p <= 65535 && p !== ex) return p;
+  }
+  return ex === HYSTERIA2_DEFAULT_PORT ? HYSTERIA2_DEFAULT_PORT + 1 : HYSTERIA2_DEFAULT_PORT;
+}
+
 function yamlEscape(s: string): string {
   if (/^[\w.@+-]+$/.test(s)) return s;
   return JSON.stringify(s);
@@ -183,32 +193,55 @@ async function restartService(cfg: SshConfig, log?: SshLog): Promise<void> {
   log?.(`Сервис ${HYSTERIA2_SERVICE_NAME} активен.`);
 }
 
+export type DeployHysteria2Options = {
+  /** Сменить UDP-порт (кнопка «Обновить Hysteria2»). */
+  rotatePort?: boolean;
+  /** Перевыпустить cert и перезаписать unit/config с нуля. */
+  forceRedeploy?: boolean;
+};
+
 export async function deployOrSyncHysteria2(
   cfg: SshConfig,
   server: ServerRow,
   log?: SshLog,
+  opts?: DeployHysteria2Options,
 ): Promise<
   | { ok: true; port: number; sni: string; statsSecret: string; certSha256: string }
   | { ok: false; detail: string }
 > {
   try {
     const rawPort = Math.floor(Number(server.hysteria2_port) || 0);
-    const port =
+    const currentPort =
       rawPort >= 1024 && rawPort <= 65535 ? rawPort : HYSTERIA2_DEFAULT_PORT;
+    const rotatePort = opts?.rotatePort === true;
+    const forceRedeploy = opts?.forceRedeploy === true || rotatePort;
+    const port = rotatePort ? pickHysteria2UdpPort(currentPort) : currentPort;
     const sni = String(server.hysteria2_sni ?? "").trim() || HYSTERIA2_DEFAULT_SNI;
     const statsSecret =
-      String(server.hysteria2_stats_secret ?? "").trim() || randomBytes(16).toString("hex");
+      forceRedeploy
+        ? randomBytes(16).toString("hex")
+        : String(server.hysteria2_stats_secret ?? "").trim() || randomBytes(16).toString("hex");
     const uuids = clientUuidsForServer(server.vless_uuid);
 
-    log?.(`Hysteria2: порт UDP ${port}, пользователей ${uuids.length}…`);
+    if (rotatePort) {
+      log?.(`Hysteria2: новый порт UDP ${port} (было ${currentPort}), пользователей ${uuids.length}…`);
+    } else {
+      log?.(`Hysteria2: порт UDP ${port}, пользователей ${uuids.length}…`);
+    }
     await ensureBinary(cfg, log);
-    // Перевыпустить cert с SAN если старый без SAN
-    const sanCheck = await sshExecCommand(
-      cfg,
-      `openssl x509 -in ${shellQuote(HYSTERIA2_CERT_PATH)} -noout -ext subjectAltName 2>/dev/null | grep -q DNS && echo san_ok || echo no_san`,
-    );
-    const needRegen = !sanCheck.stdout.includes("san_ok");
-    if (needRegen) log?.("Сертификат без SAN — перевыпускаю…");
+
+    let needRegen = forceRedeploy;
+    if (!needRegen) {
+      // Перевыпустить cert с SAN если старый без SAN
+      const sanCheck = await sshExecCommand(
+        cfg,
+        `openssl x509 -in ${shellQuote(HYSTERIA2_CERT_PATH)} -noout -ext subjectAltName 2>/dev/null | grep -q DNS && echo san_ok || echo no_san`,
+      );
+      needRegen = !sanCheck.stdout.includes("san_ok");
+      if (needRegen) log?.("Сертификат без SAN — перевыпускаю…");
+    } else {
+      log?.("Полное обновление HY2 — перевыпускаю TLS-сертификат…");
+    }
     await ensureSelfSignedCert(cfg, sni, log, needRegen);
     const certSha256 = await readCertSha256(cfg);
     log?.(`TLS pin (pcs): ${certSha256.slice(0, 16)}…`);

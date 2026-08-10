@@ -151,6 +151,56 @@
         }
       }
     },
+    "/api/auth/change-password": {
+      "post": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "`POST /api/auth/change-password`",
+        "description": "**HTTP:** `POST /api/auth/change-password`\n\n**Файл:** `auth.ts`",
+        "responses": {
+          "200": {
+            "description": "Успех"
+          },
+          "400": {
+            "description": "Неверный запрос",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Не авторизован",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Не найдено"
+          },
+          "500": {
+            "description": "Ошибка сервера"
+          }
+        },
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/auth/login": {
       "post": {
         "tags": [
