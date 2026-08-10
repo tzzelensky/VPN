@@ -29,11 +29,13 @@ ssh root@ВАШ_IP
 bash <(curl -fsSL https://raw.githubusercontent.com/tzzelensky/VPN/main/scripts/install.sh)
 ```
 
-С доменом сразу (удобнее):
+С доменом сразу (удобнее, сразу HTTPS):
 
 ```bash
 bash <(curl -fsSL https://raw.githubusercontent.com/tzzelensky/VPN/main/scripts/install.sh) -- vpn.example.com
 ```
+
+A-запись домена должна указывать на IP VPS **до** установки (иначе certbot не выдаст сертификат; HTTPS можно включить позже скриптом или кнопкой в панели).
 
 Скрипт сам:
 

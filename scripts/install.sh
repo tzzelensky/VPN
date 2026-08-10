@@ -192,7 +192,7 @@ ask_domain() {
     PUBLIC_BASE="http://${DOMAIN}"
     SERVER_NAME="$DOMAIN"
     WANT_HTTPS=1
-    ok "Домен: ${DOMAIN} → сначала ${PUBLIC_BASE} (HTTPS после certbot)"
+    ok "Домен: ${DOMAIN} → после установки будет HTTPS (Let's Encrypt)"
   fi
 }
 
@@ -202,7 +202,12 @@ confirm_install() {
   echo "  Каталог:     ${APP_ROOT}"
   echo "  Данные:      ${DATA_DIR}"
   echo "  Пользователь:${APP_USER}"
-  echo "  URL:         ${PUBLIC_BASE}"
+  if [[ "${WANT_HTTPS:-0}" -eq 1 && -n "${DOMAIN:-}" ]]; then
+    echo "  URL:         https://${DOMAIN}  (HTTPS через Let's Encrypt)"
+    echo "  Пока DNS не готов — временно http://${DOMAIN}"
+  else
+    echo "  URL:         ${PUBLIC_BASE}"
+  fi
   echo "  Репозиторий: ${REPO_URL} (${REPO_BRANCH})"
   echo
   read -r -p "Продолжить? [Y/n] " ans
@@ -275,6 +280,7 @@ setup_dirs_and_repo() {
   chmod 750 "$DATA_DIR"
 
   [[ -f "${APP_ROOT}/backend/package.json" ]] || die "После клонирования нет ${APP_ROOT}/backend — проверьте REPO_URL"
+  chmod 755 "${APP_ROOT}/scripts/"*.sh 2>/dev/null || true
   ok "Код в ${APP_ROOT}"
 }
 
@@ -550,37 +556,29 @@ try_certbot() {
     return
   fi
   if [[ "${WANT_HTTPS:-0}" -ne 1 || -z "${DOMAIN:-}" ]]; then
-    warn "HTTPS пропущен (нет домена). Позже: укажите домен и выполните certbot."
+    warn "HTTPS пропущен (нет домена). Позже: Настройки → Система → HTTPS или scripts/enable-https.sh"
     return
   fi
 
-  log "Получаем HTTPS-сертификат для ${DOMAIN}…"
-  mkdir -p /var/www/certbot
-
-  # webroot — предсказуемее, чем certbot --nginx (тот часто ломает конфиг после uninstall)
-  if ! certbot certonly --webroot -w /var/www/certbot -d "$DOMAIN" \
-      --non-interactive --agree-tos --register-unsafely-without-email --keep-until-expiring; then
-    warn "Certbot не смог выдать сертификат (часто DNS ещё не указывает на этот IP или порт 80 закрыт)."
-    warn "Когда A-запись домена = IP сервера, выполните:"
-    echo "  certbot certonly --webroot -w /var/www/certbot -d ${DOMAIN} --agree-tos -m you@example.com"
-    echo "  # затем обновите панель / переустановите, либо напишите SSL-server вручную"
+  local script="${APP_ROOT}/scripts/enable-https.sh"
+  if [[ ! -f "$script" ]]; then
+    warn "Нет ${script} — HTTPS не включён автоматически."
     return
   fi
+  chmod 755 "$script" 2>/dev/null || true
 
-  if [[ ! -f "/etc/letsencrypt/live/${DOMAIN}/fullchain.pem" ]]; then
-    warn "Certbot отработал, но файл сертификата не найден."
-    return
-  fi
-
-  write_nginx_ssl "$DOMAIN"
-  enable_https_env "$DOMAIN"
-
-  sleep 1
-  if curl -fsS --max-time 8 "https://${DOMAIN}/api/health" >/dev/null 2>&1; then
-    ok "HTTPS готов: https://${DOMAIN}"
+  log "Включаем HTTPS для ${DOMAIN} (Let's Encrypt)…"
+  # Тот же путь, что кнопка в панели: освобождает :443 от Xray, пишет nginx SSL, проверяет TLS
+  if bash "$script" --domain "$DOMAIN" --app-root "$APP_ROOT" --app-user "$APP_USER"; then
+    PUBLIC_BASE="https://${DOMAIN}"
+    USE_HTTPS=1
+    ok "HTTPS готов: ${PUBLIC_BASE}"
   else
-    warn "Сертификат установлен, но https://${DOMAIN}/api/health пока не ответил — проверьте DNS/firewall."
-    ok "Конфиг SSL записан: https://${DOMAIN}"
+    warn "Автоматический HTTPS не удался (DNS ещё не указывает сюда / порт 80 закрыт / конфликт :443)."
+    warn "Панель пока по HTTP: ${PUBLIC_BASE}"
+    warn "Когда DNS готов, выполните:"
+    echo "  bash ${script} --domain ${DOMAIN}"
+    echo "  # или в панели: Настройки → Система → Подключить HTTPS шифрование"
   fi
 }
 
@@ -616,6 +614,11 @@ print_summary() {
   echo "    cd ${APP_ROOT} && sudo -u ${APP_USER} git pull && …  # см. README"
   echo
   echo "  Дальше в панели: добавьте VPN-сервер по SSH → установите Xray."
+  if [[ "${USE_HTTPS:-0}" -ne 1 && "${WANT_HTTPS:-0}" -eq 1 ]]; then
+    echo
+    echo "  HTTPS не включился автоматически. Когда A-запись домена = IP:"
+    echo "    bash ${APP_ROOT}/scripts/enable-https.sh --domain ${DOMAIN}"
+  fi
   echo
 }
 
