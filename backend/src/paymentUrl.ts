@@ -1,5 +1,4 @@
-import { getSubscriptionShop, setSubscriptionShop } from "./db.js";
-import { getTelegramPaymentUrl } from "./telegram/env.js";
+import { getSubscriptionShop } from "./db.js";
 
 function panelHostnames(): Set<string> {
   const out = new Set<string>();
@@ -56,19 +55,8 @@ function pickClientPaymentUrl(candidate: string, panelHosts: Set<string>): strin
 /** URL страницы оплаты для клиента (WebApp / бот). Не отдаём URL панели. */
 export function resolveClientPaymentUrl(shopPaymentUrl?: string): string {
   const fromShop = String(shopPaymentUrl ?? getSubscriptionShop().payment_url ?? "").trim();
-  const fromEnv = getTelegramPaymentUrl();
   const panelHosts = panelHostnames();
-  return pickClientPaymentUrl(fromShop, panelHosts) || pickClientPaymentUrl(fromEnv, panelHosts);
-}
-
-/** Если в магазине пусто — подтянуть TELEGRAM_PAYMENT_URL в data.json (один раз при старте). */
-export function syncSubscriptionShopPaymentUrlFromEnv(): void {
-  const shop = getSubscriptionShop();
-  if (shop.payment_url.trim()) return;
-  const envUrl = getTelegramPaymentUrl();
-  const panelHosts = panelHostnames();
-  const picked = pickClientPaymentUrl(envUrl, panelHosts);
-  if (!picked) return;
-  setSubscriptionShop({ ...shop, payment_url: picked });
-  console.log("[payment] subscription_shop.payment_url synced from TELEGRAM_PAYMENT_URL");
+  // Важно: бот/вебапп должны использовать ТОЛЬКО вставленную ссылку из магазина.
+  // Если поле пустое — возвращаем пусто, чтобы кнопка оплаты была отключена.
+  return pickClientPaymentUrl(fromShop, panelHosts);
 }

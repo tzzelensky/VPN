@@ -23,8 +23,7 @@ router.use(requireAuth);
 
 router.get("/", (_req, res) => {
   const shop = getSubscriptionShop();
-  // Показываем эффективный URL (fallback из TELEGRAM_PAYMENT_URL),
-  // чтобы админ видел ссылку, а не пустое значение.
+  // Показываем только валидированную ссылку из магазина (без автоподстановок из env).
   res.json({ ...shop, payment_url: resolveClientPaymentUrl(shop.payment_url) });
 });
 

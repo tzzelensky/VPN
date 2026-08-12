@@ -184,10 +184,10 @@ export default function SubscriptionShopPage({ onLogout }: { onLogout: () => voi
                 <input
                   value={shop.payment_url}
                   onChange={(e) => setShop({ ...shop, payment_url: e.target.value })}
-                  placeholder="Пусто — из .env (TELEGRAM_PAYMENT_URL) или дефолт Т-Банка"
+                  placeholder="Укажите URL страницы оплаты"
                   autoComplete="off"
                 />
-                <p className="field-hint">Если пусто, бот использует переменную окружения или встроенную ссылку.</p>
+                <p className="field-hint">Бот использует только эту ссылку. Если поле пустое — кнопка оплаты в боте будет скрыта/отключена.</p>
               </div>
               <div className="form-field form-field-span-2 shop-toggle-row">
                 <div>
