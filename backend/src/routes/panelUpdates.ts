@@ -35,6 +35,30 @@ function readFrontendPanelVersion(appRoot: string): string {
   return process.env.npm_package_version ?? "1.0.0";
 }
 
+/** Файлы, которые npm run build меняет локально и блокируют git pull на VPS. */
+const UPDATE_DISCARD_PATHS = [
+  "backend/src/openapi/adminOpenApi.json",
+  "frontend/tsconfig.tsbuildinfo",
+];
+
+async function discardLocalChangesForUpdate(appRoot: string): Promise<void> {
+  const existing = UPDATE_DISCARD_PATHS.filter((rel) => fs.existsSync(path.join(appRoot, rel)));
+  if (existing.length === 0) return;
+  try {
+    await git(appRoot, ["restore", "--source=HEAD", "--", ...existing]);
+    return;
+  } catch {
+    /* git restore недоступен на старых git */
+  }
+  for (const rel of existing) {
+    try {
+      await git(appRoot, ["checkout", "--", rel]);
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
 async function git(appRoot: string, args: string[]): Promise<string> {
   const { stdout } = await execFileAsync("git", args, {
     cwd: appRoot,
@@ -136,6 +160,8 @@ router.post("/apply", async (_req, res) => {
       res.status(400).json({ error: "already_up_to_date", message: "Обновлений нет." });
       return;
     }
+
+    await discardLocalChangesForUpdate(appRoot);
 
     await git(appRoot, ["pull", "--ff-only", "origin", branch]).catch(async () =>
       git(appRoot, ["pull", "--ff-only", "origin", "main"]),

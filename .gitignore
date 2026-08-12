@@ -9,6 +9,7 @@ backend/panel_settings.json
 backend/panel_secrets.json
 backend/panel-avatars/
 *.log
+*.tsbuildinfo
 .DS_Store
 .cursor/
 .idea/
