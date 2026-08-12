@@ -45,7 +45,8 @@ import { formatStatsHtml, fmtBytes, subscriptionPublicName } from "../telegram/f
 import { notifyDropperPrizeApplied } from "../telegram/dropperTickets.js";
 import { getRoulettePublicConfig, notifyRouletteSpinToUser, spinRouletteForUser } from "../rouletteGame.js";
 import { buyRouletteTicketsForUser, getRouletteTicketShopPublicForUser } from "../rouletteTicketShop.js";
-import { getTelegramBotToken, getTelegramPaymentNotifyChatIds, getTelegramPaymentUrl } from "../telegram/env.js";
+import { getTelegramBotToken, getTelegramPaymentNotifyChatIds } from "../telegram/env.js";
+import { resolveClientPaymentUrl } from "../paymentUrl.js";
 import { sendTelegramHtml, sendTelegramPhotoBinary } from "../telegram/api.js";
 import { sendAdminPaymentReceiptToAdmins } from "../adminPaymentReceipt.js";
 import { trackPaymentSessionPendingAdmin, trackPaymentSessionStart } from "../paymentSessionLogService.js";
@@ -365,7 +366,7 @@ async function buildMySubWebAppProfileDto(
     stats_html: linked.length > 0 ? formatStatsHtml(linked) : "Подписок пока нет.",
     subscriptions,
     device_limit: deviceLimitSettingsForWebApp(),
-    payment_url: shop.payment_url.trim() || getTelegramPaymentUrl(),
+    payment_url: resolveClientPaymentUrl(shop.payment_url),
     plans: shop.plans,
     topup_plans: shop.topup_plans,
     test_plan: {

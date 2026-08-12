@@ -54,7 +54,8 @@ import { notifyDropperTicketsAfterPurchase } from "./dropperTickets.js";
 import { escHtml, formatDaysRu, subscriptionPublicName } from "./format.js";
 import { backHomeRow, mainMenuInline, newUserKeyboard, publicSubscriptionUrl } from "./keyboards.js";
 import { inlineBtn } from "./inlineButtonStyles.js";
-import { getTelegramPaymentNotifyChatIds, getTelegramPaymentUrl } from "./env.js";
+import { getTelegramPaymentNotifyChatIds } from "./env.js";
+import { resolveClientPaymentUrl } from "../paymentUrl.js";
 import {
   createDeviceSlotPurchaseRecord,
   getDeviceLimitSettings,
@@ -176,9 +177,7 @@ export function getTopUpPlanRuntimeMeta(planId: PaymentPlanId): TopUpPlanRuntime
 }
 
 function effectivePaymentUrl(): string {
-  const u = getSubscriptionShop().payment_url.trim();
-  if (u) return u;
-  return getTelegramPaymentUrl();
+  return resolveClientPaymentUrl();
 }
 
 function planPickerButtonLabel(p: SubscriptionShopPlanRow): string {
@@ -1649,8 +1648,13 @@ export async function onAdminPaymentConfirm(
       }
       const patched = updateUserRow(row.id, patch);
       if (!patched) continue;
-      const next = await resetUserTrafficCounters(patched);
-      if (next) affected.push(next);
+      try {
+        const next = await resetUserTrafficCounters(patched);
+        if (next) affected.push(next);
+      } catch (e) {
+        console.error("[telegram] reset traffic after payment confirm:", e);
+        affected.push(patched);
+      }
     }
   } else if (autoCreatedUser) {
     affected.push(autoCreatedUser);

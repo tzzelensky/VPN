@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { openExternalUrl } from "../lib/openExternalUrl";
 import DropperGame from "../components/DropperGame";
 import RouletteGame from "../components/RouletteGame";
 import DropperLobbyHero from "../components/DropperLobbyHero";
@@ -1716,9 +1717,14 @@ export default function MySubPage() {
                           ) : null}
                         </div>
                         ) : null}
-                        <a className="mysub-pay-link-btn" href={data.payment_url} target="_blank" rel="noreferrer">
+                        <button
+                          type="button"
+                          className="mysub-pay-link-btn"
+                          disabled={!String(data.payment_url ?? "").trim()}
+                          onClick={() => openExternalUrl(data.payment_url)}
+                        >
                           Перейти к оплате
-                        </a>
+                        </button>
                       </div>
                     </div>
                     <div className="mysub-pay-step">

@@ -132,28 +132,41 @@ export default function EnableHttpsModal({
             <>
               <div className="https-enable-hero">
                 <div className="https-enable-lock" aria-hidden>
-                  <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" strokeWidth="1.8">
+                  <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="1.8">
                     <rect x="5" y="11" width="14" height="10" rx="2" />
                     <path d="M8 11V8a4 4 0 0 1 8 0v3" />
                   </svg>
                 </div>
-                <div>
+                <div className="https-enable-hero__content">
                   <p className="https-enable-hero__title">
                     {status?.httpsEnabled
                       ? "Соединение уже защищено"
                       : "Подключите шифрование для панели"}
                   </p>
-                  <p className="https-enable-hero__sub">
-                    Домен: <strong>{status?.domain ?? "—"}</strong>
-                    {status?.httpsUrl ? (
-                      <>
-                        <br />
-                        URL: <strong>{status.httpsUrl}</strong>
-                      </>
-                    ) : null}
-                  </p>
+                  {!status?.httpsEnabled ? (
+                    <p className="https-enable-hero__lead">
+                      Бесплатный сертификат Let&apos;s Encrypt для домена панели.
+                    </p>
+                  ) : null}
                 </div>
               </div>
+
+              {status?.domain || status?.httpsUrl ? (
+                <dl className="https-enable-meta">
+                  {status?.domain ? (
+                    <div className="https-enable-meta__row">
+                      <dt>Домен</dt>
+                      <dd>{status.domain}</dd>
+                    </div>
+                  ) : null}
+                  {status?.httpsUrl ? (
+                    <div className="https-enable-meta__row">
+                      <dt>URL</dt>
+                      <dd>{status.httpsUrl}</dd>
+                    </div>
+                  ) : null}
+                </dl>
+              ) : null}
 
               {phase !== "idle" ? (
                 <div className={`https-enable-progress https-enable-progress--${phase}`}>

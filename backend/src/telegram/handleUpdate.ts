@@ -820,6 +820,28 @@ export async function handleTelegramUpdate(body: unknown): Promise<void> {
 async function handleCallback(q: CallbackQuery, rawUpdate?: unknown): Promise<void> {
   let data = (q.data ?? "").trim();
   const fromId = q.from.id;
+
+  const pokEarly = /^pok:([0-9a-f]+)$/i.exec(data);
+  if (pokEarly) {
+    try {
+      await onAdminPaymentConfirm(q.id, fromId, pokEarly[1]!.toLowerCase(), q.message);
+    } catch (e) {
+      console.error("[telegram] pok:", e);
+      await answerCallbackQuery(q.id, { text: "Ошибка при подтверждении оплаты.", show_alert: true });
+    }
+    return;
+  }
+  const pnxEarly = /^pnx:([0-9a-f]+)$/i.exec(data);
+  if (pnxEarly) {
+    try {
+      await onAdminPaymentReject(q.id, fromId, pnxEarly[1]!.toLowerCase(), q.message);
+    } catch (e) {
+      console.error("[telegram] pnx:", e);
+      await answerCallbackQuery(q.id, { text: "Ошибка при отклонении оплаты.", show_alert: true });
+    }
+    return;
+  }
+
   const chatId = q.message?.chat.id;
   if (chatId == null) {
     await answerCallbackQuery(q.id, { text: "Нет чата", show_alert: true });
@@ -1280,18 +1302,6 @@ async function handleCallback(q: CallbackQuery, rawUpdate?: unknown): Promise<vo
       const targetUserId = gp[2] ? Number(gp[2]) : undefined;
       await answerAndDismiss(q, rawUpdate);
       await onGbTopUpPlanChosen(chatId, fromId, planId, targetUserId, q.from);
-      return;
-    }
-
-    const pok = /^pok:([0-9a-f]+)$/.exec(data);
-    if (pok) {
-      await onAdminPaymentConfirm(q.id, fromId, pok[1]!, q.message);
-      return;
-    }
-
-    const pnx = /^pnx:([0-9a-f]+)$/.exec(data);
-    if (pnx) {
-      await onAdminPaymentReject(q.id, fromId, pnx[1]!, q.message);
       return;
     }
 

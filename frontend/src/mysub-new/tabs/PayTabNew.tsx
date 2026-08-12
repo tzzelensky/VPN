@@ -3,6 +3,7 @@ import Card from "../components/Card";
 import PrimaryButton from "../components/PrimaryButton";
 import SecondaryButton from "../components/SecondaryButton";
 import TariffCard from "../components/TariffCard";
+import { openExternalUrl } from "../../lib/openExternalUrl";
 import type { MySubWebAppController } from "../types";
 
 function formatPlanMeta(p: { total_gb: number; days: number }): string {
@@ -543,14 +544,19 @@ export default function PayTabNew({ ctrl }: Props) {
                 ? "В комментарии укажите слово «тест»."
                 : `В комментарии укажите номер тарифа: ${payPlanId}.`}
         </p>
-        <a
-          className={`mn-btn mn-btn--full mn-link-btn ${payProduct === "combo" ? "mn-combo-pay-btn" : "mn-btn--primary"}`}
-          href={data.payment_url}
-          target="_blank"
-          rel="noreferrer"
+        <PrimaryButton
+          fullWidth
+          className={payProduct === "combo" ? "mn-combo-pay-btn" : undefined}
+          disabled={!String(data.payment_url ?? "").trim() || ctrl.previewMode}
+          onClick={() => openExternalUrl(data.payment_url)}
         >
           {payProduct === "combo" ? "Оплатить комбо со скидкой" : "Перейти к оплате"}
-        </a>
+        </PrimaryButton>
+        {!String(data.payment_url ?? "").trim() ? (
+          <p className="mn-muted" style={{ marginTop: "0.5rem" }}>
+            Ссылка на оплату не настроена. Укажите URL платёжной страницы в настройках магазина (не адрес панели).
+          </p>
+        ) : null}
 
         <div className="mn-upload" style={{ marginTop: "0.85rem" }}>
           <p className="mn-card-title">Прикрепите чек</p>
