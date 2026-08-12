@@ -16,12 +16,16 @@ import { subscriptionPublicName } from "../telegram/format.js";
 import { getTestPlanRuntimeMeta } from "../testSubscription.js";
 import { refreshTestSubscriptionSegment } from "../db.js";
 import { removeUserUuidFromAllServers, pushClientListToAllDeployedServers } from "../userSync.js";
+import { resolveClientPaymentUrl } from "../paymentUrl.js";
 
 const router = Router();
 router.use(requireAuth);
 
 router.get("/", (_req, res) => {
-  res.json(getSubscriptionShop());
+  const shop = getSubscriptionShop();
+  // Показываем эффективный URL (fallback из TELEGRAM_PAYMENT_URL),
+  // чтобы админ видел ссылку, а не пустое значение.
+  res.json({ ...shop, payment_url: resolveClientPaymentUrl(shop.payment_url) });
 });
 
 router.get("/test-subscriptions", (_req, res) => {
