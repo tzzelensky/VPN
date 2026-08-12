@@ -87,6 +87,43 @@ export async function applyPanelUpdates(): Promise<{
   return handle(res);
 }
 
+export function isPanelUpdateRestartError(error: unknown): boolean {
+  const s = String(error ?? "").toLowerCase();
+  return (
+    s.includes("504") ||
+    s.includes("502") ||
+    s.includes("503") ||
+    s.includes("gateway time-out") ||
+    s.includes("gateway timeout") ||
+    s.includes("failed to fetch") ||
+    s.includes("networkerror") ||
+    s.includes("load failed") ||
+    s.includes("<html>")
+  );
+}
+
+export async function waitForPanelHealth(opts?: {
+  timeoutMs?: number;
+  intervalMs?: number;
+}): Promise<boolean> {
+  const timeoutMs = opts?.timeoutMs ?? 15 * 60_000;
+  const intervalMs = opts?.intervalMs ?? 2500;
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      const res = await fetch("/api/health", { cache: "no-store" });
+      if (res.ok) {
+        const body = (await res.json()) as { ok?: boolean };
+        if (body.ok) return true;
+      }
+    } catch {
+      /* сервер ещё перезапускается */
+    }
+    await new Promise((resolve) => window.setTimeout(resolve, intervalMs));
+  }
+  return false;
+}
+
 export type PanelHttpsStatusDto = {
   ok: boolean;
   domain: string | null;

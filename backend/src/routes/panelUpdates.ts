@@ -167,43 +167,18 @@ router.post("/apply", async (_req, res) => {
       git(appRoot, ["pull", "--ff-only", "origin", "main"]),
     );
 
-    const runNpm = async (subdir: string) => {
-      await execFileAsync(
-        "bash",
-        ["-lc", `cd '${appRoot}/${subdir}' && npm ci && npm run build`],
-        {
-          timeout: 15 * 60_000,
-          maxBuffer: 16 * 1024 * 1024,
-          env: process.env,
-        },
-      );
-    };
-    await runNpm("backend");
-    await runNpm("frontend");
-
     const newVersion = readFrontendPanelVersion(appRoot);
     res.json({
       ok: true,
       behindApplied: behindCount,
       currentVersion: newVersion,
-      message: "Обновление применено. Сервис перезапускается…",
+      message: "Обновление скачано. Идёт сборка и перезапуск…",
       restarting: true,
     });
 
-    // Даём ответу уйти к клиенту, затем рестарт
-    setTimeout(() => {
-      execFile(
-        "bash",
-        [
-          "-lc",
-          "sudo -n /bin/systemctl restart vpn-admin-api 2>/dev/null || sudo -n /usr/bin/systemctl restart vpn-admin-api 2>/dev/null || true",
-        ],
-        { timeout: 30_000 },
-        (err) => {
-          if (err) console.error("[panel-update] restart failed:", err.message);
-        },
-      );
-    }, 1200);
+    void runUpdateBuildAndRestart(appRoot).catch((e) => {
+      console.error("[panel-update] background apply failed:", e instanceof Error ? e.message : e);
+    });
   } catch (e) {
     res.status(500).json({
       error: "update_apply_failed",
@@ -211,5 +186,35 @@ router.post("/apply", async (_req, res) => {
     });
   }
 });
+
+async function runUpdateBuildAndRestart(appRoot: string): Promise<void> {
+  const runNpm = async (subdir: string) => {
+    await execFileAsync(
+      "bash",
+      ["-lc", `cd '${appRoot}/${subdir}' && npm ci && npm run build`],
+      {
+        timeout: 15 * 60_000,
+        maxBuffer: 16 * 1024 * 1024,
+        env: process.env,
+      },
+    );
+  };
+  await runNpm("backend");
+  await runNpm("frontend");
+  await new Promise<void>((resolve) => {
+    execFile(
+      "bash",
+      [
+        "-lc",
+        "sudo -n /bin/systemctl restart vpn-admin-api 2>/dev/null || sudo -n /usr/bin/systemctl restart vpn-admin-api 2>/dev/null || true",
+      ],
+      { timeout: 30_000 },
+      (err) => {
+        if (err) console.error("[panel-update] restart failed:", err.message);
+        resolve();
+      },
+    );
+  });
+}
 
 export default router;

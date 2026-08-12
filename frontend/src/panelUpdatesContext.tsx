@@ -11,6 +11,8 @@ import {
 import {
   applyPanelUpdates,
   checkPanelUpdates,
+  isPanelUpdateRestartError,
+  waitForPanelHealth,
   type PanelUpdateCheckDto,
 } from "./api";
 
@@ -114,18 +116,30 @@ export function PanelUpdatesProvider({
         );
       }, 12_000),
     );
-    try {
-      const r = await applyPanelUpdates();
+
+    const finishSuccess = async (message: string, currentVersion?: string) => {
       clearPhaseTimers();
+      setApplyPhase("restarting");
+      setApplyMessage("Ждём перезапуск API…");
+      const healthy = await waitForPanelHealth();
+      if (!healthy) {
+        setApplyPhase("error");
+        setApplyMessage(
+          "Сборка могла завершиться, но панель долго не отвечала. Обновите страницу через минуту.",
+        );
+        applyBusyRef.current = false;
+        return;
+      }
+      const checked = await refresh();
       setApplyPhase("done");
-      setApplyMessage(r.message || "Обновление завершено. Перезагрузка…");
+      setApplyMessage(message || "Обновление завершено. Перезагрузка…");
       setInfo((prev) =>
         prev
           ? {
               ...prev,
               updateAvailable: false,
               behindCount: 0,
-              currentVersion: r.currentVersion || prev.currentVersion,
+              currentVersion: currentVersion || checked?.currentVersion || prev.currentVersion,
               message: "Установлена актуальная версия.",
             }
           : prev,
@@ -133,13 +147,25 @@ export function PanelUpdatesProvider({
       window.setTimeout(() => {
         window.location.assign("/login");
       }, 2800);
+    };
+
+    try {
+      const r = await applyPanelUpdates();
+      await finishSuccess(r.message || "Обновление завершено. Перезагрузка…", r.currentVersion);
     } catch (e) {
+      if (isPanelUpdateRestartError(e)) {
+        clearPhaseTimers();
+        setApplyPhase("restarting");
+        setApplyMessage("Сервер перезапускается (это нормально). Ждём ответа…");
+        await finishSuccess("Обновление завершено. Перезагрузка…");
+        return;
+      }
       clearPhaseTimers();
       setApplyPhase("error");
       setApplyMessage(String(e));
       applyBusyRef.current = false;
     }
-  }, [clearPhaseTimers]);
+  }, [clearPhaseTimers, refresh]);
 
   const value = useMemo<PanelUpdatesContextValue>(
     () => ({
