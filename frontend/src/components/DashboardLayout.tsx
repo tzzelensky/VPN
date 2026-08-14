@@ -162,6 +162,36 @@ function IconLogout(p: SVGProps<SVGSVGElement>) {
   );
 }
 
+function IconSidebarChevron({ collapsed }: { collapsed: boolean }) {
+  return (
+    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2.2" aria-hidden>
+      {collapsed ? (
+        <path d="M9 6l6 6-6 6" strokeLinecap="round" strokeLinejoin="round" />
+      ) : (
+        <path d="M15 6l-6 6 6 6" strokeLinecap="round" strokeLinejoin="round" />
+      )}
+    </svg>
+  );
+}
+
+const SIDEBAR_COLLAPSED_KEY = "vpn-admin-sidebar-collapsed";
+
+function readSidebarCollapsed(): boolean {
+  try {
+    return localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function writeSidebarCollapsed(collapsed: boolean): void {
+  try {
+    localStorage.setItem(SIDEBAR_COLLAPSED_KEY, collapsed ? "1" : "0");
+  } catch {
+    /* ignore */
+  }
+}
+
 function ExpiryNotifyStatusIcon({ status, hint }: { status: "sent" | "waiting" | "error"; hint?: string }) {
   const title = hint || (status === "sent" ? "Доставлено" : status === "waiting" ? "Ожидает отправки" : "Ошибка");
   if (status === "sent") {
@@ -218,7 +248,15 @@ const NAV_ITEMS: NavItem[] = [
   { to: "/device-limit", label: "Устройства", Icon: IconDevice, sectionKey: "device_limit" },
 ];
 
-function SidebarNav({ items, onNavigate }: { items: NavItem[]; onNavigate?: () => void }) {
+function SidebarNav({
+  items,
+  onNavigate,
+  collapsed,
+}: {
+  items: NavItem[];
+  onNavigate?: () => void;
+  collapsed?: boolean;
+}) {
   return (
     <nav className="admin-sidebar-nav">
       {items.map(({ to, label, Icon }) => (
@@ -227,7 +265,8 @@ function SidebarNav({ items, onNavigate }: { items: NavItem[]; onNavigate?: () =
           to={to}
           className={({ isActive }) => (isActive ? "admin-sidebar-link active" : "admin-sidebar-link")}
           onClick={onNavigate}
-          title={label}
+          title={collapsed ? undefined : label}
+          data-label={label}
         >
           <span className="admin-sidebar-link-icon">
             <Icon />
@@ -268,6 +307,7 @@ export default function DashboardLayout({
   const location = useLocation();
   const panel = usePanelSettings();
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(readSidebarCollapsed);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [drawerDragX, setDrawerDragX] = useState<number | null>(null);
   const [drawerWidth, setDrawerWidth] = useState(296);
@@ -637,7 +677,26 @@ export default function DashboardLayout({
   return (
     <div ref={shellRef} className={`admin-shell ${mobileShell ? "admin-shell--mobile" : ""}`.trim()}>
       {!mobileShell ? (
-        <aside className="admin-sidebar" aria-label="Навигация">
+        <aside
+          className={`admin-sidebar${sidebarCollapsed ? " admin-sidebar--collapsed" : ""}`}
+          aria-label="Навигация"
+        >
+          <button
+            type="button"
+            className="admin-sidebar-collapse-btn"
+            aria-expanded={!sidebarCollapsed}
+            aria-label={sidebarCollapsed ? "Развернуть меню" : "Свернуть меню"}
+            title={sidebarCollapsed ? "Развернуть меню" : "Свернуть меню"}
+            onClick={() => {
+              setSidebarCollapsed((prev) => {
+                const next = !prev;
+                writeSidebarCollapsed(next);
+                return next;
+              });
+            }}
+          >
+            <IconSidebarChevron collapsed={sidebarCollapsed} />
+          </button>
           <div className="admin-sidebar-brand">
             {avatarSrc && !avatarBroken ? (
               <img
@@ -659,10 +718,13 @@ export default function DashboardLayout({
               {panelSubtitle ? <span className="admin-sidebar-brand-sub">{panelSubtitle}</span> : null}
             </div>
           </div>
-          <SidebarNav items={visibleNav} />
+          <SidebarNav items={visibleNav} collapsed={sidebarCollapsed} />
           <div className="admin-sidebar-footer">
-            <AdminSidebarThemeDock />
-            <AdminSettingsButton variant="full" onClick={() => setSettingsOpen(true)} />
+            <AdminSidebarThemeDock collapsed={sidebarCollapsed} />
+            <AdminSettingsButton
+              variant={sidebarCollapsed ? "icon" : "full"}
+              onClick={() => setSettingsOpen(true)}
+            />
           </div>
         </aside>
       ) : null}

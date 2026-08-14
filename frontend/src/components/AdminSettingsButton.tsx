@@ -40,7 +40,7 @@ export default function AdminSettingsButton({ onClick, variant = "full", classNa
         type="button"
         className={`admin-settings-btn ghost ${className ?? ""}`.trim()}
         aria-label="Настройки панели"
-        title="Настройки"
+        data-label="Настройки"
         onClick={onClick}
       >
         <IconGear />

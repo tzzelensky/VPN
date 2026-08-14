@@ -2,7 +2,13 @@ import { useCallback, useEffect, useState } from "react";
 import { getLoginAccent, LOGIN_ACCENTS, setLoginAccent, type LoginAccent } from "../loginTheme";
 import AdminThemeToggle from "./AdminThemeToggle";
 
-export default function AdminSidebarThemeDock({ className }: { className?: string }) {
+export default function AdminSidebarThemeDock({
+  className,
+  collapsed = false,
+}: {
+  className?: string;
+  collapsed?: boolean;
+}) {
   const [accent, setAccent] = useState<LoginAccent>(() => getLoginAccent());
 
   const syncAccent = useCallback(() => setAccent(getLoginAccent()), []);
@@ -27,7 +33,10 @@ export default function AdminSidebarThemeDock({ className }: { className?: strin
   const accentLabel = LOGIN_ACCENTS.find((a) => a.id === accent)?.label ?? "Аврора";
 
   return (
-    <div className={`admin-sidebar-theme-dock${className ? ` ${className}` : ""}`} aria-label="Тема и оформление">
+    <div
+      className={`admin-sidebar-theme-dock${collapsed ? " admin-sidebar-theme-dock--collapsed" : ""}${className ? ` ${className}` : ""}`}
+      aria-label="Тема и оформление"
+    >
       <div className="admin-sidebar-theme-dock__popover">
         <span className="admin-sidebar-theme-dock__popover-label">Оформление</span>
         <div className="admin-sidebar-theme-dock__swatches" role="group" aria-label="Цветовое оформление">
@@ -46,7 +55,7 @@ export default function AdminSidebarThemeDock({ className }: { className?: strin
         </div>
         <span className="admin-sidebar-theme-dock__hint">{accentLabel}</span>
       </div>
-      <AdminThemeToggle />
+      <AdminThemeToggle variant={collapsed ? "icon" : "sidebar"} />
     </div>
   );
 }

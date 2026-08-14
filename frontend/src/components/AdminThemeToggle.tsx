@@ -176,7 +176,7 @@ export default function AdminThemeToggle({ className, variant = "sidebar" }: Pro
         disabled={busy}
         aria-pressed={isLight}
         aria-label={nextLabel}
-        title={nextLabel}
+        data-label={isLight ? "Светлая" : "Тёмная"}
       >
         {isLight ? <IconMoon /> : <IconSun />}
       </button>
