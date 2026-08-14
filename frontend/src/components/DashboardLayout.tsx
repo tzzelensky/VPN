@@ -681,22 +681,6 @@ export default function DashboardLayout({
           className={`admin-sidebar${sidebarCollapsed ? " admin-sidebar--collapsed" : ""}`}
           aria-label="Навигация"
         >
-          <button
-            type="button"
-            className="admin-sidebar-collapse-btn"
-            aria-expanded={!sidebarCollapsed}
-            aria-label={sidebarCollapsed ? "Развернуть меню" : "Свернуть меню"}
-            title={sidebarCollapsed ? "Развернуть меню" : "Свернуть меню"}
-            onClick={() => {
-              setSidebarCollapsed((prev) => {
-                const next = !prev;
-                writeSidebarCollapsed(next);
-                return next;
-              });
-            }}
-          >
-            <IconSidebarChevron collapsed={sidebarCollapsed} />
-          </button>
           <div className="admin-sidebar-brand">
             {avatarSrc && !avatarBroken ? (
               <img
@@ -726,6 +710,22 @@ export default function DashboardLayout({
               onClick={() => setSettingsOpen(true)}
             />
           </div>
+          <button
+            type="button"
+            className="admin-sidebar-collapse-btn"
+            aria-expanded={!sidebarCollapsed}
+            aria-label={sidebarCollapsed ? "Развернуть меню" : "Свернуть меню"}
+            title={sidebarCollapsed ? "Развернуть меню" : "Свернуть меню"}
+            onClick={() => {
+              setSidebarCollapsed((prev) => {
+                const next = !prev;
+                writeSidebarCollapsed(next);
+                return next;
+              });
+            }}
+          >
+            <IconSidebarChevron collapsed={sidebarCollapsed} />
+          </button>
         </aside>
       ) : null}
 

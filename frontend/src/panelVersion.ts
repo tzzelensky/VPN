@@ -4,7 +4,7 @@
  * При крупном релизе поднимайте major (2.0).
  */
 export const PANEL_VERSION_MAJOR = 1;
-export const PANEL_VERSION_MINOR = 80;
+export const PANEL_VERSION_MINOR = 81;
 
 export const PANEL_VERSION = `${PANEL_VERSION_MAJOR}.${PANEL_VERSION_MINOR}`;
 

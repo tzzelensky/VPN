@@ -373,8 +373,21 @@ a {
   flex-direction: column;
   gap: 0.2rem;
   flex: 1;
+  overflow-x: hidden;
   overflow-y: auto;
   padding: 0.25rem 0;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--muted) 45%, transparent) transparent;
+}
+
+.admin-sidebar-nav::-webkit-scrollbar {
+  width: 4px;
+  height: 0;
+}
+
+.admin-sidebar-nav::-webkit-scrollbar:horizontal {
+  display: none;
+  height: 0;
 }
 
 .admin-sidebar-link {
@@ -438,7 +451,8 @@ html[data-theme="light"] .admin-sidebar-link.active {
 
 .admin-sidebar-collapse-btn {
   position: absolute;
-  top: 1.4rem;
+  top: auto;
+  bottom: 1.15rem;
   right: -0.7rem;
   z-index: 40;
   width: 1.4rem;
@@ -484,6 +498,7 @@ html[data-theme="light"] .admin-sidebar-link.active {
   opacity: 0;
   width: 0;
   max-width: 0;
+  overflow: hidden;
   transform: translateX(-0.4rem);
   pointer-events: none;
 }
