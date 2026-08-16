@@ -31,7 +31,6 @@ function HeaderContent({ data, status }: { data: MySubProfileDto; status: Return
         <h1 className="mn-user-header__name">{data.name}</h1>
         <div className="mn-user-header__badges">
           <Badge tone="accent">Ultra Secure</Badge>
-          <Badge tone="muted">Reality VPN</Badge>
           <Badge tone={status.tone}>{status.text}</Badge>
         </div>
       </div>

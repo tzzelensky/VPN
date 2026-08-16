@@ -110,9 +110,9 @@ export default function LoginPage({ onSuccess }: { onSuccess: () => void }) {
             <div className="login-card__logo" aria-hidden>
               <span className="login-card__logo-mark">◆</span>
             </div>
-            <h1 className="login-card__title">Панель управления</h1>
+            <h1 className="login-card__title">Вход</h1>
             <p className="login-card__sub">
-              {awaitingCode ? "Введите код из Telegram" : "Вход в панель управления"}
+              {awaitingCode ? "Введите код из Telegram" : "Авторизация"}
             </p>
           </div>
 

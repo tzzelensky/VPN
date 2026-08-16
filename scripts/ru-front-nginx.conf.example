@@ -1,0 +1,140 @@
+# Example nginx site for RU subscription front (hot-standby).
+# Upstream MUST be abroad IP — never the public domain (avoids loop after DNS cutover).
+#
+# Install:
+#   cp scripts/ru-front-nginx.conf.example /etc/nginx/sites-available/vpn-front
+#   # edit UPSTREAM_IP / DOMAIN / ssl paths if needed
+#   ln -sf /etc/nginx/sites-available/vpn-front /etc/nginx/sites-enabled/vpn-front
+#   rm -f /etc/nginx/sites-enabled/default
+#   nginx -t && systemctl reload nginx
+
+# Defaults used on first deploy:
+#   DOMAIN      = devspace5.duckdns.org
+#   UPSTREAM_IP = 82.25.58.214
+#   RU_IP       = 93.115.203.23
+
+upstream abroad_panel {
+    server 82.25.58.214:443;
+}
+
+server {
+    listen 80 default_server;
+    listen [::]:80 default_server;
+    server_name devspace5.duckdns.org;
+
+    location ^~ /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+        default_type text/plain;
+    }
+
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}
+
+server {
+    listen 443 ssl default_server;
+    listen [::]:443 ssl default_server;
+    http2 on;
+    server_name devspace5.duckdns.org;
+
+    ssl_certificate     /etc/letsencrypt/live/devspace5.duckdns.org/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/devspace5.duckdns.org/privkey.pem;
+    include /etc/letsencrypt/options-ssl-nginx.conf;
+    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
+
+    client_max_body_size 12m;
+
+    # Common proxy to abroad by IP + correct Host/SNI
+    set $abroad_host "devspace5.duckdns.org";
+
+    location /api/ {
+        proxy_pass https://abroad_panel;
+        proxy_http_version 1.1;
+        client_max_body_size 12m;
+        proxy_ssl_server_name on;
+        proxy_ssl_name $abroad_host;
+        proxy_ssl_verify off;
+        proxy_set_header Host $abroad_host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 120s;
+    }
+
+    location /sub/ {
+        proxy_pass https://abroad_panel;
+        proxy_http_version 1.1;
+        proxy_ssl_server_name on;
+        proxy_ssl_name $abroad_host;
+        proxy_ssl_verify off;
+        proxy_set_header Host $abroad_host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 120s;
+    }
+
+    location /goods/ {
+        proxy_pass https://abroad_panel;
+        proxy_http_version 1.1;
+        proxy_ssl_server_name on;
+        proxy_ssl_name $abroad_host;
+        proxy_ssl_verify off;
+        proxy_set_header Host $abroad_host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 120s;
+    }
+
+    location /comfort {
+        proxy_pass https://abroad_panel;
+        proxy_http_version 1.1;
+        proxy_ssl_server_name on;
+        proxy_ssl_name $abroad_host;
+        proxy_ssl_verify off;
+        proxy_set_header Host $abroad_host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    location = / {
+        proxy_pass https://abroad_panel/;
+        proxy_http_version 1.1;
+        proxy_ssl_server_name on;
+        proxy_ssl_name $abroad_host;
+        proxy_ssl_verify off;
+        proxy_set_header Host $abroad_host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    location /panel/swagger/ {
+        proxy_pass https://abroad_panel;
+        proxy_http_version 1.1;
+        proxy_ssl_server_name on;
+        proxy_ssl_name $abroad_host;
+        proxy_ssl_verify off;
+        proxy_set_header Host $abroad_host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # SPA + static assets on abroad (login, mysub, assets)
+    location / {
+        proxy_pass https://abroad_panel;
+        proxy_http_version 1.1;
+        proxy_ssl_server_name on;
+        proxy_ssl_name $abroad_host;
+        proxy_ssl_verify off;
+        proxy_set_header Host $abroad_host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 120s;
+    }
+}

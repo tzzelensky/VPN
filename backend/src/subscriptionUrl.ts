@@ -4,7 +4,7 @@ import { isDeviceLimitActiveForUser } from "./deviceLimitEffective.js";
 export function publicSubUrl(subToken: string, deviceId?: string): string {
   const base = (process.env.PUBLIC_API_URL ?? "http://localhost:4000").replace(/\/$/, "");
   const token = encodeURIComponent(String(subToken ?? "").trim());
-  const path = `${base}/sub/${token}`;
+  const path = `${base}/goods/${token}`;
   const did = String(deviceId ?? "").trim();
   if (!did) return path;
   return `${path}?did=${encodeURIComponent(did)}`;

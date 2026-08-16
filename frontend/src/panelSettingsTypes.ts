@@ -52,6 +52,8 @@ export type PanelSettings = {
     avatarPath: string | null;
     brandName: string;
     telegramFooter: string;
+    /** Ключевое слово «отзыва» на витрине → /login (только мобильная кнопка). */
+    shopReviewKeyword: string;
     subscriptionBanner: PanelSubscriptionBanner;
   };
   ui: {

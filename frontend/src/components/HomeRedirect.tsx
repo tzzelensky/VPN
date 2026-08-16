@@ -1,6 +1,7 @@
 import { useEffect } from "react";
-import { Navigate, useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { usePanelSettings } from "../panelSettingsContext";
+import DecoyShopPage from "../pages/DecoyShopPage";
 
 export default function HomeRedirect({ loggedIn }: { loggedIn: boolean }) {
   const panel = usePanelSettings();
@@ -12,7 +13,7 @@ export default function HomeRedirect({ loggedIn }: { loggedIn: boolean }) {
   }, [loggedIn, panel.loaded, panel.firstVisiblePath, nav]);
 
   if (!loggedIn) {
-    return <Navigate to="/login" replace />;
+    return <DecoyShopPage />;
   }
 
   if (!panel.loaded) {

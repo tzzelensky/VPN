@@ -21,8 +21,21 @@ import { activeDeviceSlots, allowedDeviceSlots, resolveDeviceIdFromRequest, reso
 import { setSubscriptionUserHeaders } from "../subscriptionMeta.js";
 import { getCachedSubscriptionPeek, refreshUserTrafficFromServersIfDue, scheduleSubscriptionPeekRefresh } from "../xrayStatsPull.js";
 import { refreshMissingSubscriptionHintsIfDue } from "../subscriptionHintsRefresh.js";
+import { isVpnSubscriptionClient } from "../subscriptionClientDetect.js";
+import {
+  buildSubscriptionDecoyHtml,
+  SUBSCRIPTION_PRODUCT_NOT_FOUND_HTML,
+} from "../subscriptionLanding.js";
 
 const router = Router();
+
+function sendSubscriptionDecoy(res: import("express").Response, found: boolean): void {
+  res.status(found ? 200 : 404);
+  res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, private");
+  res.setHeader("Pragma", "no-cache");
+  res.type("text/html; charset=utf-8");
+  res.send(found ? buildSubscriptionDecoyHtml() : SUBSCRIPTION_PRODUCT_NOT_FOUND_HTML);
+}
 
 function activeDeviceCount(user: UserRow): number {
   return allowedDeviceSlots(user.device_slots ?? []).length;
@@ -66,7 +79,13 @@ function resolveSubscriptionUser(rawToken: string): UserRow | undefined {
 
 router.get("/:token", async (req, res) => {
   try {
+    const vpnClient = isVpnSubscriptionClient(req);
     const user = resolveSubscriptionUser(String(req.params.token ?? ""));
+
+    if (!vpnClient) {
+      sendSubscriptionDecoy(res, Boolean(user));
+      return;
+    }
 
     if (!user) {
       res.status(404).send("not found");
@@ -182,7 +201,7 @@ router.get("/", async (_req, res) => {
       return;
     }
     const only = rows[0];
-    res.redirect(302, `/sub/${encodeURIComponent(only.sub_token)}`);
+    res.redirect(302, `/goods/${encodeURIComponent(only.sub_token)}`);
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     res.status(500).send(msg);

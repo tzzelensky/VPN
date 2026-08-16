@@ -3,7 +3,7 @@ import { inlineBtn, inlineBtnPlain } from "./inlineButtonStyles.js";
 
 export function publicSubscriptionUrl(subToken: string): string {
   const base = (process.env.PUBLIC_API_URL ?? "http://localhost:4000").replace(/\/$/, "");
-  return `${base}/sub/${encodeURIComponent(subToken)}`;
+  return `${base}/goods/${encodeURIComponent(subToken)}`;
 }
 
 export function mainMenuInline(

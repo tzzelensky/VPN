@@ -47,7 +47,7 @@ function NavIcon({ tab }: { tab: MySubNavTabId }) {
 }
 
 function defaultNewSubscriptionName(userName: string): string {
-  const base = String(userName || "VPN").trim().slice(0, 24) || "VPN";
+  const base = String(userName || "Клиент").trim().slice(0, 24) || "Клиент";
   return `${base} #2`;
 }
 

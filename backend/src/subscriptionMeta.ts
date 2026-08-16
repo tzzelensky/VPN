@@ -4,6 +4,7 @@ import type { DeviceLimitPressure } from "./deviceLimitHappPush.js";
 import { isDeviceLimitActiveForUser } from "./deviceLimitEffective.js";
 import { allowedDeviceSlots, reconcileUserDeviceSlots, userDeviceTotalLimit } from "./userDeviceSlots.js";
 import { subscriptionBannerAnnounceHeader, getSubscriptionBannerSettings } from "./subscriptionBannerHapp.js";
+import { publicBrandName } from "./publicBrand.js";
 
 type UnlimitedTotalMode = "zero" | "omit" | "maxsafe";
 const unlimitedMode = (
@@ -26,7 +27,7 @@ export function clearSubscriptionUsageMonotonic(user: Pick<UserRow, "id" | "sub_
  * @see https://docs.v2raytun.com/overview/supported-headers
  */
 function profileTitleBase(user: UserRow): string {
-  const base = (user.name || user.email || "VPN").trim();
+  const base = (user.name || user.email || publicBrandName("Клиент")).trim();
   return base;
 }
 

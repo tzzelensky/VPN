@@ -730,7 +730,7 @@ export default function MySubPage() {
       return;
     }
     const discountPct = Math.max(0, Math.floor(Number(data.referral.invited_discount_percent) || 20));
-    const brand = data.referral.brand_name || "HSN VPN";
+    const brand = data.referral.brand_name || "Клиент";
     const text = applyReferralInviteVars(
       data.referral.invite_copy_text || "Я пользуюсь {brand}, вот тебе скидка {discount} на первую покупку!",
       {
@@ -1095,7 +1095,7 @@ export default function MySubPage() {
               <section className="mysub-section mysub-section-anim">
                 <div className="mysub-hero-badges">
                   <span className="mysub-hero-badge">Ultra Secure</span>
-                  <span className="mysub-hero-badge muted">Reality VPN</span>
+                  <span className="mysub-hero-badge muted">Доступ</span>
                 </div>
                 <h3 className="mysub-title">Подключитесь за минуту</h3>
                 <p className="sub">Быстрый и надежный VPN для стабильного подключения.</p>
@@ -1202,7 +1202,7 @@ export default function MySubPage() {
                           </div>
                           {homeSub.devices.devices.length === 0 ? (
                             <p className="sub mysub-devices-empty">
-                              Устройства пока не подключены. Скопируйте ссылку VPN — первое устройство привяжется автоматически.
+                              Устройства пока не подключены. Скопируйте ссылку доступа — первое устройство привяжется автоматически.
                             </p>
                           ) : (
                             <ul className="mysub-device-list">

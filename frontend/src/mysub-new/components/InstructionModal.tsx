@@ -32,7 +32,7 @@ export default function InstructionModal({ open, onClose, onCopyLink, copyUrl, t
         </div>
         <div className="mn-modal__body">
           <ol className="mn-steps">
-            <li>Скопируйте ссылку VPN.</li>
+            <li>Скопируйте ссылку доступа.</li>
             <li>Откройте Happ / V2Ray.</li>
             <li>Добавьте подписку по ссылке.</li>
             <li>Нажмите «Обновить».</li>

@@ -211,6 +211,7 @@ router.patch("/", (req, res) => {
   next.panel.subtitle = String(next.panel.subtitle ?? "").trim().slice(0, 240);
   next.panel.brandName = String(next.panel.brandName ?? "").trim().slice(0, 80);
   next.panel.telegramFooter = String(next.panel.telegramFooter ?? "").trim().slice(0, 500);
+  next.panel.shopReviewKeyword = String(next.panel.shopReviewKeyword ?? "").trim().slice(0, 80);
   const prevBanner = prev.panel.subscriptionBanner ?? defaultPanelSettings().panel.subscriptionBanner;
   const bannerIn = body.settings?.panel?.subscriptionBanner;
   if (bannerIn) {

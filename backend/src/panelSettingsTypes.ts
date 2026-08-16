@@ -38,6 +38,8 @@ export type PanelSettings = {
     avatarPath: string | null;
     brandName: string;
     telegramFooter: string;
+    /** Ключевое слово «отзыва» на витрине → переход на /login (мобильная кнопка). */
+    shopReviewKeyword: string;
     subscriptionBanner: PanelSubscriptionBanner;
   };
   ui: {
@@ -201,6 +203,7 @@ export function defaultPanelSettings(): PanelSettings {
       avatarPath: null,
       brandName: "",
       telegramFooter: "",
+      shopReviewKeyword: "",
       subscriptionBanner: {
         enabled: false,
         text: "",

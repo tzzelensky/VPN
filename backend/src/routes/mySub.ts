@@ -433,7 +433,7 @@ async function buildMySubWebAppProfileDto(
       inviter_reward_gb: referralCfg.inviter_reward_gb,
       inviter_reward_days: referralCfg.inviter_reward_days,
       invited_discount_percent: referralCfg.invited_discount_percent,
-      brand_name: getPanelSettings().panel.brandName.trim() || "HSN VPN",
+      brand_name: getPanelSettings().panel.brandName.trim() || "Клиент",
       invited_friends: rewardRows.map((r) => ({
         reward_id: r.id,
         name: String(r.invitee_name || "Пользователь"),

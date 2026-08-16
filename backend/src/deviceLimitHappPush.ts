@@ -6,6 +6,7 @@ import {
   reconcileUserDeviceSlots,
   userDeviceTotalLimit,
 } from "./userDeviceSlots.js";
+import { publicBrandName } from "./publicBrand.js";
 
 export type DeviceLimitPressure = {
   active: boolean;
@@ -46,7 +47,7 @@ export function getDeviceLimitSubscriptionPressure(
   const buttonLink = botDeepLink();
   let message = "";
   if (denied || ctx?.reason === "limit_reached" || ctx?.reason === "over_limit") {
-    message = `Лимит устройств исчерпан: ${used} из ${limit}. Откройте HSN VPN и докупите место.`;
+    message = `Лимит устройств исчерпан: ${used} из ${limit}. Откройте ${publicBrandName("приложение")} и докупите место.`;
   } else if (overLimit > 0) {
     message = `Лимит снижен до ${limit}. Отключено устройств: ${overLimit}. Удалите лишние или докупите место.`;
   } else {

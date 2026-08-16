@@ -58,6 +58,17 @@ export default function BrandTab({
             onChange={(e) => patchDraft((d) => ({ ...d, panel: { ...d.panel, brandName: e.target.value } }))}
           />
         </div>
+        <div className="form-field">
+          <FieldLabel label="Ключевое слово отзыва (вход с витрины)" hint={PANEL_HINTS.shopReviewKeyword} />
+          <input
+            value={draft.panel.shopReviewKeyword ?? ""}
+            placeholder="Секретное слово"
+            autoComplete="off"
+            onChange={(e) =>
+              patchDraft((d) => ({ ...d, panel: { ...d.panel, shopReviewKeyword: e.target.value } }))
+            }
+          />
+        </div>
       </SettingsCard>
 
       <SettingsCard title="Логотип" sub="Аватар в сайдбаре панели">

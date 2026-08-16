@@ -1406,7 +1406,7 @@ export async function onAdminPaymentConfirm(
       `<b>✅ Дополнительное устройство подключено</b>\n\n` +
       `Вы купили ещё 1 место для подписки «${escHtml(subscriptionPublicName(fresh))}».\n\n` +
       `Теперь доступно устройств: <b>${used}/${limit}</b>.\n\n` +
-      `Чтобы подключить новое устройство, откройте приложение и скопируйте ссылку VPN для нового устройства.`;
+      `Чтобы подключить новое устройство, откройте приложение и скопируйте ссылку доступа для нового устройства.`;
     logPaymentBotMessage(sess.tg_chat_id, deviceBody);
     archiveAndDeletePaymentSession(sessionId, "confirmed");
     await finalizeAdminPaymentReceipt(adminMessage, "confirmed");

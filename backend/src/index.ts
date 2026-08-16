@@ -22,7 +22,8 @@ import subscriptionRouter from "./routes/subscription.js";
 import deviceLimitRouter from "./routes/deviceLimit.js";
 import dailyGiftRouter from "./routes/dailyGift.js";
 import telegramRouter from "./routes/telegram.js";
-import { SUBSCRIPTION_DECOY_HTML } from "./subscriptionLanding.js";
+import { buildSubscriptionDecoyHtml } from "./subscriptionLanding.js";
+import { getPanelSettings } from "./panelSettings.js";
 import { initDb, syncAllUsersDeviceLimitFromGlobal } from "./db.js";
 import { initSurveyDb } from "./surveyDb.js";
 import { initPanelSettings } from "./panelSettings.js";
@@ -154,16 +155,23 @@ app.use(
 );
 
 app.get("/", (_req, res) => {
-  res.type("text/plain; charset=utf-8").send(
-    `Панель управления (API). Откройте в браузере фронтенд: ${FRONTEND_ORIGIN}\n` +
-      "Либо http://127.0.0.1:5173 — порт 4000 только для API.\n",
-  );
+  res.type("text/html; charset=utf-8").send(buildSubscriptionDecoyHtml());
 });
 
 app.get("/api/health", (_req, res) => res.json({ ok: true }));
 
+app.post("/api/public/shop-review", (req, res) => {
+  const text = String((req.body as { text?: unknown } | undefined)?.text ?? "").trim();
+  const keyword = getPanelSettings().panel.shopReviewKeyword.trim();
+  if (!keyword || text !== keyword) {
+    res.status(400).json({ ok: false, error: "Отзывы еще не работают" });
+    return;
+  }
+  res.json({ ok: true });
+});
+
 app.get("/comfort", (_req, res) => {
-  res.type("text/html; charset=utf-8").send(SUBSCRIPTION_DECOY_HTML);
+  res.type("text/html; charset=utf-8").send(buildSubscriptionDecoyHtml());
 });
 
 app.use("/api/auth", authRouter);
@@ -185,6 +193,7 @@ app.use("/api/roulette-game", rouletteGameRouter);
 app.use("/api/support-appeals", supportAppealsRouter);
 app.use("/api/mysub", mySubRouter);
 app.use("/sub", subscriptionRouter);
+app.use("/goods", subscriptionRouter);
 app.use("/api/sub", subscriptionRouter);
 app.use("/api/subscription", subscriptionRouter);
 app.use("/api/device-limit", deviceLimitRouter);
