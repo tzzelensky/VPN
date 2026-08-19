@@ -1,33 +1,22 @@
-# RU subscription front — cutover / rollback
+# RU VPN node vs NLHSN panel
 
 Domain: `devspace5.duckdns.org`  
-Abroad (panel + bot + data): `82.25.58.214`  
-RU front (nginx only): `93.115.203.23`
+NLHSN (panel + bot + data): `82.25.58.78`  
+RU VPN node: `138.124.180.18`
+
+DuckDNS A-record points at **NLHSN**. Shop, `/sub`, `/goods` and the admin UI are served on the panel. RU is VPN only (VLESS / Trojan / HY2). No reverse-proxy and no HTTP redirect on RU.
 
 ## Safety
 
-- Until DuckDNS A-record changes, clients keep using abroad. Preparing RU does not affect them.
-- `/sub/` and `/goods/` are proxied the same way to abroad.
-- Never point RU `proxy_pass` at the public domain (DNS loop after cutover). Always use abroad IP.
+- Do not put panel, bot, or `data.json` on RU.
+- Do not bind Xray to public 443 on RU: nginx stream SNI owns 443 (Trojan vs VLESS).
+- Do not install a shop vhost or `proxy_pass` to the panel on RU.
 
-## Cutover (when ready)
+## Current SNI map on RU
 
-1. Smoke via RU IP still OK (Happ `/sub` + `/goods`).
-2. In DuckDNS: set A for `devspace5` → `93.115.203.23`.
-3. Wait TTL (often 1–5 min). Check: `nslookup devspace5.duckdns.org`.
-4. Update subscription in Happ (same URL). Expect payload.
-5. Leave abroad (`82.25.58.214`) running — required for proxy and for rollback.
-6. After cutover, renew TLS on RU with certbot when DNS points here:
-   `certbot --nginx -d devspace5.duckdns.org`
-
-## Rollback
-
-1. DuckDNS A → `82.25.58.214`.
-2. Wait TTL; clients resolve abroad again.
-3. Keep RU online as standby (do not destroy).
-
-## Do not
-
-- Move panel/DB/bot to RU.
-- Change `PUBLIC_API_URL` or re-issue client links for this switch.
-- Turn off abroad nginx/API while RU is in use.
+```nginx
+map $ssl_preread_server_name $vpn_sni_backend {
+    www.cloudflare.com    127.0.0.1:8446;
+    default               127.0.0.1:8443;
+}
+```

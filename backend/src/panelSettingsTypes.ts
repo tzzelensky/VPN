@@ -88,7 +88,7 @@ export type PanelSettings = {
   vpnDisplay: {
     /** @deprecated Миграция → entryOrder (только vless-id). */
     serverOrder: number[];
-    /** vless:1 | hy2:1 | vault:5 | whitelist:3 */
+    /** vless:1 | hy2:1 | trojan:1 | vault:5 | whitelist:3 */
     entryOrder: string[];
   };
   updatedAt: number;

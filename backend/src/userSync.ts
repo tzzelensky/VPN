@@ -218,6 +218,12 @@ export async function pushClientListToAllDeployedServers(log?: SshLog): Promise<
     } catch (e) {
       log?.(`Hysteria2 sync: ${e instanceof Error ? e.message : String(e)}`);
     }
+    try {
+      const { pushTrojanClientsToAllDeployedServers } = await import("./trojanDeploy.js");
+      await pushTrojanClientsToAllDeployedServers(log);
+    } catch (e) {
+      log?.(`Trojan sync: ${e instanceof Error ? e.message : String(e)}`);
+    }
   };
   const job = pushQueue.then(() => run());
   pushQueue = job.catch(() => {});

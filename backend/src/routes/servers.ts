@@ -17,6 +17,7 @@ import {
 import { softDeleteProxiesForServer } from "../telegramProxiesDb.js";
 import { deployOrSyncHysteria2 } from "../hysteria2Deploy.js";
 import { HYSTERIA2_CONFIG_PATH } from "../hysteria2Constants.js";
+import { deployOrSyncTrojan } from "../trojanDeploy.js";
 import { pushClientListToAllDeployedServers } from "../userSync.js";
 import { countryFlagEmoji } from "../serverDisplay.js";
 import { encryptSecret } from "../crypto.js";
@@ -102,10 +103,15 @@ function serverToJson(r: ServerRow) {
     subscription_settings: subscriptionSettingsToApi(getServerSubscriptionSettings(r)),
     subscription_settings_custom: Boolean(r.subscription_settings_custom),
     vless_deployed: Boolean(r.vless_deployed),
+    vless_in_subscriptions: Boolean(r.vless_in_subscriptions),
     hysteria2_deployed: Boolean(r.hysteria2_deployed),
     hysteria2_in_subscriptions: Boolean(r.hysteria2_in_subscriptions),
     hysteria2_port: r.hysteria2_port,
     hysteria2_sni: r.hysteria2_sni,
+    trojan_deployed: Boolean(r.trojan_deployed),
+    trojan_in_subscriptions: Boolean(r.trojan_in_subscriptions),
+    trojan_port: r.trojan_port,
+    trojan_sni: r.trojan_sni,
     experimental_only: Boolean(r.experimental_only),
     last_ssh_ok: Boolean(r.last_ssh_ok),
     last_error: r.last_error,
@@ -168,6 +174,7 @@ router.post("/", (req, res) => {
     subscription_settings: null,
     subscription_settings_custom: 0,
     vless_deployed: 0,
+    vless_in_subscriptions: 0,
     hysteria2_deployed: 0,
     hysteria2_in_subscriptions: 0,
     hysteria2_port: 36712,
@@ -175,6 +182,11 @@ router.post("/", (req, res) => {
     hysteria2_stats_secret: "",
     hysteria2_config_path: null,
     hysteria2_cert_sha256: "",
+    trojan_deployed: 0,
+    trojan_in_subscriptions: 0,
+    trojan_port: 8446,
+    trojan_sni: "www.cloudflare.com",
+    trojan_cert_sha256: "",
     experimental_only: 0,
     last_ssh_ok: 0,
     last_error: null,
@@ -394,6 +406,101 @@ router.post("/:id(\\d+)/hysteria2-subscriptions", (req, res) => {
   res.json({ ok: true, server: next ? serverToJson(next) : null });
 });
 
+router.post("/:id(\\d+)/vless-subscriptions", (req, res) => {
+  const id = Number(req.params.id);
+  const row = getServer(id);
+  if (!row) {
+    res.status(404).json({ error: "not_found" });
+    return;
+  }
+  if (row.vless_deployed !== 1) {
+    res.status(400).json({ error: "vless_not_deployed" });
+    return;
+  }
+  const body = (req.body ?? {}) as { enabled?: unknown };
+  const enabled = body.enabled === true || body.enabled === 1 || body.enabled === "1";
+  updateServer(id, { vless_in_subscriptions: enabled ? 1 : 0 });
+  const next = getServer(id);
+  res.json({ ok: true, server: next ? serverToJson(next) : null });
+});
+
+router.post("/:id/connect-trojan", async (req, res) => {
+  const id = Number(req.params.id);
+  const stream = wantsNdjsonStream(req);
+  if (stream) initNdjsonStream(res);
+  const log = mkLog(stream, res);
+
+  const row = getServer(id);
+  if (!row) {
+    if (stream) {
+      ndjsonLine(res, { type: "error", message: "not_found" });
+      return res.end();
+    }
+    return res.status(404).json({ error: "not_found" });
+  }
+
+  try {
+    const alreadyDeployed = row.trojan_deployed === 1;
+    const dep = await deployOrSyncTrojan(sshCfg(row), row, log, {
+      forceRedeploy: alreadyDeployed,
+    });
+    if (!dep.ok) {
+      updateServer(id, { last_error: dep.detail });
+      if (stream) {
+        ndjsonLine(res, { type: "done", ok: false, detail: dep.detail });
+        return res.end();
+      }
+      return res.status(400).json(dep);
+    }
+    updateServer(id, {
+      trojan_deployed: 1,
+      trojan_in_subscriptions: alreadyDeployed ? row.trojan_in_subscriptions : 1,
+      trojan_port: dep.port,
+      trojan_sni: dep.sni,
+      trojan_cert_sha256: dep.certSha256,
+      last_ssh_ok: 1,
+      last_error: null,
+    });
+    const payload = {
+      ok: true,
+      detail: alreadyDeployed
+        ? `Trojan обновлён: TCP ${dep.port} (SNI ${dep.sni})`
+        : `Trojan на TCP ${dep.port} (SNI ${dep.sni})`,
+      port: dep.port,
+    };
+    if (stream) {
+      ndjsonLine(res, { type: "done", ...payload });
+      return res.end();
+    }
+    res.json(payload);
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    if (stream) {
+      ndjsonLine(res, { type: "error", message });
+      return res.end();
+    }
+    res.status(500).json({ error: message });
+  }
+});
+
+router.post("/:id(\\d+)/trojan-subscriptions", (req, res) => {
+  const id = Number(req.params.id);
+  const row = getServer(id);
+  if (!row) {
+    res.status(404).json({ error: "not_found" });
+    return;
+  }
+  if (row.trojan_deployed !== 1) {
+    res.status(400).json({ error: "trojan_not_deployed" });
+    return;
+  }
+  const body = (req.body ?? {}) as { enabled?: unknown };
+  const enabled = body.enabled === true || body.enabled === 1 || body.enabled === "1";
+  updateServer(id, { trojan_in_subscriptions: enabled ? 1 : 0 });
+  const next = getServer(id);
+  res.json({ ok: true, server: next ? serverToJson(next) : null });
+});
+
 router.post("/:id/install-xray", async (req, res) => {
   const id = Number(req.params.id);
   const stream = wantsNdjsonStream(req);
@@ -481,6 +588,7 @@ router.post("/:id/deploy-vless", async (req, res) => {
     updateServer(id, {
       vless_uuid: uuid,
       vless_deployed: 1,
+      vless_in_subscriptions: 1,
       last_ssh_ok: 1,
       last_error: null,
       xray_config_path: pathToUse,

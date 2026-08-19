@@ -250,6 +250,20 @@ export function parseTrojanUri(raw: string): ParsedVlessParams | null {
         remark = u.hash.slice(1).trim();
       }
     }
+    const allowInsecure =
+      q.get("allowInsecure") === "1" ||
+      q.get("allowInsecure") === "true" ||
+      q.get("insecure") === "1" ||
+      q.get("insecure") === "true";
+    const pinnedPeerCertSha256 = (
+      q.get("pcs") ||
+      q.get("pinnedPeerCertSha256") ||
+      q.get("pinSHA256") ||
+      ""
+    )
+      .trim()
+      .replace(/:/g, "")
+      .toLowerCase();
     return {
       address,
       port: Math.floor(port),
@@ -266,6 +280,8 @@ export function parseTrojanUri(raw: string): ParsedVlessParams | null {
       path: (q.get("path") || "").trim(),
       host: (q.get("host") || "").trim(),
       alpn: (q.get("alpn") || "").trim(),
+      allowInsecure,
+      pinnedPeerCertSha256,
     };
   } catch {
     return null;
@@ -526,7 +542,16 @@ function buildTrojanUriFromOutbound(
     const fp = String(tls?.fingerprint ?? "").trim();
     if (sni) q.set("sni", sni);
     if (fp) q.set("fp", fp);
-    if (tls?.allowInsecure === true) q.set("allowInsecure", "1");
+    const pin = String(tls?.pinnedPeerCertSha256 ?? tls?.pinSHA256 ?? "")
+      .trim()
+      .replace(/:/g, "")
+      .toLowerCase();
+    if (pin) {
+      q.set("pinSHA256", pin);
+      q.set("pcs", pin);
+    } else if (tls?.allowInsecure === true) {
+      q.set("allowInsecure", "1");
+    }
   } else if (network === "ws") {
     const ws = asRecord(stream?.wsSettings);
     const path = String(ws?.path ?? "").trim();

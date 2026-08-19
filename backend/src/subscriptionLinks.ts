@@ -1,4 +1,5 @@
 import { buildHysteria2UriForUser } from "./hysteria2Link.js";
+import { buildTrojanUriForUser } from "./trojanLink.js";
 import { configVaultLinksForUser } from "./configVaultDb.js";
 import {
   applyUserRemarkToProxyUri,
@@ -54,7 +55,7 @@ function appendUniqueSubscriptionUris(out: string[], seen: Set<string>, uris: st
 
 /**
  * Строки подписки в порядке vpnDisplay / subscription_entry_order:
- * vless, hy2, vault, whitelist + extras в конце + happ-хвост БС при необходимости.
+ * vless, hy2, trojan, vault, whitelist + extras в конце + happ-хвост БС при необходимости.
  */
 export function subscriptionVlessLinksForUser(user: UserRow): string[] {
   const seen = new Set<string>();
@@ -77,6 +78,13 @@ export function subscriptionVlessLinksForUser(user: UserRow): string[] {
       const row = servers.get(p.id);
       if (!row || row.hysteria2_deployed !== 1 || row.hysteria2_in_subscriptions !== 1) continue;
       const uri = buildHysteria2UriForUser(row, user);
+      if (uri) appendUniqueSubscriptionUris(out, seen, [uri]);
+      continue;
+    }
+    if (p.kind === "trojan") {
+      const row = servers.get(p.id);
+      if (!row || row.trojan_deployed !== 1 || row.trojan_in_subscriptions !== 1) continue;
+      const uri = buildTrojanUriForUser(row, user);
       if (uri) appendUniqueSubscriptionUris(out, seen, [uri]);
       continue;
     }

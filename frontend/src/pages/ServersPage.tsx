@@ -3,12 +3,15 @@ import {
   addServerToAllSubscriptions,
   removeServerFromAllSubscriptions,
   connectHysteria2Stream,
+  connectTrojanStream,
   deleteServer,
   deployVlessStream,
   installXrayStream,
   listServers,
   patchServer,
+  setServerVlessInSubscriptions,
   setServerHysteria2InSubscriptions,
+  setServerTrojanInSubscriptions,
   type NdjsonEvent,
   type ServerDto,
   testServerStream,
@@ -165,6 +168,31 @@ export default function ServersPage({ onLogout }: { onLogout: () => void }) {
                     await deployVlessStream(s.id, emit);
                   })
                 }
+                onToggleVlessSubscriptions={() => {
+                  const enable = !s.vless_in_subscriptions;
+                  const msgText = enable
+                    ? `Добавить VLESS «${s.name || s.host}» в подписки клиентов, у которых выбран этот сервер?`
+                    : `Убрать VLESS «${s.name || s.host}» из подписок? Trojan и Hysteria2 останутся.`;
+                  if (!window.confirm(msgText)) return;
+                  void (async () => {
+                    setBusyId(s.id);
+                    setBusyAction("vlessSubs");
+                    setMsg(null);
+                    try {
+                      await setServerVlessInSubscriptions(s.id, enable);
+                      await refresh();
+                      setMsg({
+                        type: "ok",
+                        text: enable ? "VLESS добавлен в подписки. Клиентам обновите подписку." : "VLESS убран из подписок.",
+                      });
+                    } catch (e) {
+                      setMsg({ type: "err", text: String(e) });
+                    } finally {
+                      setBusyId(null);
+                      setBusyAction(null);
+                    }
+                  })();
+                }}
                 onConnectHysteria2={() =>
                   void runServerStream(s.id, "hysteria2", `Hysteria2: ${s.host}`, async (emit) => {
                     await connectHysteria2Stream(s.id, emit);
@@ -188,6 +216,38 @@ export default function ServersPage({ onLogout }: { onLogout: () => void }) {
                         text: enable
                           ? "Hysteria2 добавлен в подписки. Клиентам обновите подписку."
                           : "Hysteria2 убран из подписок.",
+                      });
+                    } catch (e) {
+                      setMsg({ type: "err", text: String(e) });
+                    } finally {
+                      setBusyId(null);
+                      setBusyAction(null);
+                    }
+                  })();
+                }}
+                onConnectTrojan={() =>
+                  void runServerStream(s.id, "trojan", `Trojan: ${s.host}`, async (emit) => {
+                    await connectTrojanStream(s.id, emit);
+                  })
+                }
+                onToggleTrojanSubscriptions={() => {
+                  const enable = !s.trojan_in_subscriptions;
+                  const msgText = enable
+                    ? `Добавить Trojan «${s.name || s.host}» в подписки клиентов, у которых выбран этот сервер?`
+                    : `Убрать Trojan «${s.name || s.host}» из подписок? VLESS останется.`;
+                  if (!window.confirm(msgText)) return;
+                  void (async () => {
+                    setBusyId(s.id);
+                    setBusyAction("trojanSubs");
+                    setMsg(null);
+                    try {
+                      await setServerTrojanInSubscriptions(s.id, enable);
+                      await refresh();
+                      setMsg({
+                        type: "ok",
+                        text: enable
+                          ? "Trojan добавлен в подписки. Клиентам обновите подписку."
+                          : "Trojan убран из подписок.",
                       });
                     } catch (e) {
                       setMsg({ type: "err", text: String(e) });

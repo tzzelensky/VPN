@@ -188,10 +188,15 @@ export type ServerDto = {
   subscription_settings?: ServerSubscriptionSettingsDto;
   subscription_settings_custom?: boolean;
   vless_deployed: boolean;
+  vless_in_subscriptions?: boolean;
   hysteria2_deployed?: boolean;
   hysteria2_in_subscriptions?: boolean;
   hysteria2_port?: number;
   hysteria2_sni?: string;
+  trojan_deployed?: boolean;
+  trojan_in_subscriptions?: boolean;
+  trojan_port?: number;
+  trojan_sni?: string;
   experimental_only?: boolean;
   last_ssh_ok: boolean;
   last_error: string | null;
@@ -566,6 +571,36 @@ export async function setServerHysteria2InSubscriptions(
   return handle(res);
 }
 
+export async function setServerVlessInSubscriptions(
+  id: number,
+  enabled: boolean,
+): Promise<{ ok: boolean; server: ServerDto | null }> {
+  const res = await fetch(`/api/servers/${id}/vless-subscriptions`, {
+    method: "POST",
+    credentials: "include",
+    headers: jsonHeaders,
+    body: JSON.stringify({ enabled }),
+  });
+  return handle(res);
+}
+
+export async function connectTrojanStream(id: number, onEvent: (ev: NdjsonEvent) => void): Promise<void> {
+  await postNdjsonStream(`/api/servers/${id}/connect-trojan?stream=1`, onEvent, { method: "POST" });
+}
+
+export async function setServerTrojanInSubscriptions(
+  id: number,
+  enabled: boolean,
+): Promise<{ ok: boolean; server: ServerDto | null }> {
+  const res = await fetch(`/api/servers/${id}/trojan-subscriptions`, {
+    method: "POST",
+    credentials: "include",
+    headers: jsonHeaders,
+    body: JSON.stringify({ enabled }),
+  });
+  return handle(res);
+}
+
 export type UserDto = {
   id: number;
   name: string;
@@ -591,7 +626,7 @@ export type UserDto = {
   subscription_server_count: number;
   /** Id серверов в подписке (явный выбор). */
   subscription_server_ids: number[];
-  /** Порядок элементов подписки (vless:/hy2:/vault:/whitelist:). */
+  /** Порядок элементов подписки (vless:/hy2:/trojan:/vault:/whitelist:). */
   subscription_entry_order?: string[];
   /** Включено ли ограничение устройств для подписки. */
   device_limit_enabled: boolean;

@@ -18,9 +18,14 @@ import { getPanelSettings } from "./panelSettings.js";
 export function listGlobalVpnDisplayAvailableKeys(): string[] {
   const keys: string[] = [];
   for (const s of listDeployedServers()) {
-    keys.push(makeVpnEntryKey("vless", s.id));
+    if (s.vless_in_subscriptions === 1) {
+      keys.push(makeVpnEntryKey("vless", s.id));
+    }
     if (s.hysteria2_deployed === 1 && s.hysteria2_in_subscriptions === 1) {
       keys.push(makeVpnEntryKey("hy2", s.id));
+    }
+    if (s.trojan_deployed === 1 && s.trojan_in_subscriptions === 1) {
+      keys.push(makeVpnEntryKey("trojan", s.id));
     }
   }
   for (const k of listConfigVaultKeys()) {
@@ -39,9 +44,14 @@ export function listVpnDisplayAvailableKeysForUser(user: UserRow): string[] {
   const serverIds = new Set(user.subscription_server_ids ?? []);
   for (const s of listDeployedServers()) {
     if (!serverIds.has(s.id)) continue;
-    keys.push(makeVpnEntryKey("vless", s.id));
+    if (s.vless_in_subscriptions === 1) {
+      keys.push(makeVpnEntryKey("vless", s.id));
+    }
     if (s.hysteria2_deployed === 1 && s.hysteria2_in_subscriptions === 1) {
       keys.push(makeVpnEntryKey("hy2", s.id));
+    }
+    if (s.trojan_deployed === 1 && s.trojan_in_subscriptions === 1) {
+      keys.push(makeVpnEntryKey("trojan", s.id));
     }
   }
   for (const link of configVaultLinksForUser(user)) {
@@ -94,7 +104,7 @@ export function applyVpnDisplayOrderToAllUsers(templateOrder: string[]): { updat
 
 export type VpnDisplayCatalogItem = {
   key: string;
-  kind: "vless" | "hy2" | "vault" | "whitelist";
+  kind: "vless" | "hy2" | "trojan" | "vault" | "whitelist";
   id: number;
   title: string;
   subtitle: string;
@@ -107,16 +117,18 @@ export function buildVpnDisplayCatalogItems(keys: string[]): VpnDisplayCatalogIt
   for (const key of keys) {
     const p = parseVpnEntryKey(key);
     if (!p) continue;
-    if (p.kind === "vless" || p.kind === "hy2") {
+    if (p.kind === "vless" || p.kind === "hy2" || p.kind === "trojan") {
       const s = servers.get(p.id);
       if (!s) continue;
+      const port =
+        p.kind === "hy2" ? s.hysteria2_port || 36712 : p.kind === "trojan" ? s.trojan_port || 8446 : s.vless_port || 443;
       out.push({
         key: p.key,
         kind: p.kind,
         id: p.id,
         title: s.name || `Сервер #${s.id}`,
-        subtitle: `${s.host}:${p.kind === "hy2" ? s.hysteria2_port || 36712 : s.vless_port || 443}`,
-        badge: p.kind === "hy2" ? "HY2" : "VLESS",
+        subtitle: `${s.host}:${port}`,
+        badge: p.kind === "hy2" ? "HY2" : p.kind === "trojan" ? "Trojan" : "VLESS",
       });
       continue;
     }

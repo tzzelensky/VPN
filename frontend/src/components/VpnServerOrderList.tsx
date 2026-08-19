@@ -1,4 +1,4 @@
-export type VpnDisplayKind = "vless" | "hy2" | "vault" | "whitelist";
+export type VpnDisplayKind = "vless" | "hy2" | "trojan" | "vault" | "whitelist";
 
 export type VpnDisplayItem = {
   key: string;

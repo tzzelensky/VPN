@@ -1,6 +1,6 @@
-/** Ключи порядка отображения VPN: vless:1 | hy2:1 | vault:5 | whitelist:3 */
+/** Ключи порядка отображения VPN: vless:1 | hy2:1 | trojan:1 | vault:5 | whitelist:3 */
 
-export type VpnDisplayKind = "vless" | "hy2" | "vault" | "whitelist";
+export type VpnDisplayKind = "vless" | "hy2" | "trojan" | "vault" | "whitelist";
 
 export type VpnDisplayEntryRef = {
   kind: VpnDisplayKind;
@@ -8,7 +8,7 @@ export type VpnDisplayEntryRef = {
   key: string;
 };
 
-const KIND_RE = /^(vless|hy2|vault|whitelist):(\d+)$/;
+const KIND_RE = /^(vless|hy2|trojan|vault|whitelist):(\d+)$/;
 
 export function makeVpnEntryKey(kind: VpnDisplayKind, id: number): string {
   return `${kind}:${Math.floor(id)}`;

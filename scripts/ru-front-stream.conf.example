@@ -1,0 +1,17 @@
+# Public 443 SNI split on RU VPN node (shop/API live on NLHSN, not here):
+#   Trojan SNI www.cloudflare.com → xray 127.0.0.1:8446
+#   everything else (VLESS REALITY SNI, e.g. www.microsoft.com) → xray 127.0.0.1:8443
+
+map $ssl_preread_server_name $vpn_sni_backend {
+    www.cloudflare.com    127.0.0.1:8446;
+    default               127.0.0.1:8443;
+}
+
+server {
+    listen 443;
+    listen [::]:443;
+    ssl_preread on;
+    proxy_pass $vpn_sni_backend;
+    proxy_timeout 300s;
+    proxy_connect_timeout 5s;
+}

@@ -19,7 +19,7 @@ function makeKey(kind: VpnDisplayKind, id: number): string {
 }
 
 function parseKey(raw: string): { kind: VpnDisplayKind; id: number } | null {
-  const m = /^(vless|hy2|vault|whitelist):(\d+)$/.exec(raw.trim());
+  const m = /^(vless|hy2|trojan|vault|whitelist):(\d+)$/.exec(raw.trim());
   if (!m) return null;
   return { kind: m[1] as VpnDisplayKind, id: Number(m[2]) };
 }
@@ -56,6 +56,17 @@ function buildCatalog(opts: {
         title: s.name || `Сервер #${s.id}`,
         subtitle: `${s.host}:${s.hysteria2_port || 36712}`,
         badge: "HY2",
+        flag: s.country_flag || undefined,
+      });
+    }
+    if (s.trojan_deployed && s.trojan_in_subscriptions) {
+      items.push({
+        key: makeKey("trojan", s.id),
+        kind: "trojan",
+        id: s.id,
+        title: s.name || `Сервер #${s.id}`,
+        subtitle: `${s.host}:${s.trojan_port || 8446}`,
+        badge: "Trojan",
         flag: s.country_flag || undefined,
       });
     }

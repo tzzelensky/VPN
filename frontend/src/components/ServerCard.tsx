@@ -14,8 +14,11 @@ export type ServerBusyAction =
   | "ssh"
   | "xray"
   | "vless"
+  | "vlessSubs"
   | "hysteria2"
   | "hy2Subs"
+  | "trojan"
+  | "trojanSubs"
   | "save"
   | "addSubs"
   | "removeSubs"
@@ -55,8 +58,11 @@ type Props = {
   onTestSsh: () => void;
   onInstallXray: () => void;
   onDeployVless: () => void;
+  onToggleVlessSubscriptions: () => void;
   onConnectHysteria2: () => void;
   onToggleHysteria2Subscriptions: () => void;
+  onConnectTrojan: () => void;
+  onToggleTrojanSubscriptions: () => void;
   onDelete: () => Promise<void>;
   onAddToAllSubscriptions?: () => void;
   onRemoveFromAllSubscriptions?: () => void;
@@ -284,8 +290,11 @@ export default function ServerCard({
   onTestSsh,
   onInstallXray,
   onDeployVless,
+  onToggleVlessSubscriptions,
   onConnectHysteria2,
   onToggleHysteria2Subscriptions,
+  onConnectTrojan,
+  onToggleTrojanSubscriptions,
   onDelete,
   onAddToAllSubscriptions,
   onRemoveFromAllSubscriptions,
@@ -480,6 +489,13 @@ export default function ServerCard({
                     ? `HY2 :${s.hysteria2_port ?? "—"} в подписке`
                     : `HY2 :${s.hysteria2_port ?? "—"}`
                   : "HY2 выкл"}
+              </StatusBadge>
+              <StatusBadge tone={s.trojan_deployed ? "ok" : "muted"}>
+                {s.trojan_deployed
+                  ? s.trojan_in_subscriptions
+                    ? `Trojan :${s.trojan_port ?? "—"} в подписке`
+                    : `Trojan :${s.trojan_port ?? "—"}`
+                  : "Trojan выкл"}
               </StatusBadge>
               <div className="server-card-v2__port-stack">
                 <StatusBadge tone="muted">{`:${vlessPort}`}</StatusBadge>
@@ -676,6 +692,28 @@ export default function ServerCard({
                     "Развернуть VLESS"
                   )}
                 </button>
+                {s.vless_deployed && s.vless_in_subscriptions ? (
+                  <button type="button" className="ghost" disabled={isBusy} onClick={onToggleVlessSubscriptions}>
+                    {busyAction === "vlessSubs" ? (
+                      <>
+                        <Spinner /> Сохраняем…
+                      </>
+                    ) : (
+                      "Убрать VLess из подписок"
+                    )}
+                  </button>
+                ) : null}
+                {s.vless_deployed && !s.vless_in_subscriptions ? (
+                  <button type="button" className="ghost" disabled={isBusy} onClick={onToggleVlessSubscriptions}>
+                    {busyAction === "vlessSubs" ? (
+                      <>
+                        <Spinner /> Сохраняем…
+                      </>
+                    ) : (
+                      "Добавить Vless в подписки"
+                    )}
+                  </button>
+                ) : null}
                 <button
                   type="button"
                   className={s.hysteria2_deployed ? "ghost" : "primary"}
@@ -707,6 +745,40 @@ export default function ServerCard({
                       "Убрать Hysteria2 из подписок"
                     ) : (
                       "Добавить Hysteria2 в подписки"
+                    )}
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  className={s.trojan_deployed ? "ghost" : "primary"}
+                  disabled={isBusy}
+                  onClick={onConnectTrojan}
+                >
+                  {busyAction === "trojan" ? (
+                    <>
+                      <Spinner /> {s.trojan_deployed ? "Обновляем Trojan…" : "Подключаем Trojan…"}
+                    </>
+                  ) : s.trojan_deployed ? (
+                    "Обновить Trojan"
+                  ) : (
+                    "Подключить Trojan"
+                  )}
+                </button>
+                {s.trojan_deployed ? (
+                  <button
+                    type="button"
+                    className="ghost"
+                    disabled={isBusy}
+                    onClick={onToggleTrojanSubscriptions}
+                  >
+                    {busyAction === "trojanSubs" ? (
+                      <>
+                        <Spinner /> Сохраняем…
+                      </>
+                    ) : s.trojan_in_subscriptions ? (
+                      "Убрать Trojan из подписок"
+                    ) : (
+                      "Добавить Trojan в подписки"
                     )}
                   </button>
                 ) : null}

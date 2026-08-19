@@ -640,6 +640,8 @@ export type ServerRow = {
   /** 1 = админ сохранил настройки вручную; deploy/hints не перезаписывают subscription_settings. */
   subscription_settings_custom: number;
   vless_deployed: number;
+  /** 1 = VLESS ссылка попадает в клиентские подписки (если сервер выбран у пользователя). */
+  vless_in_subscriptions: number;
   /** 1 = Hysteria2 установлен и запущен на узле. */
   hysteria2_deployed: number;
   /** 1 = ссылка Hysteria2 попадает в клиентские подписки (если сервер выбран у пользователя). */
@@ -650,6 +652,15 @@ export type ServerRow = {
   hysteria2_config_path: string | null;
   /** SHA-256 leaf-сертификата HY2 (hex без `:`) для pinnedPeerCertSha256 / pcs. */
   hysteria2_cert_sha256: string;
+  /** 1 = Trojan TLS inbound установлен на узле. */
+  trojan_deployed: number;
+  /** 1 = ссылка Trojan попадает в клиентские подписки (если сервер выбран у пользователя). */
+  trojan_in_subscriptions: number;
+  /** Публичный порт в подписке (443 при SNI-mux, иначе listen). */
+  trojan_port: number;
+  trojan_sni: string;
+  /** SHA-256 leaf-сертификата Trojan (hex без `:`) для pinSHA256 / pcs. */
+  trojan_cert_sha256: string;
   /** 1 = только эксперименты, можно свободно использовать 443 без прод-подписок. */
   experimental_only: number;
   last_ssh_ok: number;
@@ -1427,6 +1438,8 @@ export function normalizeServer(s: ServerRow): ServerRow {
     ),
     subscription_settings_custom: s.subscription_settings_custom === 1 ? 1 : 0,
     vless_deployed: s.vless_deployed === 1 ? 1 : 0,
+    vless_in_subscriptions:
+      s.vless_in_subscriptions === 1 ? 1 : s.vless_in_subscriptions === 0 ? 0 : s.vless_deployed === 1 ? 1 : 0,
     hysteria2_deployed: s.hysteria2_deployed === 1 ? 1 : 0,
     hysteria2_in_subscriptions: s.hysteria2_in_subscriptions === 1 ? 1 : 0,
     hysteria2_port: (() => {
@@ -1438,6 +1451,17 @@ export function normalizeServer(s: ServerRow): ServerRow {
     hysteria2_stats_secret: String(s.hysteria2_stats_secret ?? "").trim(),
     hysteria2_config_path: s.hysteria2_config_path ?? null,
     hysteria2_cert_sha256: String(s.hysteria2_cert_sha256 ?? "")
+      .trim()
+      .replace(/:/g, "")
+      .toLowerCase(),
+    trojan_deployed: s.trojan_deployed === 1 ? 1 : 0,
+    trojan_in_subscriptions: s.trojan_in_subscriptions === 1 ? 1 : 0,
+    trojan_port: (() => {
+      const n = Math.floor(Number(s.trojan_port) || 0);
+      return n >= 1 && n <= 65535 ? n : 8446;
+    })(),
+    trojan_sni: String(s.trojan_sni ?? "").trim() || "www.cloudflare.com",
+    trojan_cert_sha256: String(s.trojan_cert_sha256 ?? "")
       .trim()
       .replace(/:/g, "")
       .toLowerCase(),

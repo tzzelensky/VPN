@@ -5,6 +5,7 @@ import { getServerSubscriptionSettings, listDeployedServers, type UserRow } from
 import { resolveVpnDisplayEntryOrderForUser } from "./vpnDisplayCatalog.js";
 import { parseVpnEntryKey } from "./vpnDisplayOrder.js";
 import { buildHysteria2UriForUser } from "./hysteria2Link.js";
+import { buildTrojanUriForUser } from "./trojanLink.js";
 import { buildVlessUriFromSubscriptionSettings } from "./vlessLink.js";
 
 export function isHappUserAgent(ua: string | undefined | null): boolean {
@@ -161,17 +162,48 @@ function buildHysteria2Outbound(p: ParsedVlessParams): Record<string, unknown> {
   };
 }
 
-/** Профиль Happ из vless:// или hysteria2:// (без полного routing — как обычный узел). */
+function buildTrojanOutbound(p: ParsedVlessParams): Record<string, unknown> {
+  const tls: Record<string, unknown> = {
+    serverName: p.sni || undefined,
+    fingerprint: p.fingerprint || "chrome",
+  };
+  const pin = String(p.pinnedPeerCertSha256 ?? "")
+    .trim()
+    .replace(/:/g, "")
+    .toLowerCase();
+  if (pin) tls.pinnedPeerCertSha256 = pin;
+  return {
+    protocol: "trojan",
+    settings: {
+      servers: [
+        {
+          address: p.address,
+          port: p.port,
+          password: p.uuid,
+        },
+      ],
+    },
+    streamSettings: {
+      network: p.network || "tcp",
+      security: p.security || "tls",
+      tlsSettings: tls,
+    },
+    tag: "proxy",
+  };
+}
+
+/** Профиль Happ из vless://, trojan:// или hysteria2:// (без полного routing — как обычный узел). */
 export function shareLinkToHappProfile(uri: string): Record<string, unknown> | null {
   const trimmed = uri.trim();
   if (!trimmed || /^happ:\/\//i.test(trimmed)) return null;
   const isHy = /^hysteria2:\/\//i.test(trimmed) || /^hysteria:\/\//i.test(trimmed);
   const isVless = /^vless:\/\//i.test(trimmed);
-  if (!isHy && !isVless) return null;
+  const isTrojan = /^trojan:\/\//i.test(trimmed);
+  if (!isHy && !isVless && !isTrojan) return null;
   const p = parseProxyUri(trimmed);
   if (!p) return null;
   const remarks = (p.remark || `${p.address}:${p.port}`).slice(0, 120);
-  const outbound = isHy ? buildHysteria2Outbound(p) : buildVlessOutbound(p);
+  const outbound = isHy ? buildHysteria2Outbound(p) : isTrojan ? buildTrojanOutbound(p) : buildVlessOutbound(p);
   return {
     dns: { queryStrategy: "AsIs", servers: ["1.1.1.1", "1.0.0.1", "8.8.8.8"] },
     inbounds: defaultInbounds(),
@@ -227,6 +259,13 @@ export function buildHappJsonSubscriptionBody(
         const row = servers.get(p.id);
         if (!row || row.hysteria2_deployed !== 1 || row.hysteria2_in_subscriptions !== 1) continue;
         const uri = buildHysteria2UriForUser(row, user);
+        if (uri) pushProfile(shareLinkToHappProfile(uri), uri);
+        continue;
+      }
+      if (p.kind === "trojan") {
+        const row = servers.get(p.id);
+        if (!row || row.trojan_deployed !== 1 || row.trojan_in_subscriptions !== 1) continue;
+        const uri = buildTrojanUriForUser(row, user);
         if (uri) pushProfile(shareLinkToHappProfile(uri), uri);
         continue;
       }
