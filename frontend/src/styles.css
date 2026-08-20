@@ -5223,12 +5223,26 @@ html.admin-mobile-app .modal.user-modal-panel .modal-footer,
 
 .users-dash-wrap {
   margin-top: 0.75rem;
+  border-radius: 14px;
+  overflow: auto;
+  border: 1px solid color-mix(in srgb, var(--border) 85%, transparent);
+  background: color-mix(in srgb, var(--panel) 92%, var(--surface-inset, transparent));
+  box-shadow:
+    0 1px 2px rgba(15, 23, 42, 0.04),
+    0 10px 28px rgba(15, 23, 42, 0.07),
+    0 0 48px rgba(15, 23, 42, 0.035);
 }
 
 .users-dash-panel {
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
+  border-radius: 16px;
+  overflow: hidden;
+  box-shadow:
+    0 1px 2px rgba(15, 23, 42, 0.04),
+    0 12px 32px rgba(15, 23, 42, 0.08),
+    0 0 56px rgba(15, 23, 42, 0.04);
 }
 
 .users-dash-top {
@@ -5533,11 +5547,21 @@ html.admin-mobile-app .modal.user-modal-panel .modal-footer,
 
 .users-dash-table {
   font-size: 0.84rem;
+  border-collapse: separate;
+  border-spacing: 0;
 }
 
 .users-dash-table th,
 .users-dash-table td {
   vertical-align: middle;
+}
+
+.users-dash-table thead th:first-child {
+  border-top-left-radius: 13px;
+}
+
+.users-dash-table thead th:last-child {
+  border-top-right-radius: 13px;
 }
 
 .users-dash-table .ud-th-sort {
@@ -12382,6 +12406,22 @@ html[data-theme="light"] th {
 
 html[data-theme="light"] .users-dash-table tbody tr:hover {
   background: rgba(37, 99, 235, 0.05);
+}
+
+html[data-theme="light"] .users-dash-panel {
+  box-shadow:
+    0 1px 2px rgba(15, 23, 42, 0.03),
+    0 14px 36px rgba(15, 23, 42, 0.08),
+    0 0 60px rgba(15, 23, 42, 0.045);
+}
+
+html[data-theme="light"] .users-dash-wrap {
+  background: #fff;
+  border-color: rgba(148, 163, 184, 0.28);
+  box-shadow:
+    0 1px 2px rgba(15, 23, 42, 0.03),
+    0 8px 24px rgba(15, 23, 42, 0.06),
+    0 0 40px rgba(15, 23, 42, 0.03);
 }
 
 html[data-theme="light"] .flash.ok {
