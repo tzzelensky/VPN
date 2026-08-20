@@ -5400,29 +5400,86 @@ html.admin-mobile-app .modal.user-modal-panel .modal-footer,
   cursor: not-allowed;
 }
 
-.users-renew-btn {
-  appearance: none;
-  display: inline-flex;
-  align-items: center;
-  gap: 0.35rem;
-  border: 1px solid color-mix(in srgb, var(--ok) 45%, transparent);
-  background: color-mix(in srgb, var(--ok) 14%, transparent);
-  color: var(--ok);
-  border-radius: 8px;
-  padding: 0.28rem 0.65rem;
-  font-size: 0.78rem;
-  font-weight: 650;
-  cursor: pointer;
-  white-space: nowrap;
+@keyframes ud-renew-water-fill {
+  0% {
+    transform: scaleX(0);
+    opacity: 0.55;
+  }
+  55% {
+    opacity: 0.85;
+  }
+  100% {
+    transform: scaleX(1);
+    opacity: 0.4;
+  }
 }
 
-.users-renew-btn:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--ok) 24%, transparent);
+.ud-row--renewing > td {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
 }
 
-.users-renew-btn:disabled {
-  opacity: 0.55;
-  cursor: not-allowed;
+.ud-row--renewing > td::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  transform-origin: left center;
+  background: linear-gradient(
+    90deg,
+    rgba(134, 239, 172, 0.55) 0%,
+    rgba(74, 222, 128, 0.42) 42%,
+    rgba(187, 247, 208, 0.28) 78%,
+    rgba(220, 252, 231, 0.12) 100%
+  );
+  animation: ud-renew-water-fill 1.35s cubic-bezier(0.33, 0.1, 0.25, 1) infinite;
+}
+
+.ud-row--renewing > td > * {
+  position: relative;
+  z-index: 1;
+}
+
+.users-mobile-card--renewing {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+}
+
+.users-mobile-card--renewing::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  transform-origin: left center;
+  border-radius: inherit;
+  background: linear-gradient(
+    90deg,
+    rgba(134, 239, 172, 0.55) 0%,
+    rgba(74, 222, 128, 0.42) 42%,
+    rgba(187, 247, 208, 0.28) 78%,
+    rgba(220, 252, 231, 0.12) 100%
+  );
+  animation: ud-renew-water-fill 1.35s cubic-bezier(0.33, 0.1, 0.25, 1) infinite;
+}
+
+.users-mobile-card--renewing > * {
+  position: relative;
+  z-index: 1;
+}
+
+html[data-theme="light"] .ud-row--renewing > td::before,
+html[data-theme="light"] .users-mobile-card--renewing::before {
+  background: linear-gradient(
+    90deg,
+    rgba(134, 239, 172, 0.62) 0%,
+    rgba(74, 222, 128, 0.38) 45%,
+    rgba(187, 247, 208, 0.22) 80%,
+    rgba(240, 253, 244, 0.1) 100%
+  );
 }
 
 .users-tab-count {
@@ -5538,6 +5595,12 @@ html.admin-mobile-app .modal.user-modal-panel .modal-footer,
 
 .ud-tool-success {
   color: #22c55e;
+}
+
+.ud-tool-success:hover:not(:disabled) {
+  border-color: rgba(34, 197, 94, 0.45);
+  color: #16a34a;
+  background: rgba(34, 197, 94, 0.12);
 }
 
 .ud-sync-all {

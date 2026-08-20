@@ -235,6 +235,16 @@ function IconPower(p: SVGProps<SVGSVGElement>) {
   );
 }
 
+function IconRenew(p: SVGProps<SVGSVGElement>) {
+  return (
+    <svg width={18} height={18} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden {...p}>
+      <rect x="3" y="4" width="18" height="18" rx="2" />
+      <path d="M16 2v4M8 2v4M3 10h18" />
+      <path d="M12 14v4M10 16h4" />
+    </svg>
+  );
+}
+
 type UserModalState = { kind: "closed" } | { kind: "create" } | { kind: "edit"; userId: number };
 const USERS_TABS = ["active", "inactive", "preview"] as const;
 
@@ -865,8 +875,13 @@ export default function UsersPage({ onLogout }: { onLogout: () => void }) {
     }
     setRenewBusyId(u.id);
     setMsg(null);
+    const startedAt = Date.now();
     try {
       const r = await renewUserSubscription(u.id);
+      // Даём доиграть заливку строки, пока пользователь ещё в «Неактивных».
+      const minMs = 1200;
+      const left = minMs - (Date.now() - startedAt);
+      if (left > 0) await new Promise((resolve) => window.setTimeout(resolve, left));
       await refresh();
       const until = r.user.expiry_time
         ? new Date(r.user.expiry_time).toLocaleDateString("ru-RU", {
@@ -898,13 +913,13 @@ export default function UsersPage({ onLogout }: { onLogout: () => void }) {
     return (
       <button
         type="button"
-        className="users-renew-btn"
+        className={`ud-tool ud-tool-success${renewBusyId === u.id ? " is-busy" : ""}`}
         title="Продлить на 30 дней и уведомить клиента"
+        aria-label="Продлить"
         disabled={renewBusyId === u.id || tableLocked}
         onClick={() => void onRenewInactive(u)}
       >
-        {renewBusyId === u.id ? <Spinner /> : null}
-        <span>Продлить</span>
+        {renewBusyId === u.id ? <Spinner /> : <IconRenew />}
       </button>
     );
   }
@@ -1485,7 +1500,7 @@ export default function UsersPage({ onLogout }: { onLogout: () => void }) {
               return (
                 <article
                   key={u.id}
-                  className={`users-mobile-card ${hiddenUserIdSet.has(u.id) && showHiddenUsers ? "users-mobile-card--hidden-preview" : ""}`}
+                  className={`users-mobile-card${renewBusyId === u.id ? " users-mobile-card--renewing" : ""}${hiddenUserIdSet.has(u.id) && showHiddenUsers ? " users-mobile-card--hidden-preview" : ""}`}
                 >
                   <div className="users-mobile-card-head">
                     <div className="users-mobile-card-title-wrap">
@@ -1597,7 +1612,7 @@ export default function UsersPage({ onLogout }: { onLogout: () => void }) {
                   return (
                     <tr
                       key={u.id}
-                      className={`ud-row ${hiddenUserIdSet.has(u.id) && showHiddenUsers ? "ud-row--hidden-preview" : ""}`}
+                      className={`ud-row${renewBusyId === u.id ? " ud-row--renewing" : ""}${hiddenUserIdSet.has(u.id) && showHiddenUsers ? " ud-row--hidden-preview" : ""}`}
                     >
                       <td className="ud-td-actions">
                         <div className="ud-toolbar" role="group" aria-label="Действия по клиенту">
