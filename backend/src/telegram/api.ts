@@ -253,7 +253,7 @@ export async function editMessageText(
   messageId: number,
   text: string,
   opts?: { parse_mode?: "HTML"; reply_markup?: unknown },
-): Promise<void> {
+): Promise<boolean> {
   const r = await tgCall<unknown>("editMessageText", {
     chat_id: chatId,
     message_id: messageId,
@@ -264,7 +264,9 @@ export async function editMessageText(
   });
   if (!r.ok) {
     console.error("[telegram] editMessageText failed:", r.description);
+    return false;
   }
+  return true;
 }
 
 export async function sendTelegramDocument(
@@ -311,7 +313,7 @@ export async function editMessageCaption(
   messageId: number,
   caption: string,
   opts?: { parse_mode?: "HTML"; reply_markup?: unknown },
-): Promise<void> {
+): Promise<boolean> {
   const r = await tgCall<unknown>("editMessageCaption", {
     chat_id: chatId,
     message_id: messageId,
@@ -321,7 +323,9 @@ export async function editMessageCaption(
   });
   if (!r.ok) {
     console.error("[telegram] editMessageCaption failed:", r.description);
+    return false;
   }
+  return true;
 }
 
 export async function sendTelegramPhotoBinary(

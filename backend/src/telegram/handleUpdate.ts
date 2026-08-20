@@ -98,7 +98,14 @@ type Message = {
 type CallbackQuery = {
   id: string;
   from: TgUser;
-  message?: { chat: { id: number }; message_id: number; message_thread_id?: number; caption?: string };
+  message?: {
+    chat: { id: number };
+    message_id: number;
+    message_thread_id?: number;
+    text?: string;
+    caption?: string;
+    photo?: { file_id: string }[];
+  };
   data?: string;
 };
 

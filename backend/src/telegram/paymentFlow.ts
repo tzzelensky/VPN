@@ -1711,16 +1711,19 @@ export async function onAdminPaymentConfirm(
     }
   }
 
+  const confirmFeedback = adminPaymentConfirmFeedback({
+    kind: sess.kind,
+    autoCreated,
+    isTopUp,
+    isTest,
+    sentWithSubscriptionLink: autoCreated && !isTopUp,
+  });
   await answerCallbackQuery(callbackQueryId, {
-    text: adminPaymentConfirmFeedback({
-      kind: sess.kind,
-      autoCreated,
-      isTopUp,
-      isTest,
-      sentWithSubscriptionLink: autoCreated && !isTopUp,
-    }),
+    text: confirmFeedback,
     show_alert: true,
   });
+  // Сразу убираем кнопки и пишем статус — до долгого push на серверы.
+  await finalizeAdminPaymentReceipt(adminMessage, "confirmed", confirmFeedback);
   try {
     await pushClientListToAllDeployedServers();
   } catch (e) {
@@ -1737,7 +1740,11 @@ export async function onAdminPaymentConfirm(
           .join(" · ")}\n`
       : "";
   const primary = affected[0] ?? linked[0];
-  if (!primary) return;
+  if (!primary) {
+    console.error("[telegram] payment confirm: no primary user after apply, session=", sessionId);
+    archiveAndDeletePaymentSession(sessionId, "confirmed");
+    return;
+  }
   const subUrl = publicSubscriptionUrl(primary.sub_token);
   const subCode = escUrlForCode(subUrl);
   const affectedList =
@@ -1807,8 +1814,6 @@ export async function onAdminPaymentConfirm(
       }
     }
   }
-
-  await finalizeAdminPaymentReceipt(adminMessage, "confirmed");
 
   const targetUser =
     sess.target_user_id != null && sess.target_user_id > 0 ? getUser(sess.target_user_id) : findUsersByTelegramChatId(sess.tg_chat_id)[0];
@@ -1941,7 +1946,7 @@ export async function onAdminPaymentReject(
     "<b>Платёж не подтверждён.</b>\n\nЕсли вы уже оплатили, напишите администратору и приложите чек ещё раз через «Оплата подписки», «Докупить ГБ» или «Купить подписку».";
   logPaymentBotMessage(sess.tg_chat_id, rejectBody);
   archiveAndDeletePaymentSession(sessionId, "rejected");
-  await finalizeAdminPaymentReceipt(adminMessage, "rejected");
+  await finalizeAdminPaymentReceipt(adminMessage, "rejected", adminPaymentRejectFeedback());
   await sendTelegramHtml(sess.tg_chat_id, rejectBody, backHomeRow());
   const targetUser =
     sess.target_user_id != null && sess.target_user_id > 0 ? getUser(sess.target_user_id) : findUsersByTelegramChatId(sess.tg_chat_id)[0];

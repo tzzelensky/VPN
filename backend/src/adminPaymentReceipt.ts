@@ -14,6 +14,7 @@ import { escHtml, subscriptionPublicName } from "./telegram/format.js";
 import {
   editMessageCaption,
   editMessageText,
+  editTelegramReplyMarkup,
   sendTelegramPhoto,
   sendTelegramPhotoBinary,
 } from "./telegram/api.js";
@@ -22,12 +23,15 @@ import { getWhitelistPurchasePriceRub } from "./whitelistPurchaseService.js";
 import { getComboOffer, resolveComboOfferPricing } from "./comboSubscriptionService.js";
 
 const SEP = "━━━━━━━━━━━━━━━━━━━━━━";
+const CAPTION_MAX = 1024;
+const TEXT_MAX = 4096;
 
 export type AdminPaymentReceiptMessage = {
   chat: { id: number };
   message_id: number;
   text?: string;
   caption?: string;
+  photo?: unknown[];
 };
 
 export type AdminPaymentProof =
@@ -308,9 +312,17 @@ export function adminDecisionKeyboard(sessionId: string) {
   };
 }
 
-function truncateTelegramCaption(html: string, max = 1024): string {
+function truncateTelegramCaption(html: string, max = CAPTION_MAX): string {
   if (html.length <= max) return html;
   return `${html.slice(0, max - 1)}…`;
+}
+
+function fitWithFooter(base: string, footer: string, max: number): string {
+  const combined = `${base}${footer}`;
+  if (combined.length <= max) return combined;
+  const budget = Math.max(0, max - footer.length - 1);
+  const trimmed = base.slice(0, budget).trimEnd();
+  return `${trimmed}…${footer}`;
 }
 
 export async function sendAdminPaymentReceiptToAdmins(
@@ -351,30 +363,47 @@ export async function finalizeAdminPaymentReceipt(
   status: "confirmed" | "rejected",
   footerNote?: string,
 ): Promise<void> {
-  if (!msg) return;
+  if (!msg?.chat?.id || !msg.message_id) return;
   const note = String(footerNote ?? "").trim();
   const footer =
     status === "confirmed"
       ? note
-        ? `\n\n${SEP}\n✅ <b>Обработано</b> · ${escHtml(note)}`
-        : `\n\n${SEP}\n✅ <b>Обработано</b> · уведомление отправлено клиенту`
+        ? `\n\n${SEP}\n✅ <b>Подтверждено</b>\n${escHtml(note)}`
+        : `\n\n${SEP}\n✅ <b>Подтверждено</b>\nСообщение отправлено пользователю`
       : note
-        ? `\n\n${SEP}\n❌ <b>Отклонено</b> · ${escHtml(note)}`
-        : `\n\n${SEP}\n❌ <b>Отклонено</b> · уведомление отправлено клиенту`;
-  const base = String(msg.text ?? msg.caption ?? "").trim();
-  const next = base ? `${base}${footer}` : footer.trim();
+        ? `\n\n${SEP}\n❌ <b>Отклонено</b>\n${escHtml(note)}`
+        : `\n\n${SEP}\n❌ <b>Отклонено</b>\nСообщение отправлено пользователю`;
+
+  const isPhoto =
+    (Array.isArray(msg.photo) && msg.photo.length > 0) ||
+    (typeof msg.caption === "string" && msg.text == null);
+  const base = String(isPhoto ? (msg.caption ?? "") : (msg.text ?? msg.caption ?? "")).trim();
+  const max = isPhoto ? CAPTION_MAX : TEXT_MAX;
+  const next = base ? fitWithFooter(base, footer, max) : footer.trim();
+  const emptyKeyboard = { inline_keyboard: [] as unknown[] };
+
   try {
-    if (msg.caption != null && msg.text == null) {
-      await editMessageCaption(msg.chat.id, msg.message_id, next, {
-        reply_markup: { inline_keyboard: [] },
+    let edited = false;
+    if (isPhoto) {
+      edited = await editMessageCaption(msg.chat.id, msg.message_id, next, {
+        reply_markup: emptyKeyboard,
       });
     } else {
-      await editMessageText(msg.chat.id, msg.message_id, next, {
-        reply_markup: { inline_keyboard: [] },
+      edited = await editMessageText(msg.chat.id, msg.message_id, next, {
+        reply_markup: emptyKeyboard,
       });
+    }
+    // Если правка текста/подписи не прошла (лимит, HTML и т.п.) — хотя бы убрать кнопки.
+    if (!edited) {
+      await editTelegramReplyMarkup(msg.chat.id, msg.message_id, emptyKeyboard);
     }
   } catch (e) {
     console.error("[payment-receipt] finalizeAdminPaymentReceipt:", e);
+    try {
+      await editTelegramReplyMarkup(msg.chat.id, msg.message_id, emptyKeyboard);
+    } catch (e2) {
+      console.error("[payment-receipt] clear keyboard failed:", e2);
+    }
   }
 }
 
