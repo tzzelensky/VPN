@@ -175,8 +175,13 @@ router.get("/:token", async (req, res) => {
       device_limit_pressure: deviceLimitPressure,
     };
 
-    if (shouldServeHappJsonSubscription(subUser, userAgent, xClient)) {
-      const links = resolveSubscriptionLinks(subUser, resolveCtx);
+    const links = resolveSubscriptionLinks(subUser, resolveCtx);
+    // Happ JSON нельзя отдавать при пустых links: билдер иначе снова соберёт узлы из каталога.
+    if (
+      links.length > 0 &&
+      !deviceLimitDenied &&
+      shouldServeHappJsonSubscription(subUser, userAgent, xClient)
+    ) {
       const happ = buildHappJsonSubscriptionBody(subUser, links);
       if (happ) {
         res.setHeader("Content-Type", happ.contentType);

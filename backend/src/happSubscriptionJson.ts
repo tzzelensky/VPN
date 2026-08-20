@@ -1,7 +1,7 @@
 import { parseProxyUri, type ParsedVlessParams } from "./configVaultUri.js";
 import { configVaultLinksForUser } from "./configVaultDb.js";
 import { subscriptionWhitelistEntriesForUser } from "./whitelistVaultDb.js";
-import { getServerSubscriptionSettings, listDeployedServers, type UserRow } from "./db.js";
+import { getServerSubscriptionSettings, listDeployedServers, userAllowedOnServers, type UserRow } from "./db.js";
 import { resolveVpnDisplayEntryOrderForUser } from "./vpnDisplayCatalog.js";
 import { parseVpnEntryKey } from "./vpnDisplayOrder.js";
 import { buildHysteria2UriForUser } from "./hysteria2Link.js";
@@ -223,11 +223,18 @@ export function shareLinkToHappProfile(uri: string): Record<string, unknown> | n
 /**
  * Тело подписки для Happ/Incy: JSON-массив профилей Xray в порядке vpnDisplay.
  * Ключи БС с client_json идут as-is (routing + xhttp.extra сохраняются).
+ *
+ * Важно: если `shareLinks` пустой (истечение / лимит устройств / отключение),
+ * не пересобираем узлы из каталога — иначе клиент снова получит рабочие конфиги.
  */
 export function buildHappJsonSubscriptionBody(
   user: UserRow,
   shareLinks: string[],
 ): { contentType: string; body: string } | null {
+  if (!userAllowedOnServers(user) || shareLinks.length === 0) {
+    return null;
+  }
+
   const profiles: Record<string, unknown>[] = [];
   const used = new Set<string>();
   const pushProfile = (profile: Record<string, unknown> | null, dedupeKey?: string) => {

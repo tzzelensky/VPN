@@ -30,6 +30,7 @@ type Props = {
   navRef?: React.RefObject<BottomNavHandle | null>;
   headerShellRef?: React.MutableRefObject<HTMLDivElement | null>;
   contentRef?: React.MutableRefObject<HTMLDivElement | null>;
+  portalMountRef?: (el: HTMLDivElement | null) => void;
   children: ReactNode;
 };
 
@@ -49,6 +50,7 @@ export default function WebAppLayoutNew({
   navRef: navRefProp,
   headerShellRef,
   contentRef,
+  portalMountRef,
   children,
 }: Props) {
   const navRefLocal = useRef<BottomNavHandle | null>(null);
@@ -103,6 +105,7 @@ export default function WebAppLayoutNew({
       )}
       {!hideNav ? <BottomNavNew ref={navRef as React.Ref<BottomNavHandle>} items={navItems} active={tab} onChange={onTabChange} /> : null}
       {toast && onToastDismiss ? <Toast message={toast} tone={toastTone} onDismiss={onToastDismiss} /> : null}
+      <div ref={portalMountRef} className="mn-portal-mount" aria-hidden="true" />
     </div>
   );
 }

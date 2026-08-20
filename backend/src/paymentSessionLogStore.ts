@@ -256,7 +256,8 @@ export function cancelActivePaymentSessionLogsForChat(tgChatId: number, exceptId
     for (let i = 0; i < store.sessions.length; i++) {
       const s = store.sessions[i]!;
       if (s.id === exceptId || s.tg_chat_id !== tgChatId) continue;
-      if (s.status !== "awaiting_proof" && s.status !== "pending_admin") continue;
+      // Только awaiting_proof: pending_admin — уже отправленные чеки, их нельзя сбрасывать.
+      if (s.status !== "awaiting_proof") continue;
       store.sessions[i] = {
         ...s,
         status: "cancelled",

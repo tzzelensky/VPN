@@ -5386,6 +5386,31 @@ html.admin-mobile-app .modal.user-modal-panel .modal-footer,
   cursor: not-allowed;
 }
 
+.users-renew-btn {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  border: 1px solid color-mix(in srgb, var(--ok) 45%, transparent);
+  background: color-mix(in srgb, var(--ok) 14%, transparent);
+  color: var(--ok);
+  border-radius: 8px;
+  padding: 0.28rem 0.65rem;
+  font-size: 0.78rem;
+  font-weight: 650;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.users-renew-btn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--ok) 24%, transparent);
+}
+
+.users-renew-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
 .users-tab-count {
   display: inline-flex;
   align-items: center;
@@ -20106,7 +20131,8 @@ html[data-theme="light"] .comms-wiz-confirm-warn {
 }
 
 /* Модалки превью только внутри телефона */
-.webapp-preview__phone-screen .mn-modal-backdrop--portal,
+.webapp-preview__phone-screen .mn-portal-mount,
+.webapp-preview__phone-screen .mn-portal-mount .mn-modal-backdrop--portal,
 .webapp-preview__phone-screen .roulette-modal-portal.modal-backdrop,
 .webapp-preview__phone-screen .mysub-dropper-run-portal {
   position: absolute !important;

@@ -9,6 +9,7 @@ import {
   notifyUserExpiring,
   patchUser,
   pushAllUserClients,
+  renewUserSubscription,
   resetUserTraffic,
   setUserTrafficUsed,
   syncUserStatsFromServers,
@@ -260,6 +261,7 @@ export default function UsersPage({ onLogout }: { onLogout: () => void }) {
   const [copyBusyId, setCopyBusyId] = useState<number | null>(null);
   const [notifyBusyId, setNotifyBusyId] = useState<number | null>(null);
   const [resetBusyId, setResetBusyId] = useState<number | null>(null);
+  const [renewBusyId, setRenewBusyId] = useState<number | null>(null);
   const [trafficAdjustBusyId, setTrafficAdjustBusyId] = useState<number | null>(null);
   const [syncBusy, setSyncBusy] = useState(false);
   const [expandedInfoId, setExpandedInfoId] = useState<number | null>(null);
@@ -419,7 +421,13 @@ export default function UsersPage({ onLogout }: { onLogout: () => void }) {
   }, []);
 
   const tableLocked =
-    refreshing || deleteBusyId !== null || notifyBusyId !== null || resetBusyId !== null || syncBusy || inactiveDeleteBusy;
+    refreshing ||
+    deleteBusyId !== null ||
+    notifyBusyId !== null ||
+    resetBusyId !== null ||
+    renewBusyId !== null ||
+    syncBusy ||
+    inactiveDeleteBusy;
 
   function onHideUserToggle(u: UserDto) {
     if (hiddenUserIdSet.has(u.id)) {
@@ -843,10 +851,69 @@ export default function UsersPage({ onLogout }: { onLogout: () => void }) {
     })();
   }
 
+  async function onRenewInactive(u: UserDto) {
+    const trafficNote =
+      u.total_gb > 0
+        ? "Использованный трафик будет обнулён по лимиту тарифа."
+        : "Трафик безлимитный — сброс не нужен.";
+    if (
+      !confirm(
+        `Продлить «${u.name}» на 30 дней?\n\nНовый срок от сегодня.\n${trafficNote}\nКлиенту уйдёт сообщение в Telegram.`,
+      )
+    ) {
+      return;
+    }
+    setRenewBusyId(u.id);
+    setMsg(null);
+    try {
+      const r = await renewUserSubscription(u.id);
+      await refresh();
+      const until = r.user.expiry_time
+        ? new Date(r.user.expiry_time).toLocaleDateString("ru-RU", {
+            day: "2-digit",
+            month: "2-digit",
+            year: "numeric",
+          })
+        : "—";
+      const tgNote = r.telegram_notified
+        ? " Клиенту отправлено уведомление."
+        : r.telegram_error
+          ? ` Telegram: ${r.telegram_error}`
+          : String(u.tg_id || "").trim()
+            ? ""
+            : " Telegram не указан — сообщение не отправлено.";
+      setMsg({
+        type: "ok",
+        text: `«${u.name}» продлена до ${until}${r.traffic_reset ? ", трафик обнулён" : ""}.${tgNote}`,
+      });
+    } catch (err) {
+      setMsg({ type: "err", text: String(err) });
+    } finally {
+      setRenewBusyId(null);
+    }
+  }
+
+  function renderRenewInactiveButton(u: UserDto) {
+    if (activeTab !== "inactive") return null;
+    return (
+      <button
+        type="button"
+        className="users-renew-btn"
+        title="Продлить на 30 дней и уведомить клиента"
+        disabled={renewBusyId === u.id || tableLocked}
+        onClick={() => void onRenewInactive(u)}
+      >
+        {renewBusyId === u.id ? <Spinner /> : null}
+        <span>Продлить</span>
+      </button>
+    );
+  }
+
   function renderUserToolbar(u: UserDto, opts?: { mobile?: boolean }) {
     const mobile = opts?.mobile === true;
     return (
       <div className="ud-toolbar" role="group" aria-label="Действия по клиенту">
+        {renderRenewInactiveButton(u)}
         <button
           type="button"
           className="ud-tool"
@@ -1534,6 +1601,7 @@ export default function UsersPage({ onLogout }: { onLogout: () => void }) {
                     >
                       <td className="ud-td-actions">
                         <div className="ud-toolbar" role="group" aria-label="Действия по клиенту">
+                          {renderRenewInactiveButton(u)}
                           <button
                             type="button"
                             className="ud-tool"

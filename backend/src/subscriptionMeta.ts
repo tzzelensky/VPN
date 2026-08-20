@@ -5,6 +5,7 @@ import { isDeviceLimitActiveForUser } from "./deviceLimitEffective.js";
 import { allowedDeviceSlots, reconcileUserDeviceSlots, userDeviceTotalLimit } from "./userDeviceSlots.js";
 import { subscriptionBannerAnnounceHeader, getSubscriptionBannerSettings } from "./subscriptionBannerHapp.js";
 import { publicBrandName } from "./publicBrand.js";
+import { getSubscriptionAccessBlock } from "./subscriptionAccess.js";
 
 type UnlimitedTotalMode = "zero" | "omit" | "maxsafe";
 const unlimitedMode = (
@@ -85,16 +86,19 @@ export function setSubscriptionUserHeaders(
   const plain = parts.join("; ");
   res.setHeader("subscription-userinfo", plain);
 
-  const rawTitle = profileTitleWithTrafficAndExpiry(user);
+  const accessBlock = getSubscriptionAccessBlock(user);
+  const rawTitle = accessBlock
+    ? `${profileTitleBase(user)} · ${accessBlock.title}`
+    : profileTitleWithTrafficAndExpiry(user);
   const pressure = opts?.deviceLimitPressure;
   let titleWithLimit = rawTitle;
-  if (isDeviceLimitActiveForUser(user)) {
+  if (!accessBlock && isDeviceLimitActiveForUser(user)) {
     const slots = reconcileUserDeviceSlots(user);
     const used = allowedDeviceSlots(slots).length;
     const limit = userDeviceTotalLimit(user);
     titleWithLimit = `${rawTitle} · ${used}/${limit} устр.`;
   }
-  if (pressure?.active) {
+  if (!accessBlock && pressure?.active) {
     titleWithLimit = `${rawTitle}${pressure.profileSuffix}`;
   }
   const nonAscii = [...titleWithLimit].some((c) => c.charCodeAt(0) > 127);
@@ -104,18 +108,21 @@ export function setSubscriptionUserHeaders(
     res.setHeader("profile-title", titleWithLimit);
   }
 
-  res.setHeader("profile-update-interval", pressure?.active ? "1" : "1");
+  res.setHeader("profile-update-interval", "1");
 
   const deviceLimitActive = isDeviceLimitActiveForUser(user);
   const bannerActive = getSubscriptionBannerSettings()?.enabled === true;
-  if (deviceLimitActive || bannerActive) {
+  if (accessBlock || deviceLimitActive || bannerActive) {
     // Happ: автообновлять подписку при открытии приложения.
     res.setHeader("subscription-auto-update-open-enable", "1");
     // Чтобы клиент не зависел только от manual refresh, включаем обновления и по обычному расписанию.
     res.setHeader("subscription-auto-update-enable", "1");
   }
 
-  if (pressure?.active) {
+  if (accessBlock) {
+    res.setHeader("announce", `base64:${Buffer.from(accessBlock.message, "utf8").toString("base64")}`);
+    res.setHeader("sub-info-color", "red");
+  } else if (pressure?.active) {
     res.setHeader("announce", `base64:${Buffer.from(pressure.message, "utf8").toString("base64")}`);
     res.setHeader("sub-info-color", "red");
     // NOTE: Node.js rejects non-latin1 chars in HTTP header values.

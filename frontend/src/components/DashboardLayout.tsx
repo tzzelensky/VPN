@@ -641,9 +641,14 @@ export default function DashboardLayout({
             year: "numeric",
           })
         : "—";
+      const tgNote = r.telegram_notified
+        ? " Клиенту отправлено уведомление."
+        : r.telegram_error
+          ? ` Telegram: ${r.telegram_error}`
+          : "";
       setCreateFlash({
         type: "ok",
-        text: `«${u.name}» продлена до ${until}${r.traffic_reset ? ", трафик обнулён" : ""}.`,
+        text: `«${u.name}» продлена до ${until}${r.traffic_reset ? ", трафик обнулён" : ""}.${tgNote}`,
       });
     } catch (e) {
       setCreateFlash({ type: "err", text: String(e) });

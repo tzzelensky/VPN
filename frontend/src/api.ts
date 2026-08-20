@@ -1110,7 +1110,7 @@ export async function setUserTrafficUsed(
 
 export async function renewUserSubscription(
   id: number,
-): Promise<{ ok: boolean; traffic_reset: boolean; user: UserDto }> {
+): Promise<{ ok: boolean; traffic_reset: boolean; telegram_notified?: boolean; telegram_error?: string; user: UserDto }> {
   const res = await fetch(`/api/users/${id}/renew-subscription`, {
     method: "POST",
     credentials: "include",

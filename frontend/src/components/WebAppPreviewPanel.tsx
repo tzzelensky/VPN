@@ -101,13 +101,26 @@ export default function WebAppPreviewPanel() {
     setProfileLoading(true);
     setError(null);
     try {
-      const p = await loadAdminMySubWebAppProfile(tgId);
+      let p: MySubProfileDto | null = null;
+      let lastErr: unknown = null;
+      for (let i = 0; i < 2; i++) {
+        try {
+          p = await loadAdminMySubWebAppProfile(tgId);
+          break;
+        } catch (e) {
+          lastErr = e;
+          if (!(e instanceof Error) || e.message !== "Failed to fetch" || i === 1) throw e;
+          await new Promise((r) => window.setTimeout(r, 300));
+        }
+      }
+      if (!p) throw (lastErr instanceof Error ? lastErr : new Error("Failed to fetch"));
       setLegacyShell(p.web_app_new_design === false);
       setProfile({ ...p, web_app_new_design: true });
       setFrameKey((k) => k + 1);
     } catch (e) {
       setProfile(null);
-      setError(e instanceof Error ? e.message : String(e));
+      const msg = e instanceof Error ? e.message : String(e);
+      setError(msg === "Failed to fetch" ? "Не удалось загрузить превью (проверьте API/сеть)." : msg);
     } finally {
       setProfileLoading(false);
     }
@@ -281,3 +294,4 @@ export default function WebAppPreviewPanel() {
     </div>
   );
 }
+

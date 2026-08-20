@@ -1,8 +1,7 @@
-import { createPortal } from "react-dom";
 import PrimaryButton from "./PrimaryButton";
 import SecondaryButton from "./SecondaryButton";
 import type { MySubTheme } from "../types";
-import { useMySubPortalRoot } from "../portalContext";
+import MySubModalBackdrop from "./MySubModalBackdrop";
 
 type Props = {
   open: boolean;
@@ -13,16 +12,8 @@ type Props = {
 };
 
 export default function InstructionModal({ open, onClose, onCopyLink, copyUrl, theme }: Props) {
-  const portalRoot = useMySubPortalRoot();
-  if (!open) return null;
-
-  const light = theme === "light";
-
-  return createPortal(
-    <div
-      className={`mn-modal-backdrop mn-modal-backdrop--portal mn-app mn-app--${theme}${light ? " mysub-wrap--light" : ""}`}
-      onClick={onClose}
-    >
+  return (
+    <MySubModalBackdrop open={open} theme={theme} onClose={onClose}>
       <div className="mn-modal mn-modal--solid" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
         <div className="mn-modal__head">
           <h2>Инструкция по подключению</h2>
@@ -51,7 +42,6 @@ export default function InstructionModal({ open, onClose, onCopyLink, copyUrl, t
           </PrimaryButton>
         </div>
       </div>
-    </div>,
-    portalRoot,
+    </MySubModalBackdrop>
   );
 }

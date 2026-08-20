@@ -16,6 +16,7 @@ import {
   type DeviceLimitPressure,
 } from "./deviceLimitHappPush.js";
 import { happDirectivesForSubscriptionBanner, happBaseDirectivesForSubscriptionBanner } from "./subscriptionBannerHapp.js";
+import { getSubscriptionAccessBlock } from "./subscriptionAccess.js";
 
 export type SubscriptionResolveContext = {
   /** false = превью в панели, лимит устройств не применяем */
@@ -27,9 +28,21 @@ export type SubscriptionResolveContext = {
   device_limit_pressure?: DeviceLimitPressure | null;
 };
 
+function happDirectivesForAccessBlock(message: string): string[] {
+  return [
+    ...happBaseDirectivesForDeviceLimit(),
+    `#announce: base64:${Buffer.from(message, "utf8").toString("base64")}`,
+    `#sub-info-color: red`,
+    `#sub-info-text: ${message}`,
+  ];
+}
+
 export function resolveSubscriptionBase64(user: UserRow, ctx?: SubscriptionResolveContext): string {
-  if (!userAllowedOnServers(user)) {
-    return buildSubscriptionPayload([]);
+  const accessBlock = getSubscriptionAccessBlock(user);
+  if (accessBlock) {
+    return buildSubscriptionNoticePayload(accessBlock.noticeLines, {
+      happDirectives: happDirectivesForAccessBlock(accessBlock.message),
+    });
   }
   const deviceLimitActive = isDeviceLimitActiveForUser(user);
   const applyLimit = ctx?.apply_device_limit !== false && isDeviceLimitActiveForUser(user);

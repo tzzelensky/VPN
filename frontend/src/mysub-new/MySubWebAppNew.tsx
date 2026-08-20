@@ -1,6 +1,4 @@
-import { useEffect, useRef, useCallback, useLayoutEffect } from "react";
-import { createPortal } from "react-dom";
-import { subscriptionLabel } from "../subscriptionLabel";
+import { useEffect, useRef, useCallback, useLayoutEffect, useState } from "react";
 import MySubProfileStats from "../components/MySubProfileStats";
 import type { MySubNavTabId } from "../components/MySubBottomNav";
 import WebAppLayoutNew from "./components/WebAppLayoutNew";
@@ -11,13 +9,27 @@ import InstructionModal from "./components/InstructionModal";
 import MySubTabPanel from "./components/MySubTabPanel";
 import PrimaryButton from "./components/PrimaryButton";
 import SecondaryButton from "./components/SecondaryButton";
+import MySubModalBackdrop from "./components/MySubModalBackdrop";
+import PickSubscriptionModal from "./components/PickSubscriptionModal";
 import type { MySubWebAppController } from "./types";
-import { useMySubPortalRoot } from "./portalContext";
+import { MySubPortalProvider } from "./portalContext";
 
 type Props = { ctrl: MySubWebAppController; embedInAdmin?: boolean };
 
-export default function MySubWebAppNew({ ctrl, embedInAdmin = false }: Props) {
-  const portalRoot = useMySubPortalRoot();
+export default function MySubWebAppNew(props: Props) {
+  const [portalMount, setPortalMount] = useState<HTMLElement | null>(null);
+  return (
+    <MySubPortalProvider root={portalMount}>
+      <MySubWebAppNewBody {...props} portalMountRef={setPortalMount} />
+    </MySubPortalProvider>
+  );
+}
+
+function MySubWebAppNewBody({
+  ctrl,
+  embedInAdmin = false,
+  portalMountRef,
+}: Props & { portalMountRef: (el: HTMLDivElement | null) => void }) {
   const {
     data,
     err,
@@ -338,9 +350,10 @@ export default function MySubWebAppNew({ ctrl, embedInAdmin = false }: Props) {
         onToastDismiss={() => setMsg("")}
         navItems={bottomNavItems}
         onTabChange={setTab}
-        onRefresh={refreshProfile}
-        refreshDisabled={refreshDisabled}
+        onRefresh={embedInAdmin ? undefined : refreshProfile}
+        refreshDisabled={embedInAdmin ? true : refreshDisabled}
         navRef={navRef}
+        portalMountRef={portalMountRef}
       >
         <TabSwipeViews
           items={bottomNavItems}
@@ -364,139 +377,95 @@ export default function MySubWebAppNew({ ctrl, embedInAdmin = false }: Props) {
         onCopyLink={homeSub ? () => void copySubscription(homeSub.subscription_url) : undefined}
       />
 
-      {profileSubModalId > 0
-        ? createPortal(
-            (() => {
-              const s = data.subscriptions.find((x) => x.id === profileSubModalId);
-              const light = theme === "light";
-              return (
-                <div
-                  className={`mn-modal-backdrop mn-modal-backdrop--portal mn-app mn-app--${theme}${light ? " mysub-wrap--light" : ""}`}
-                  onClick={() => setProfileSubModalId(0)}
-                >
-                  <div className="mn-modal mn-modal--solid" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
-                    <div className="mn-modal__head">
-                      <h2>Подписка</h2>
-                      <button type="button" className="mn-modal__close" onClick={() => setProfileSubModalId(0)} aria-label="Закрыть">
-                        ×
-                      </button>
-                    </div>
-                    <div className="mn-modal__body">
-                      {!s ? (
-                        <p className="mn-muted">Подписка не найдена.</p>
-                      ) : (
-                        <>
-                          <MySubProfileStats subscription={s} whitelist={data.whitelist} />
-                          <div className="mn-stack" style={{ marginTop: "0.65rem" }}>
-                            <p className="mn-muted" style={{ margin: 0 }}>
-                              Срок:{" "}
-                              {s.expiry_time > 0 ? new Date(s.expiry_time).toLocaleDateString("ru-RU") : "без срока"}
-                            </p>
-                          </div>
-                        </>
-                      )}
-                    </div>
-                    {s ? (
-                      <div className="mn-modal__foot mn-modal__foot--stack">
-                        <PrimaryButton fullWidth onClick={() => void copySubscription(s.subscription_url)}>
-                          Скопировать ссылку
-                        </PrimaryButton>
-                        <SecondaryButton fullWidth onClick={() => setProfileSubModalId(0)}>
-                          Закрыть
-                        </SecondaryButton>
-                      </div>
-                    ) : null}
-                  </div>
-                </div>
-              );
-            })(),
-            portalRoot,
-          )
-        : null}
-
-      {showWhitelistInstruction && data.whitelist?.instruction
-        ? createPortal(
-            <div
-              className={`mn-modal-backdrop mn-modal-backdrop--portal mn-app mn-app--${theme}${theme === "light" ? " mysub-wrap--light" : ""}`}
-              onClick={() => setShowWhitelistInstruction(false)}
-            >
-              <div className="mn-modal" onClick={(e) => e.stopPropagation()}>
-                <div className="mn-modal__head">
-                  <h2>{data.whitelist.instruction.title || "Как обновить подписку"}</h2>
-                  <button type="button" className="mn-modal__close" onClick={() => setShowWhitelistInstruction(false)}>
-                    ×
-                  </button>
-                </div>
-                <div className="mn-modal__body">
-                  {data.whitelist.instruction.photo_url ? (
-                    <img src={data.whitelist.instruction.photo_url} alt="" className="mn-modal__photo" />
-                  ) : null}
-                  <p className="mn-muted" style={{ whiteSpace: "pre-wrap" }}>
-                    {data.whitelist.instruction.text}
-                  </p>
-                </div>
-                <div className="mn-modal__foot">
-                  <PrimaryButton fullWidth onClick={() => setShowWhitelistInstruction(false)}>
-                    Понятно
-                  </PrimaryButton>
-                </div>
-              </div>
-            </div>,
-            portalRoot,
-          )
-        : null}
-
-      {showPickModal
-        ? createPortal(
-            <div
-              className={`mn-modal-backdrop mn-modal-backdrop--portal mn-app mn-app--${theme}${theme === "light" ? " mysub-wrap--light" : ""}`}
-              onClick={() => setShowPickModal(false)}
-            >
+      {profileSubModalId > 0 ? (
+        <MySubModalBackdrop open theme={theme} onClose={() => setProfileSubModalId(0)}>
+          {(() => {
+            const s = data.subscriptions.find((x) => x.id === profileSubModalId);
+            return (
               <div className="mn-modal mn-modal--solid" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
                 <div className="mn-modal__head">
-                  <h2>Выбор подписки</h2>
-                  <button type="button" className="mn-modal__close" onClick={() => setShowPickModal(false)} aria-label="Закрыть">
+                  <h2>Подписка</h2>
+                  <button type="button" className="mn-modal__close" onClick={() => setProfileSubModalId(0)} aria-label="Закрыть">
                     ×
                   </button>
                 </div>
                 <div className="mn-modal__body">
-                  <div className="mn-stack">
-                    {data.subscriptions.map((s) => (
-                      <SecondaryButton
-                        key={s.id}
-                        fullWidth
-                        className={pickedSubId === s.id ? "mn-selected-outline" : ""}
-                        onClick={() => setPickedSubId(s.id)}
-                      >
-                        {subscriptionLabel(s)}
-                      </SecondaryButton>
-                    ))}
+                  {!s ? (
+                    <p className="mn-muted">Подписка не найдена.</p>
+                  ) : (
+                    <>
+                      <MySubProfileStats subscription={s} whitelist={data.whitelist} />
+                      <div className="mn-stack" style={{ marginTop: "0.65rem" }}>
+                        <p className="mn-muted" style={{ margin: 0 }}>
+                          Срок: {s.expiry_time > 0 ? new Date(s.expiry_time).toLocaleDateString("ru-RU") : "без срока"}
+                        </p>
+                      </div>
+                    </>
+                  )}
+                </div>
+                {s ? (
+                  <div className="mn-modal__foot mn-modal__foot--stack">
+                    <PrimaryButton fullWidth onClick={() => void copySubscription(s.subscription_url)}>
+                      Скопировать ссылку
+                    </PrimaryButton>
+                    <SecondaryButton fullWidth onClick={() => setProfileSubModalId(0)}>
+                      Закрыть
+                    </SecondaryButton>
                   </div>
-                </div>
-                <div className="mn-modal__foot">
-                  <PrimaryButton
-                    fullWidth
-                    onClick={() => {
-                      const sub = data.subscriptions.find((s) => s.id === pickedSubId);
-                      if (sub) void copySubscription(sub.subscription_url);
-                      setShowPickModal(false);
-                    }}
-                  >
-                    Скопировать ссылку
-                  </PrimaryButton>
-                </div>
+                ) : null}
               </div>
-            </div>,
-            portalRoot,
-          )
-        : null}
+            );
+          })()}
+        </MySubModalBackdrop>
+      ) : null}
 
-      {supportOpen
-        ? createPortal(
-            <div
-              className={`mn-modal-backdrop mn-modal-backdrop--portal mn-app mn-app--${theme}${theme === "light" ? " mysub-wrap--light" : ""}`}
-              onClick={() => !supportBusy && setSupportOpen(false)}
-            >
+      {showWhitelistInstruction && data.whitelist?.instruction ? (
+        <MySubModalBackdrop open theme={theme} onClose={() => setShowWhitelistInstruction(false)}>
+          <div className="mn-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="mn-modal__head">
+              <h2>{data.whitelist.instruction.title || "Как обновить подписку"}</h2>
+              <button type="button" className="mn-modal__close" onClick={() => setShowWhitelistInstruction(false)}>
+                ×
+              </button>
+            </div>
+            <div className="mn-modal__body">
+              {data.whitelist.instruction.photo_url ? (
+                <img src={data.whitelist.instruction.photo_url} alt="" className="mn-modal__photo" />
+              ) : null}
+              <p className="mn-muted" style={{ whiteSpace: "pre-wrap" }}>
+                {data.whitelist.instruction.text}
+              </p>
+            </div>
+            <div className="mn-modal__foot">
+              <PrimaryButton fullWidth onClick={() => setShowWhitelistInstruction(false)}>
+                Понятно
+              </PrimaryButton>
+            </div>
+          </div>
+        </MySubModalBackdrop>
+      ) : null}
+
+      <PickSubscriptionModal
+        open={showPickModal}
+        theme={theme}
+        subscriptions={data.subscriptions}
+        pickedSubId={pickedSubId}
+        onPick={setPickedSubId}
+        onClose={() => setShowPickModal(false)}
+        onConfirm={() => {
+          const sub = data.subscriptions.find((s) => s.id === pickedSubId);
+          if (sub) void copySubscription(sub.subscription_url);
+          setShowPickModal(false);
+        }}
+      />
+
+      {supportOpen ? (
+        <MySubModalBackdrop
+          open
+          theme={theme}
+          onClose={() => !supportBusy && setSupportOpen(false)}
+          closeOnBackdrop={!supportBusy}
+        >
               <div className="mn-modal mn-modal--support" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
                 <div className="mn-modal__head">
                   <h2>Сообщить о проблеме</h2>
@@ -545,69 +514,55 @@ export default function MySubWebAppNew({ ctrl, embedInAdmin = false }: Props) {
                   </SecondaryButton>
                 </div>
               </div>
-            </div>,
-            portalRoot,
-          )
-        : null}
+        </MySubModalBackdrop>
+      ) : null}
 
-      {dropperPracticeModalOpen
-        ? createPortal(
-            <div
-              className={`mn-modal-backdrop mn-modal-backdrop--portal mn-app mn-app--${theme}${theme === "light" ? " mysub-wrap--light" : ""}`}
-              onClick={() => setDropperPracticeModalOpen(false)}
-            >
-              <div className="mn-modal mn-modal--solid" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
-                <div className="mn-modal__head">
-                  <h2>Тренировка</h2>
-                </div>
-                <div className="mn-modal__body">
-                  <p className="mn-muted">
-                    Бесплатный режим без билета и наград. Когда будете готовы — играйте с билетом.
-                  </p>
-                  <label className="mn-check">
-                    <input
-                      type="checkbox"
-                      checked={dropperPracticeSkipNextHint}
-                      onChange={(e) => setDropperPracticeSkipNextHint(e.target.checked)}
-                    />
-                    Не показывать это окно
-                  </label>
-                </div>
-                <div className="mn-modal__foot">
-                  <SecondaryButton onClick={() => setDropperPracticeModalOpen(false)}>Отмена</SecondaryButton>
-                  <PrimaryButton onClick={confirmDropperPracticePlay}>Играть</PrimaryButton>
-                </div>
-              </div>
-            </div>,
-            portalRoot,
-          )
-        : null}
+      {dropperPracticeModalOpen ? (
+        <MySubModalBackdrop open theme={theme} onClose={() => setDropperPracticeModalOpen(false)}>
+          <div className="mn-modal mn-modal--solid" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
+            <div className="mn-modal__head">
+              <h2>Тренировка</h2>
+            </div>
+            <div className="mn-modal__body">
+              <p className="mn-muted">
+                Бесплатный режим без билета и наград. Когда будете готовы — играйте с билетом.
+              </p>
+              <label className="mn-check">
+                <input
+                  type="checkbox"
+                  checked={dropperPracticeSkipNextHint}
+                  onChange={(e) => setDropperPracticeSkipNextHint(e.target.checked)}
+                />
+                Не показывать это окно
+              </label>
+            </div>
+            <div className="mn-modal__foot">
+              <SecondaryButton onClick={() => setDropperPracticeModalOpen(false)}>Отмена</SecondaryButton>
+              <PrimaryButton onClick={confirmDropperPracticePlay}>Играть</PrimaryButton>
+            </div>
+          </div>
+        </MySubModalBackdrop>
+      ) : null}
 
-      {dropperInstructionOpen
-        ? createPortal(
-            <div
-              className={`mn-modal-backdrop mn-modal-backdrop--portal mn-app mn-app--${theme}${theme === "light" ? " mysub-wrap--light" : ""}`}
-              onClick={() => setDropperInstructionOpen(false)}
-            >
-              <div className="mn-modal mn-modal--solid" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
-                <div className="mn-modal__head">
-                  <h2>Как играть</h2>
-                </div>
-                <div className="mn-modal__body">
-                  <p className="mn-muted">
-                    Ведите пальцем влево и вправо. Пролетайте между препятствиями и приземлитесь на жёлтую полосу.
-                  </p>
-                </div>
-                <div className="mn-modal__foot">
-                  <PrimaryButton fullWidth onClick={() => setDropperInstructionOpen(false)}>
-                    Понятно
-                  </PrimaryButton>
-                </div>
-              </div>
-            </div>,
-            portalRoot,
-          )
-        : null}
+      {dropperInstructionOpen ? (
+        <MySubModalBackdrop open theme={theme} onClose={() => setDropperInstructionOpen(false)}>
+          <div className="mn-modal mn-modal--solid" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
+            <div className="mn-modal__head">
+              <h2>Как играть</h2>
+            </div>
+            <div className="mn-modal__body">
+              <p className="mn-muted">
+                Ведите пальцем влево и вправо. Пролетайте между препятствиями и приземлитесь на жёлтую полосу.
+              </p>
+            </div>
+            <div className="mn-modal__foot">
+              <PrimaryButton fullWidth onClick={() => setDropperInstructionOpen(false)}>
+                Понятно
+              </PrimaryButton>
+            </div>
+          </div>
+        </MySubModalBackdrop>
+      ) : null}
     </>
   );
 }

@@ -3162,7 +3162,8 @@ export function findPendingAdminSessionByChat(tg_chat_id: number): PaymentSessio
   );
 }
 
-/** Новая заявка: сбрасываем все незавершённые сессии этого чата. */
+/** Новая заявка: сбрасываем только незавершённый awaiting_proof этого чата.
+ *  pending_admin оставляем — клиент может оплатить несколько подписок подряд. */
 export function startPaymentAwaitingProof(
   tg_chat_id: number,
   tg_user_id: number,
@@ -3184,7 +3185,9 @@ export function startPaymentAwaitingProof(
   const fn = (tgProfile?.first_name ?? "").trim();
   mutate((store) => {
     const prev = store.payment_sessions ?? [];
-    store.payment_sessions = prev.filter((s) => s.tg_chat_id !== tg_chat_id);
+    store.payment_sessions = prev.filter(
+      (s) => !(s.tg_chat_id === tg_chat_id && s.status === "awaiting_proof"),
+    );
     store.payment_sessions.push({
       id,
       tg_chat_id,

@@ -26,8 +26,10 @@ import { initNdjsonStream, ndjsonLine, wantsNdjsonStream } from "../streamUtil.j
 import { resolveSubscriptionBase64, resolveSubscriptionLinks } from "../subscriptionResolve.js";
 import { peekUserTrafficForSubscription } from "../xrayStatsPull.js";
 import { generateX25519RealityKeyPair } from "../realityKeygen.js";
-import { logCommunicationMessage } from "../communicationLog.js";
-import { sendTelegramMessage } from "../telegram/api.js";
+import { logCommunicationMessage, stripHtmlPreview } from "../communicationLog.js";
+import { sendTelegramHtml, sendTelegramMessage } from "../telegram/api.js";
+import { backHomeRow } from "../telegram/keyboards.js";
+import { escHtml, subscriptionPublicName } from "../telegram/format.js";
 import { sendExpiredSubscriptionReminder, sendExpiryRenewalReminder } from "../telegram/expiryNotify.js";
 import { expiryAutoNotifyStatusForUser } from "../expiryAutoNotifyStatus.js";
 import { configVaultLinksCountForUser, configVaultLinksForUser } from "../configVaultDb.js";
@@ -390,6 +392,18 @@ router.patch("/:id(\\d+)", async (req, res) => {
     res.status(404).json({ error: "not_found" });
     return;
   }
+  // Продление срока после авто-disable при истечении — снова включить доступ.
+  if (
+    patch.expiry_time !== undefined &&
+    Number(patch.expiry_time) > Date.now() &&
+    patch.enable === undefined &&
+    before.enable === 0 &&
+    before.expiry_time > 0 &&
+    before.expiry_time <= Date.now()
+  ) {
+    patch.enable = 1;
+  }
+
   let u = updateUserRow(id, patch);
   if (!u) {
     res.status(404).json({ error: "not_found" });
@@ -542,9 +556,53 @@ router.post("/:id(\\d+)/renew-subscription", async (req, res) => {
     if (trafficReset) {
       next = (await resetUserTrafficCounters(next)) ?? next;
     }
+
+    void pushClientListToAllDeployedServers().catch((e) => {
+      console.error("[users] push after renew:", e);
+    });
+
+    let telegram_notified = false;
+    let telegram_error: string | undefined;
+    const chatId = Math.floor(Number(String(next.tg_id ?? "").trim()));
+    if (Number.isFinite(chatId) && chatId > 0) {
+      const until = new Date(next.expiry_time).toLocaleDateString("ru-RU", {
+        day: "2-digit",
+        month: "2-digit",
+        year: "numeric",
+      });
+      const subName = escHtml(subscriptionPublicName(next));
+      const trafficLine = trafficReset
+        ? `\nЛимит трафика обновлён: счётчик использования обнулён.`
+        : "";
+      const body =
+        `<b>✅ Подписка продлена</b>\n\n` +
+        `«${subName}» снова активна.\n` +
+        `Новый срок: до <b>${escHtml(until)}</b>.${trafficLine}\n\n` +
+        `Обновите подписку в приложении (🔄) — и можно пользоваться как раньше. Спасибо, что с нами!`;
+      try {
+        await sendTelegramHtml(chatId, body, backHomeRow());
+        telegram_notified = true;
+        logCommunicationMessage({
+          automatic: false,
+          source_label: "Панель: продление подписки",
+          text: stripHtmlPreview(body),
+          has_photo: false,
+          recipients: [{ user_id: next.id, user_name: next.name }],
+          sent: 1,
+          attempted: 1,
+          failed: 0,
+        });
+      } catch (e) {
+        telegram_error = e instanceof Error ? e.message : String(e);
+        console.error("[users] renew telegram notify:", telegram_error);
+      }
+    }
+
     res.json({
       ok: true,
       traffic_reset: trafficReset,
+      telegram_notified,
+      ...(telegram_error ? { telegram_error } : {}),
       user: userDto(next),
     });
   } catch (e) {

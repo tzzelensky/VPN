@@ -40,6 +40,7 @@ import {
 import { startTelegramLongPolling } from "./telegram/polling.js";
 import { startAutoTrafficNotifyLoop } from "./telegram/trafficNotify.js";
 import { startAutoExpiryNotifyLoop } from "./telegram/expiryNotify.js";
+import { startExpiredSubscriptionAccessLoop } from "./expiryAccessEnforce.js";
 import { startConfigVaultAutoCheckLoop } from "./configVaultAutoCheck.js";
 import { startTelegramProxyAutoCheckLoop } from "./telegramProxyAutoCheck.js";
 import { startWhitelistVaultAutoCheckLoop } from "./whitelistVaultAutoCheck.js";
@@ -224,6 +225,8 @@ app.listen(PORT, "0.0.0.0", () => {
     startDailyGiftNotifyLoop();
     startTriggerMailingsLoop();
   }
+  // Всегда: снимать истёкших с узлов (не зависит от Telegram).
+  startExpiredSubscriptionAccessLoop();
   startConfigVaultAutoCheckLoop();
   startTelegramProxyAutoCheckLoop();
   startWhitelistVaultAutoCheckLoop();
