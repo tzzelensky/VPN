@@ -963,54 +963,58 @@ export default function DeviceLimitPage({ onLogout }: { onLogout: () => void }) 
         {atLimitModalOpen ? (
           <AdminModalBackdrop className="device-limit-modal-backdrop" onClose={() => setAtLimitModalOpen(false)}>
             <div className="modal card device-limit-modal device-limit-at-limit-modal" onClick={(e) => e.stopPropagation()}>
-              <h3>Пользователи на лимите</h3>
-              <p className="sub">
-                Подписки, у которых зарегистрировано устройств не меньше разрешённого лимита ({usersAtLimit.length}).
-              </p>
-              {usersAtLimit.length === 0 ? (
-                <p className="sub device-limit-empty">Сейчас никто не достиг лимита устройств.</p>
-              ) : (
-                <div className="card device-limit-table-wrap table-wrap">
-                  <table className="data-table">
-                    <thead>
-                      <tr>
-                        <th>Пользователь</th>
-                        <th>Подписка</th>
-                        <th>Устройства</th>
-                        <th>Telegram</th>
-                        <th />
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {usersAtLimit.map((r) => (
-                        <tr key={r.subscription_id}>
-                          <td>{r.user_name}</td>
-                          <td>{r.subscription_name}</td>
-                          <td>
-                            <strong>
-                              {r.devices_used}/{r.device_limit}
-                            </strong>
-                            {r.device_extra_slots > 0 ? ` · +${r.device_extra_slots}` : ""}
-                          </td>
-                          <td>{r.tg_id ? r.tg_id : "—"}</td>
-                          <td>
-                            <button
-                              type="button"
-                              className="ghost"
-                              onClick={() => {
-                                setAtLimitModalOpen(false);
-                                setDevicesModal(r);
-                              }}
-                            >
-                              Устройства
-                            </button>
-                          </td>
+              <div className="device-limit-modal__head">
+                <h3>Пользователи на лимите</h3>
+                <p className="sub">
+                  Подписки, у которых зарегистрировано устройств не меньше разрешённого лимита ({usersAtLimit.length}).
+                </p>
+              </div>
+              <div className="device-limit-modal__body">
+                {usersAtLimit.length === 0 ? (
+                  <p className="sub device-limit-empty">Сейчас никто не достиг лимита устройств.</p>
+                ) : (
+                  <div className="card device-limit-table-wrap table-wrap">
+                    <table className="data-table">
+                      <thead>
+                        <tr>
+                          <th>Пользователь</th>
+                          <th>Подписка</th>
+                          <th>Устройства</th>
+                          <th>Telegram</th>
+                          <th />
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
+                      </thead>
+                      <tbody>
+                        {usersAtLimit.map((r) => (
+                          <tr key={r.subscription_id}>
+                            <td>{r.user_name}</td>
+                            <td>{r.subscription_name}</td>
+                            <td>
+                              <strong>
+                                {r.devices_used}/{r.device_limit}
+                              </strong>
+                              {r.device_extra_slots > 0 ? ` · +${r.device_extra_slots}` : ""}
+                            </td>
+                            <td>{r.tg_id ? r.tg_id : "—"}</td>
+                            <td>
+                              <button
+                                type="button"
+                                className="ghost"
+                                onClick={() => {
+                                  setAtLimitModalOpen(false);
+                                  setDevicesModal(r);
+                                }}
+                              >
+                                Устройства
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
               <div className="device-limit-modal__footer">
                 <button type="button" className="ghost" onClick={() => setAtLimitModalOpen(false)}>
                   Закрыть
@@ -1023,70 +1027,74 @@ export default function DeviceLimitPage({ onLogout }: { onLogout: () => void }) 
         {devicesModal ? (
           <AdminModalBackdrop className="device-limit-modal-backdrop" onClose={() => setDevicesModal(null)}>
             <div className="modal card device-limit-modal" onClick={(e) => e.stopPropagation()}>
-              <h3>{devicesModal.subscription_name}</h3>
-              <p className="sub">
-                {devicesModal.device_limit != null
-                  ? `Лимит: ${devicesModal.devices_used}/${devicesModal.device_limit} · свободно: ${Math.max(0, devicesModal.device_limit - devicesModal.devices_used)} · докуплено: ${devicesModal.device_extra_slots}`
-                  : `Лимит: без ограничений · докуплено: ${devicesModal.device_extra_slots}`}
-              </p>
-              <ul className="device-slot-list">
-                {devicesModal.devices.map((d) => (
-                  <li key={d.id} className="device-slot-card">
-                    <div className="device-slot-head">
-                      <span className="device-slot-icon">{d.device_icon}</span>
-                      <div className="device-slot-title">
-                        <b>{d.device_name}</b>
-                        <div className="device-slot-meta">{d.device_id_masked ?? d.id}</div>
+              <div className="device-limit-modal__head">
+                <h3>{devicesModal.subscription_name}</h3>
+                <p className="sub">
+                  {devicesModal.device_limit != null
+                    ? `Лимит: ${devicesModal.devices_used}/${devicesModal.device_limit} · свободно: ${Math.max(0, devicesModal.device_limit - devicesModal.devices_used)} · докуплено: ${devicesModal.device_extra_slots}`
+                    : `Лимит: без ограничений · докуплено: ${devicesModal.device_extra_slots}`}
+                </p>
+              </div>
+              <div className="device-limit-modal__body">
+                <ul className="device-slot-list">
+                  {devicesModal.devices.map((d) => (
+                    <li key={d.id} className="device-slot-card">
+                      <div className="device-slot-head">
+                        <span className="device-slot-icon">{d.device_icon}</span>
+                        <div className="device-slot-title">
+                          <b>{d.device_name}</b>
+                          <div className="device-slot-meta">{d.device_id_masked ?? d.id}</div>
+                        </div>
                       </div>
-                    </div>
-                    <div className="device-slot-meta">
-                      Первое подключение: {fmtDate(d.first_seen_at ?? d.created_at)}
-                      <br />
-                      Последняя активность: {fmtDate(d.last_seen_at)}
-                      {d.last_ip ? (
-                        <>
-                          <br />
-                          IP: {d.last_ip}
-                        </>
-                      ) : null}
-                    </div>
-                    <code className="device-slot-url">{d.subscription_url}</code>
-                    <div className="device-slot-actions device-slot-actions--3">
-                      <button type="button" className="ghost" onClick={() => void navigator.clipboard.writeText(d.subscription_url)}>
-                        Копировать
-                      </button>
-                      <button
-                        type="button"
-                        className="ghost"
-                        onClick={() => {
-                          const name = window.prompt("Название", d.device_name);
-                          if (!name) return;
-                          void renameAdminDevice(devicesModal.subscription_id, d.id, name)
-                            .then((r) => setDevicesModal(r.row))
-                            .catch((e) => setToast({ type: "err", text: e instanceof Error ? e.message : "Ошибка" }));
-                        }}
-                      >
-                        Переименовать
-                      </button>
-                      <button
-                        type="button"
-                        className="ghost"
-                        onClick={() => {
-                          if (!window.confirm(`Удалить ${d.device_name}?`)) return;
-                          void removeAdminDevice(devicesModal.subscription_id, d.id)
-                            .then((r) => setDevicesModal(r.row))
-                            .catch((e) => setToast({ type: "err", text: e instanceof Error ? e.message : "Ошибка" }));
-                        }}
-                      >
-                        Удалить
-                      </button>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-              {devicesModal.devices.length === 0 ? (
-                <p className="sub device-limit-empty">Устройства не привязаны.</p>
-              ) : null}
+                      <div className="device-slot-meta">
+                        Первое подключение: {fmtDate(d.first_seen_at ?? d.created_at)}
+                        <br />
+                        Последняя активность: {fmtDate(d.last_seen_at)}
+                        {d.last_ip ? (
+                          <>
+                            <br />
+                            IP: {d.last_ip}
+                          </>
+                        ) : null}
+                      </div>
+                      <code className="device-slot-url">{d.subscription_url}</code>
+                      <div className="device-slot-actions device-slot-actions--3">
+                        <button type="button" className="ghost" onClick={() => void navigator.clipboard.writeText(d.subscription_url)}>
+                          Копировать
+                        </button>
+                        <button
+                          type="button"
+                          className="ghost"
+                          onClick={() => {
+                            const name = window.prompt("Название", d.device_name);
+                            if (!name) return;
+                            void renameAdminDevice(devicesModal.subscription_id, d.id, name)
+                              .then((r) => setDevicesModal(r.row))
+                              .catch((e) => setToast({ type: "err", text: e instanceof Error ? e.message : "Ошибка" }));
+                          }}
+                        >
+                          Переименовать
+                        </button>
+                        <button
+                          type="button"
+                          className="ghost"
+                          onClick={() => {
+                            if (!window.confirm(`Удалить ${d.device_name}?`)) return;
+                            void removeAdminDevice(devicesModal.subscription_id, d.id)
+                              .then((r) => setDevicesModal(r.row))
+                              .catch((e) => setToast({ type: "err", text: e instanceof Error ? e.message : "Ошибка" }));
+                          }}
+                        >
+                          Удалить
+                        </button>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+                {devicesModal.devices.length === 0 ? (
+                  <p className="sub device-limit-empty">Устройства не привязаны.</p>
+                ) : null}
+              </div>
               <div className="device-limit-modal__footer">
                 <button
                   type="button"

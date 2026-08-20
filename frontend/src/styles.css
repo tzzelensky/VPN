@@ -17681,16 +17681,49 @@ html[data-theme="light"] .setting-hint-popover__arrow {
 .device-limit-modal {
   width: min(720px, calc(100vw - 1.5rem));
   max-height: min(90vh, 900px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 0;
+}
+
+.device-limit-modal__head {
+  flex-shrink: 0;
+  padding: 1rem 1rem 0.35rem;
+}
+
+.device-limit-modal__head h3 {
+  margin: 0 0 0.35rem;
+}
+
+.device-limit-modal__head .sub {
+  margin: 0;
+}
+
+.device-limit-modal__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-x: hidden;
   overflow-y: auto;
-  padding: 1rem;
   -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
+  overscroll-behavior: contain;
+  padding: 0.5rem 1rem 0.25rem;
+}
+
+.device-limit-modal__body .device-slot-list {
+  margin-top: 0;
 }
 
 .device-limit-modal__footer {
+  flex-shrink: 0;
   display: flex;
   flex-wrap: wrap;
   gap: 0.5rem;
-  margin-top: 0.75rem;
+  margin-top: 0;
+  padding: 0.75rem 1rem max(0.75rem, env(safe-area-inset-bottom, 0));
+  border-top: 1px solid var(--border);
+  background: var(--panel);
 }
 
 .device-limit-modal__footer button {
@@ -17740,8 +17773,28 @@ html[data-theme="light"] .setting-hint-popover__arrow {
     width: 100%;
     max-width: 100%;
     max-height: min(92vh, 100dvh);
+    margin: 0;
     border-radius: 20px 20px 0 0;
-    padding: 1rem 1rem max(1rem, env(safe-area-inset-bottom));
+  }
+
+  html.admin-mobile-app .modal.device-limit-modal,
+  .admin-shell--mobile .modal.device-limit-modal {
+    display: flex;
+    flex-direction: column;
+    max-height: min(92vh, 100dvh);
+    margin: 0;
+    overflow: hidden;
+  }
+
+  html.admin-mobile-app .modal.device-limit-modal .device-limit-modal__body,
+  .admin-shell--mobile .modal.device-limit-modal .device-limit-modal__body {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    touch-action: pan-y;
+    overscroll-behavior: contain;
   }
 
   .device-limit-modal__footer {
