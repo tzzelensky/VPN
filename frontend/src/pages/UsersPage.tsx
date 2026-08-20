@@ -1615,6 +1615,7 @@ export default function UsersPage({ onLogout }: { onLogout: () => void }) {
                       className={`ud-row${renewBusyId === u.id ? " ud-row--renewing" : ""}${hiddenUserIdSet.has(u.id) && showHiddenUsers ? " ud-row--hidden-preview" : ""}`}
                     >
                       <td className="ud-td-actions">
+                        {renewBusyId === u.id ? <span className="ud-renew-fill-bar" aria-hidden="true" /> : null}
                         <div className="ud-toolbar" role="group" aria-label="Действия по клиенту">
                           {renderRenewInactiveButton(u)}
                           <button

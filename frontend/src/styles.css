@@ -5414,32 +5414,58 @@ html.admin-mobile-app .modal.user-modal-panel .modal-footer,
   }
 }
 
-.ud-row--renewing > td {
+/* Единая заливка строки: один слой на всю ширину <tr>. */
+.users-dash-table .ud-row--renewing {
   position: relative;
-  isolation: isolate;
-  overflow: hidden;
+  z-index: 0;
 }
 
-.ud-row--renewing > td::before {
-  content: "";
+.users-dash-table .ud-row--renewing > td {
+  background-color: transparent !important;
+}
+
+.users-dash-table .ud-row--renewing > td:not(:first-child) {
+  position: relative;
+  z-index: 1;
+}
+
+.users-dash-table .ud-row--renewing > .ud-td-actions {
+  /* static — чтобы абсолютный бар позиционировался относительно <tr> */
+  position: static;
+  z-index: 1;
+}
+
+.users-dash-table .ud-renew-fill-bar {
   position: absolute;
-  inset: 0;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 100%;
   z-index: 0;
   pointer-events: none;
   transform-origin: left center;
   background: linear-gradient(
     90deg,
-    rgba(134, 239, 172, 0.55) 0%,
+    rgba(134, 239, 172, 0.58) 0%,
     rgba(74, 222, 128, 0.42) 42%,
     rgba(187, 247, 208, 0.28) 78%,
-    rgba(220, 252, 231, 0.12) 100%
+    rgba(220, 252, 231, 0.1) 100%
   );
   animation: ud-renew-water-fill 1.35s cubic-bezier(0.33, 0.1, 0.25, 1) infinite;
 }
 
-.ud-row--renewing > td > * {
+.users-dash-table .ud-row--renewing .ud-toolbar,
+.users-dash-table .ud-row--renewing .toggle,
+.users-dash-table .ud-row--renewing .ud-pill,
+.users-dash-table .ud-row--renewing .ud-client-line,
+.users-dash-table .ud-row--renewing .ud-traffic,
+.users-dash-table .ud-row--renewing .ud-expiry-wrap {
   position: relative;
   z-index: 1;
+}
+
+html[data-theme="light"] .users-dash-table tbody tr.ud-row--renewing:hover {
+  background: transparent;
 }
 
 .users-mobile-card--renewing {
@@ -5458,10 +5484,10 @@ html.admin-mobile-app .modal.user-modal-panel .modal-footer,
   border-radius: inherit;
   background: linear-gradient(
     90deg,
-    rgba(134, 239, 172, 0.55) 0%,
+    rgba(134, 239, 172, 0.58) 0%,
     rgba(74, 222, 128, 0.42) 42%,
     rgba(187, 247, 208, 0.28) 78%,
-    rgba(220, 252, 231, 0.12) 100%
+    rgba(220, 252, 231, 0.1) 100%
   );
   animation: ud-renew-water-fill 1.35s cubic-bezier(0.33, 0.1, 0.25, 1) infinite;
 }
@@ -5471,14 +5497,14 @@ html.admin-mobile-app .modal.user-modal-panel .modal-footer,
   z-index: 1;
 }
 
-html[data-theme="light"] .ud-row--renewing > td::before,
+html[data-theme="light"] .users-dash-table .ud-renew-fill-bar,
 html[data-theme="light"] .users-mobile-card--renewing::before {
   background: linear-gradient(
     90deg,
-    rgba(134, 239, 172, 0.62) 0%,
-    rgba(74, 222, 128, 0.38) 45%,
+    rgba(134, 239, 172, 0.65) 0%,
+    rgba(74, 222, 128, 0.4) 45%,
     rgba(187, 247, 208, 0.22) 80%,
-    rgba(240, 253, 244, 0.1) 100%
+    rgba(240, 253, 244, 0.08) 100%
   );
 }
 
