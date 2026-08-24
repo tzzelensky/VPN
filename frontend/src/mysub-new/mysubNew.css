@@ -1,5 +1,22 @@
 /* Telegram Mini App — new design (feature flag webAppNewDesign) */
 
+html.tg-webapp-large,
+html.tg-webapp-large body {
+  min-height: var(--tg-viewport-stable-height, 100dvh);
+}
+
+html.tg-webapp-large .mn-app,
+html.tg-webapp-large .mysub-wrap {
+  min-height: var(--tg-viewport-stable-height, 100dvh);
+  width: 100%;
+}
+
+@media (min-width: 768px) {
+  html.tg-webapp-large .mn-app__content {
+    max-width: 680px;
+  }
+}
+
 .mn-app {
   --mn-bg: #eef4ff;
   --mn-bg2: #dbeafe;
@@ -292,6 +309,38 @@
   border-radius: 16px;
   object-fit: cover;
   box-shadow: var(--mn-shadow);
+}
+
+.mn-user-header__avatar-hit {
+  flex: none;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  line-height: 0;
+  cursor: pointer;
+  border-radius: 16px;
+}
+
+.mn-user-header__avatar-hit:focus-visible {
+  outline: 2px solid rgba(56, 189, 248, 0.55);
+  outline-offset: 3px;
+}
+
+.mn-user-header__meta-hit {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.mn-user-header__meta-hit:focus-visible {
+  outline: 2px solid rgba(56, 189, 248, 0.55);
+  outline-offset: 4px;
+  border-radius: 12px;
 }
 
 .mn-user-header__avatar--fallback {
@@ -1133,6 +1182,12 @@
 .mn-modal__foot--stack {
   flex-direction: column;
   align-items: stretch;
+}
+
+.mn-modal__foot--split {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.55rem;
 }
 
 .mn-modal--support .mn-modal__body {

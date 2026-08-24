@@ -31,6 +31,7 @@ type Props = {
   headerShellRef?: React.MutableRefObject<HTMLDivElement | null>;
   contentRef?: React.MutableRefObject<HTMLDivElement | null>;
   portalMountRef?: (el: HTMLDivElement | null) => void;
+  onAvatarTap?: () => void;
   children: ReactNode;
 };
 
@@ -51,6 +52,7 @@ export default function WebAppLayoutNew({
   headerShellRef,
   contentRef,
   portalMountRef,
+  onAvatarTap,
   children,
 }: Props) {
   const navRefLocal = useRef<BottomNavHandle | null>(null);
@@ -87,6 +89,7 @@ export default function WebAppLayoutNew({
             data={data}
             subscription={subscription}
             onOpenProfile={tab === "profile" ? undefined : () => onTabChange("profile")}
+            onAvatarTap={onAvatarTap}
           />
         </div>
         <main className="mn-main">{children}</main>

@@ -276,7 +276,7 @@ export function buildSubscriptionPayload(links: string[], opts?: { happDirective
 }
 
 function buildNoticeVlessUri(label: string): string {
-  const enc = encodeURIComponent(label.trim() || "VPN");
+  const enc = encodeURIComponent(label.trim() || "Уведомление");
   // Специальная «заглушка» для клиентов подписки: показывается как сервер в списке,
   // но подключение к ней не рабочее и лишь доносит текст уведомления пользователю.
   return `vless://00000000-0000-0000-0000-000000000000@127.0.0.1:443?encryption=none&security=none&type=tcp#${enc}`;

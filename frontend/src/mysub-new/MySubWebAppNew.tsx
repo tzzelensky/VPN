@@ -11,8 +11,10 @@ import PrimaryButton from "./components/PrimaryButton";
 import SecondaryButton from "./components/SecondaryButton";
 import MySubModalBackdrop from "./components/MySubModalBackdrop";
 import PickSubscriptionModal from "./components/PickSubscriptionModal";
+import WebAppAdminPanelModal from "./components/WebAppAdminPanelModal";
 import type { MySubWebAppController } from "./types";
 import { MySubPortalProvider } from "./portalContext";
+import { useWebAppAdminPanelEntry } from "./useWebAppAdminPanelEntry";
 
 type Props = { ctrl: MySubWebAppController; embedInAdmin?: boolean };
 
@@ -69,6 +71,7 @@ function MySubWebAppNewBody({
     setProfileSubModalId,
     refreshProfile,
   } = ctrl;
+  const adminGate = useWebAppAdminPanelEntry(ctrl.initData, embedInAdmin || Boolean(ctrl.previewMode));
 
   useEffect(() => {
     if (embedInAdmin) return;
@@ -147,7 +150,8 @@ function MySubWebAppNewBody({
     showInstruction ||
     showWhitelistInstruction ||
     dropperPracticeModalOpen ||
-    dropperInstructionOpen;
+    dropperInstructionOpen ||
+    adminGate.open;
   const refreshDisabled = swipeDisabled;
   const navRef = useRef<BottomNavHandle | null>(null);
   const tabRef = useRef(tab);
@@ -354,6 +358,7 @@ function MySubWebAppNewBody({
         refreshDisabled={embedInAdmin ? true : refreshDisabled}
         navRef={navRef}
         portalMountRef={portalMountRef}
+        onAvatarTap={embedInAdmin ? undefined : adminGate.onAvatarTap}
       >
         <TabSwipeViews
           items={bottomNavItems}
@@ -368,6 +373,14 @@ function MySubWebAppNewBody({
           renderPanel={renderPanel}
         />
       </WebAppLayoutNew>
+
+      <WebAppAdminPanelModal
+        open={adminGate.open}
+        busy={adminGate.busy}
+        theme={theme}
+        onConfirm={() => void adminGate.confirm()}
+        onCancel={adminGate.cancel}
+      />
 
       <InstructionModal
         open={showInstruction}

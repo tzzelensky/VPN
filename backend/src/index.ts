@@ -171,6 +171,12 @@ app.post("/api/public/shop-review", (req, res) => {
   res.json({ ok: true });
 });
 
+/** Публичный JSON витрины для SPA (без auth). */
+app.get("/api/public/decoy-shop", (_req, res) => {
+  res.setHeader("Cache-Control", "no-store");
+  res.json({ shop: getPanelSettings().panel.decoyShop });
+});
+
 app.get("/comfort", (_req, res) => {
   res.type("text/html; charset=utf-8").send(buildSubscriptionDecoyHtml());
 });

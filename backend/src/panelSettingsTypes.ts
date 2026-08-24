@@ -29,6 +29,23 @@ export type PanelSubscriptionBanner = {
   telegramLinkText: string;
 };
 
+/** Публичная HTML-витрина (ДомКомфорт и аналоги) для браузеров на /goods|/sub. */
+export type PanelDecoyShopItem = {
+  name: string;
+  description: string;
+  price: string;
+};
+
+export type PanelDecoyShop = {
+  title: string;
+  brand: string;
+  tagline: string;
+  intro: string[];
+  items: PanelDecoyShopItem[];
+  note: string;
+  footer: string;
+};
+
 export type TelegramButtonColors = Record<TelegramColoredButtonKey, string>;
 
 export type PanelSettings = {
@@ -41,6 +58,7 @@ export type PanelSettings = {
     /** Ключевое слово «отзыва» на витрине → переход на /login (мобильная кнопка). */
     shopReviewKeyword: string;
     subscriptionBanner: PanelSubscriptionBanner;
+    decoyShop: PanelDecoyShop;
   };
   ui: {
     theme: PanelTheme;
@@ -66,6 +84,8 @@ export type PanelSettings = {
     testMode: boolean;
     /** Код входа в панель через Telegram (по умолчанию включено). */
     login2faEnabled: boolean;
+    /** Вход в мобильную админку из Telegram WebApp (5 тапов по аватарке, только Admin ID). */
+    webAppAdminPanelEnabled: boolean;
     /** HEX цвета кнопок бота (в API — primary / success / danger). */
     buttonColors: TelegramButtonColors;
     /** Показывать кнопку «Спросить AI» в боте (нужен ещё Gemini API key). */
@@ -143,6 +163,54 @@ export const PANEL_SECTION_META: Array<{
 
 export const DEFAULT_SECTION_ORDER: PanelSectionKey[] = PANEL_SECTION_META.map((s) => s.key);
 
+export const DEFAULT_DECOY_SHOP: PanelDecoyShop = {
+  title: "ДомКомфорт — подушки и текстиль для сна",
+  brand: "ДомКомфорт",
+  tagline: "Подушки, одеяла, наволочки — мягкий сон без лишнего шума",
+  intro: [
+    "Мы подбираем наполнители и ткани так, чтобы вам было удобно читать, отдыхать и засыпать в тишине своей спальни.",
+    "В каталоге — ортопедические и декоративные подушки, комплекты постельного белья, пледы.",
+  ],
+  items: [
+    { name: "Подушка «Облако»", description: "Мягкий холлофайбер, чехол из сатина", price: "от 1 890 ₽" },
+    { name: "Одеяло «Тишина»", description: "Лёгкое всесезонное, микрофибра", price: "от 3 450 ₽" },
+    { name: "Наволочки 50×70", description: "Комплект из двух, хлопок", price: "от 990 ₽" },
+    { name: "Плед «Вечер»", description: "Фланель, тёплый оттенок льна", price: "от 2 290 ₽" },
+  ],
+  note: "Оставайтесь на связи — готовим новые позиции коллекции.",
+  footer: "© ДомКомфорт · доставка по России",
+};
+
+export function normalizeDecoyShop(raw: unknown): PanelDecoyShop {
+  const base = DEFAULT_DECOY_SHOP;
+  if (!raw || typeof raw !== "object") return { ...base, intro: [...base.intro], items: base.items.map((i) => ({ ...i })) };
+  const o = raw as Record<string, unknown>;
+  const intro = Array.isArray(o.intro)
+    ? o.intro.map((x) => String(x ?? "").trim()).filter(Boolean).slice(0, 6)
+    : [...base.intro];
+  const itemsRaw = Array.isArray(o.items) ? o.items : base.items;
+  const items: PanelDecoyShopItem[] = itemsRaw
+    .slice(0, 8)
+    .map((it) => {
+      const row = it && typeof it === "object" ? (it as Record<string, unknown>) : {};
+      return {
+        name: String(row.name ?? "").trim().slice(0, 80) || "Товар",
+        description: String(row.description ?? "").trim().slice(0, 160),
+        price: String(row.price ?? "").trim().slice(0, 40),
+      };
+    })
+    .filter((i) => i.name);
+  return {
+    title: String(o.title ?? base.title).trim().slice(0, 120) || base.title,
+    brand: String(o.brand ?? base.brand).trim().slice(0, 80) || base.brand,
+    tagline: String(o.tagline ?? base.tagline).trim().slice(0, 160) || base.tagline,
+    intro: intro.length > 0 ? intro : [...base.intro],
+    items: items.length > 0 ? items : base.items.map((i) => ({ ...i })),
+    note: String(o.note ?? base.note).trim().slice(0, 200),
+    footer: String(o.footer ?? base.footer).trim().slice(0, 120) || base.footer,
+  };
+}
+
 export function normalizeSectionOrder(raw: unknown): PanelSectionKey[] {
   const all = DEFAULT_SECTION_ORDER;
   if (!Array.isArray(raw)) return [...all];
@@ -211,6 +279,11 @@ export function defaultPanelSettings(): PanelSettings {
         telegramUrl: "",
         telegramLinkText: "тех. поддержку",
       },
+      decoyShop: {
+        ...DEFAULT_DECOY_SHOP,
+        intro: [...DEFAULT_DECOY_SHOP.intro],
+        items: DEFAULT_DECOY_SHOP.items.map((i) => ({ ...i })),
+      },
     },
     ui: {
       theme: "system",
@@ -232,6 +305,7 @@ export function defaultPanelSettings(): PanelSettings {
       notifyServerErrors: true,
       testMode: false,
       login2faEnabled: false,
+      webAppAdminPanelEnabled: true,
       buttonColors: { ...DEFAULT_TELEGRAM_BUTTON_COLORS },
       aiAssistantEnabled: true,
       geminiModel: "gemini-2.5-flash-lite",

@@ -1,7 +1,7 @@
-/** Бренд для реферальных сообщений: короткое «HSN» показываем как «HSN VPN». */
+/** Бренд для реферальных сообщений. Пустое / «HSN» → нейтральный «Сервис», без слова VPN. */
 export function referralBrandLabel(raw: string | undefined | null): string {
   const s = String(raw ?? "").trim();
-  if (!s || /^hsn$/i.test(s)) return "HSN VPN";
+  if (!s || /^hsn$/i.test(s)) return "Сервис";
   return s;
 }
 

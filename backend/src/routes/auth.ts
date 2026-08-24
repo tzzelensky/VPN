@@ -4,6 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { getEffectiveTelegramAdminIds, getPanelBotToken, getPanelSettings } from "../panelSettings.js";
 import { sendTelegramMessage } from "../telegram/api.js";
+import { parseTgId, verifyTelegramWebAppInitData } from "../telegram/webAppInitData.js";
 import { requireAuth } from "../middleware/requireAuth.js";
 
 const router = Router();
@@ -138,6 +139,37 @@ router.post("/logout", (req, res) => {
 
 router.get("/me", (req, res) => {
   res.json({ ok: Boolean(req.session.user?.ok) });
+});
+
+function webAppAdminGate(initData: string): { ok: true; tgId: number } | { ok: false } {
+  if (getPanelSettings().telegram.webAppAdminPanelEnabled === false) return { ok: false };
+  const ver = verifyTelegramWebAppInitData(initData);
+  if (!ver.ok) return { ok: false };
+  const tgId = parseTgId(String(ver.user.id ?? ""));
+  if (!tgId) return { ok: false };
+  const admins = getEffectiveTelegramAdminIds();
+  if (admins.length === 0 || !admins.includes(tgId)) return { ok: false };
+  return { ok: true, tgId };
+}
+
+/** Тихий probe: 5 тапов в WebApp. Не раскрывает, почему отказ. */
+router.post("/webapp-admin-check", (req, res) => {
+  const initData = String((req.body as { init_data?: unknown } | undefined)?.init_data ?? "").trim();
+  const gate = webAppAdminGate(initData);
+  res.json({ ok: gate.ok });
+});
+
+/** Сессия панели после подтверждения в WebApp. Только Admin Telegram ID. */
+router.post("/webapp-admin-login", (req, res) => {
+  const initData = String((req.body as { init_data?: unknown } | undefined)?.init_data ?? "").trim();
+  const gate = webAppAdminGate(initData);
+  if (!gate.ok) {
+    res.status(403).json({ error: "forbidden" });
+    return;
+  }
+  req.session.pending_login_2fa = undefined;
+  req.session.user = { ok: true };
+  res.json({ ok: true });
 });
 
 router.post("/change-password", requireAuth, (req, res) => {

@@ -1,8 +1,32 @@
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { DEFAULT_DECOY_SHOP, type PanelDecoyShop } from "../panelSettingsTypes";
 
 /** Публичная витрина для неавторизованного захода на `/`. */
 export default function DecoyShopPage() {
   const nav = useNavigate();
+  const [shop, setShop] = useState<PanelDecoyShop>(DEFAULT_DECOY_SHOP);
+
+  useEffect(() => {
+    let cancelled = false;
+    void fetch("/api/public/decoy-shop", { credentials: "same-origin" })
+      .then((r) => r.json())
+      .then((j: { shop?: PanelDecoyShop }) => {
+        if (cancelled || !j?.shop) return;
+        setShop({
+          ...DEFAULT_DECOY_SHOP,
+          ...j.shop,
+          intro: Array.isArray(j.shop.intro) && j.shop.intro.length ? j.shop.intro : DEFAULT_DECOY_SHOP.intro,
+          items: Array.isArray(j.shop.items) && j.shop.items.length ? j.shop.items : DEFAULT_DECOY_SHOP.items,
+        });
+      })
+      .catch(() => {
+        /* keep defaults */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   async function onReviewClick() {
     const text = window.prompt("Оставьте отзыв");
@@ -28,47 +52,32 @@ export default function DecoyShopPage() {
   return (
     <div className="decoy-shop">
       <header className="decoy-shop__header">
-        <h1>ДомКомфорт</h1>
-        <p className="decoy-shop__tag">Подушки, одеяла, наволочки — мягкий сон без лишнего шума</p>
+        <h1>{shop.brand}</h1>
+        <p className="decoy-shop__tag">{shop.tagline}</p>
       </header>
       <main className="decoy-shop__main">
         <section className="decoy-shop__card">
-          <p>
-            Мы подбираем наполнители и ткани так, чтобы вам было удобно читать, отдыхать и засыпать в
-            тишине своей спальни.
-          </p>
-          <p>В каталоге — ортопедические и декоративные подушки, комплекты постельного белья, пледы.</p>
+          {shop.intro.map((p) => (
+            <p key={p.slice(0, 24)}>{p}</p>
+          ))}
         </section>
         <div className="decoy-shop__grid" aria-label="Каталог">
-          <article className="decoy-shop__item">
-            <h3>Подушка «Облако»</h3>
-            <p>Мягкий холлофайбер, чехол из сатина</p>
-            <div className="decoy-shop__price">от 1 890 ₽</div>
-          </article>
-          <article className="decoy-shop__item">
-            <h3>Одеяло «Тишина»</h3>
-            <p>Лёгкое всесезонное, микрофибра</p>
-            <div className="decoy-shop__price">от 3 450 ₽</div>
-          </article>
-          <article className="decoy-shop__item">
-            <h3>Наволочки 50×70</h3>
-            <p>Комплект из двух, хлопок</p>
-            <div className="decoy-shop__price">от 990 ₽</div>
-          </article>
-          <article className="decoy-shop__item">
-            <h3>Плед «Вечер»</h3>
-            <p>Фланель, тёплый оттенок льна</p>
-            <div className="decoy-shop__price">от 2 290 ₽</div>
-          </article>
+          {shop.items.map((it) => (
+            <article className="decoy-shop__item" key={`${it.name}-${it.price}`}>
+              <h3>{it.name}</h3>
+              <p>{it.description}</p>
+              <div className="decoy-shop__price">{it.price}</div>
+            </article>
+          ))}
         </div>
-        <p className="decoy-shop__note">Оставайтесь на связи — готовим новые позиции коллекции.</p>
+        {shop.note ? <p className="decoy-shop__note">{shop.note}</p> : null}
         <div className="decoy-shop__review-wrap">
           <button type="button" className="decoy-shop__review-btn" onClick={() => void onReviewClick()}>
             Оставить отзыв
           </button>
         </div>
       </main>
-      <footer className="decoy-shop__footer">© ДомКомфорт · доставка по России</footer>
+      <footer className="decoy-shop__footer">{shop.footer}</footer>
       <style>{`
         .decoy-shop {
           min-height: 100vh;
@@ -93,7 +102,7 @@ export default function DecoyShopPage() {
         .decoy-shop__tag {
           font-size: 0.85rem;
           color: #7a6e5e;
-          margin: 0.35rem 0 0;
+          margin-top: 0.35rem;
         }
         .decoy-shop__main {
           max-width: 40rem;
@@ -104,7 +113,7 @@ export default function DecoyShopPage() {
           background: #fff;
           border-radius: 12px;
           padding: 1.25rem 1.35rem;
-          box-shadow: 0 8px 28px rgba(44, 36, 24, 0.06);
+          box-shadow: 0 8px 28px rgba(44,36,24,.06);
           border: 1px solid #ebe4d9;
         }
         .decoy-shop__card p { margin: 0 0 1rem; }
@@ -134,9 +143,9 @@ export default function DecoyShopPage() {
           font-size: 0.92rem;
         }
         .decoy-shop__price {
-          margin-top: 0.5rem;
           color: #c4a574;
           font-size: 0.95rem;
+          margin-top: 0.35rem;
         }
         .decoy-shop__note {
           margin-top: 1.25rem;

@@ -39,7 +39,7 @@ function defaultHistoryDateRange(timeZone: string): { from: string; to: string }
 export default function CommunicationsPage({ onLogout }: { onLogout: () => void }) {
   const { settings: panelSettings } = usePanelSettings();
   const panelTz = panelSettings?.ui.timezone?.trim() || "Asia/Yekaterinburg";
-  const brandName = panelSettings?.panel.brandName?.trim() || "HSN VPN";
+  const brandName = panelSettings?.panel.brandName?.trim() || "Сервис";
 
   const { tab: commsTab, setTab: setCommsTab } = usePanelTabParam("/communications", COMMS_TABS);
   const [targets, setTargets] = useState<CommunicationTargetDto[]>([]);

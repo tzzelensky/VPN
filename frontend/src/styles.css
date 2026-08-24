@@ -9732,6 +9732,7 @@ html[data-theme="light"] .promo-icon-btn.danger:hover:not(:disabled) {
 
 .mysub-wrap {
   min-height: 100vh;
+  min-height: var(--tg-viewport-stable-height, 100dvh);
   display: flex;
   align-items: flex-start;
   justify-content: center;
@@ -9765,6 +9766,20 @@ html[data-theme="light"] .promo-icon-btn.danger:hover:not(:disabled) {
 
 .mysub-avatar {
   object-fit: cover;
+}
+
+.mysub-avatar-hit {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  line-height: 0;
+  cursor: pointer;
+  border-radius: 50%;
+}
+
+.mysub-avatar-hit:focus-visible {
+  outline: 2px solid rgba(56, 189, 248, 0.55);
+  outline-offset: 3px;
 }
 
 .mysub-avatar-fallback {

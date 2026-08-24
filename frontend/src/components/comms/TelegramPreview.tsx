@@ -32,7 +32,7 @@ export default function TelegramPreview({ brandName, markEnabled, markText, text
       <p className="comms-wiz-hint">Как сообщение увидит пользователь в Telegram</p>
 
       <div className="comms-tg-preview">
-        <div className="comms-tg-preview__header">{brandName || "HSN VPN"}</div>
+        <div className="comms-tg-preview__header">{brandName || "Сервис"}</div>
         <div className="comms-tg-preview__bubble">
           {photoUrl ? (
             <img className="comms-tg-preview__photo" src={photoUrl} alt="" />

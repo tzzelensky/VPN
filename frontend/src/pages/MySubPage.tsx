@@ -9,6 +9,8 @@ import MySubBottomNav, { type MySubNavTabId } from "../components/MySubBottomNav
 import MySubLoadingScreen from "../mysub-new/components/MySubLoadingScreen";
 import { prefetchDailyGiftImages } from "../mysub-new/dailyGiftPrefetch";
 import MySubWebAppNew from "../mysub-new/MySubWebAppNew";
+import WebAppAdminPanelModal from "../mysub-new/components/WebAppAdminPanelModal";
+import { useWebAppAdminPanelEntry } from "../mysub-new/useWebAppAdminPanelEntry";
 import type { MySubWebAppController } from "../mysub-new/types";
 import {
   claimMySubReferralReward,
@@ -24,6 +26,7 @@ import {
 } from "../api";
 import { subscriptionLabel } from "../subscriptionLabel";
 import { applyReferralInviteVars } from "../referralInvitePreview";
+import { getTelegramWebApp, loadTelegramWebAppScript, maximizeTelegramWebApp, startTelegramWebAppMaximize } from "../lib/telegramWebApp";
 
 type Tab = "home" | "subscription" | "game" | "friends" | "profile";
 
@@ -110,6 +113,41 @@ function NavIcon({ tab }: { tab: Tab }) {
       <circle cx="12" cy="8" r="3.4" />
       <path d="M5 20c0-3.2 2.8-5.6 7-5.6s7 2.4 7 5.6" />
     </svg>
+  );
+}
+
+function MySubOldHead({
+  data,
+  headGlowClass,
+  initData,
+  theme,
+}: {
+  data: MySubProfileDto;
+  headGlowClass: string;
+  initData: string;
+  theme: MySubTheme;
+}) {
+  const adminGate = useWebAppAdminPanelEntry(initData);
+  return (
+    <>
+      <div className={`mysub-head ${headGlowClass}`.trim()}>
+        <button type="button" className="mysub-avatar-hit" onClick={adminGate.onAvatarTap} aria-label="Профиль">
+          {data.avatar_url ? (
+            <img src={data.avatar_url} alt="" className="mysub-avatar" />
+          ) : (
+            <div className="mysub-avatar-fallback">{(data.name || "U").trim().slice(0, 1).toUpperCase()}</div>
+          )}
+        </button>
+        <h1 className="mysub-name">{data.name}</h1>
+      </div>
+      <WebAppAdminPanelModal
+        open={adminGate.open}
+        busy={adminGate.busy}
+        theme={theme}
+        onConfirm={() => void adminGate.confirm()}
+        onCancel={adminGate.cancel}
+      />
+    </>
   );
 }
 
@@ -207,9 +245,7 @@ export default function MySubPage() {
   }, [theme]);
 
   function getInitData(): string {
-    const tgWebApp = (window as unknown as {
-      Telegram?: { WebApp?: { initData?: string; ready?: () => void; expand?: () => void } };
-    }).Telegram?.WebApp;
+    const tgWebApp = getTelegramWebApp();
     const direct = String(tgWebApp?.initData ?? "").trim();
     if (direct) return direct;
     const fromHash = new URLSearchParams(String(window.location.hash ?? "").replace(/^#/, "")).get("tgWebAppData");
@@ -219,27 +255,19 @@ export default function MySubPage() {
     return resolveLocalDevInitData();
   }
 
-  useEffect(() => {
-    if (!document.getElementById("tg-webapp-script")) {
-      const s = document.createElement("script");
-      s.id = "tg-webapp-script";
-      s.src = "https://telegram.org/js/telegram-web-app.js";
-      s.async = true;
-      document.head.appendChild(s);
-    }
-  }, []);
+  useEffect(() => startTelegramWebAppMaximize(), []);
 
   useEffect(() => {
     void (async () => {
       setErr("");
-      const tgWebApp = (window as unknown as { Telegram?: { WebApp?: { ready?: () => void; expand?: () => void } } }).Telegram?.WebApp;
+      await loadTelegramWebAppScript();
+      const tgWebApp = getTelegramWebApp();
       const initData = getInitData();
       if (!initData) {
         setErr("Требуется авторизация через тг.");
         return;
       }
-      tgWebApp?.ready?.();
-      tgWebApp?.expand?.();
+      maximizeTelegramWebApp(tgWebApp);
       try {
         const profile = await loadMySubWebAppProfile(initData);
         const firstSubId = profile.subscriptions[0]?.id;
@@ -1081,14 +1109,7 @@ export default function MySubPage() {
         {data ? (
           <>
             {tab !== "game" ? (
-              <div className={`mysub-head ${headGlowClass}`.trim()}>
-                {data.avatar_url ? (
-                  <img src={data.avatar_url} alt="avatar" className="mysub-avatar" />
-                ) : (
-                  <div className="mysub-avatar-fallback">{(data.name || "U").trim().slice(0, 1).toUpperCase()}</div>
-                )}
-                <h1 className="mysub-name">{data.name}</h1>
-              </div>
+              <MySubOldHead data={data} headGlowClass={headGlowClass} initData={initData} theme={theme} />
             ) : null}
 
             {tab === "home" ? (

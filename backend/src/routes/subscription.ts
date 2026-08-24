@@ -22,19 +22,19 @@ import { setSubscriptionUserHeaders } from "../subscriptionMeta.js";
 import { getCachedSubscriptionPeek, refreshUserTrafficFromServersIfDue, scheduleSubscriptionPeekRefresh } from "../xrayStatsPull.js";
 import { refreshMissingSubscriptionHintsIfDue } from "../subscriptionHintsRefresh.js";
 import { isVpnSubscriptionClient } from "../subscriptionClientDetect.js";
-import {
-  buildSubscriptionDecoyHtml,
-  SUBSCRIPTION_PRODUCT_NOT_FOUND_HTML,
-} from "../subscriptionLanding.js";
+import { buildSubscriptionDecoyHtml } from "../subscriptionLanding.js";
 
 const router = Router();
 
-function sendSubscriptionDecoy(res: import("express").Response, found: boolean): void {
-  res.status(found ? 200 : 404);
+/** Браузер/probe: всегда один и тот же HTML 200 — без oracle по существованию токена. */
+function sendSubscriptionDecoy(res: import("express").Response): void {
+  res.status(200);
   res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, private");
   res.setHeader("Pragma", "no-cache");
-  res.type("text/html; charset=utf-8");
-  res.send(found ? buildSubscriptionDecoyHtml() : SUBSCRIPTION_PRODUCT_NOT_FOUND_HTML);
+  // Не светим subscription-* в CORS expose на витрине.
+  res.removeHeader("Access-Control-Expose-Headers");
+  res.type("html");
+  res.send(buildSubscriptionDecoyHtml());
 }
 
 function activeDeviceCount(user: UserRow): number {
@@ -68,9 +68,8 @@ function resolveSubscriptionUser(rawToken: string): UserRow | undefined {
   const byToken = token ? getUserBySubToken(token) : undefined;
   if (byToken) return byToken;
 
-  // Operational fallback: when token is missing/invalid and there is exactly one user,
-  // still serve subscription so client links keep working after manual data edits.
-  if ((process.env.SUBSCRIPTION_FALLBACK_SINGLE_USER ?? "1") === "1") {
+  // Opt-in only: wrong token must not resolve to the sole user (token enumeration / ops leak).
+  if ((process.env.SUBSCRIPTION_FALLBACK_SINGLE_USER ?? "0") === "1") {
     const rows = listUsers();
     if (rows.length === 1) return rows[0];
   }
@@ -83,12 +82,13 @@ router.get("/:token", async (req, res) => {
     const user = resolveSubscriptionUser(String(req.params.token ?? ""));
 
     if (!vpnClient) {
-      sendSubscriptionDecoy(res, Boolean(user));
+      sendSubscriptionDecoy(res);
       return;
     }
 
+    // VPN UA + неизвестный токен — тот же decoy (не text/plain «not found»).
     if (!user) {
-      res.status(404).send("not found");
+      sendSubscriptionDecoy(res);
       return;
     }
 
@@ -193,24 +193,14 @@ router.get("/:token", async (req, res) => {
     res.setHeader("Content-Type", "text/plain; charset=utf-8");
     res.send(resolveSubscriptionBase64(subUser, resolveCtx));
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    res.status(500).send(msg);
+    console.error("[subscription]", e instanceof Error ? e.message : e);
+    res.status(500).type("text").send("error");
   }
 });
 
-router.get("/", async (_req, res) => {
-  try {
-    const rows = listUsers();
-    if (rows.length !== 1) {
-      res.status(404).send("not found");
-      return;
-    }
-    const only = rows[0];
-    res.redirect(302, `/goods/${encodeURIComponent(only.sub_token)}`);
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    res.status(500).send(msg);
-  }
+/** Корень /goods|/sub — витрина, без redirect на реальный sub_token. */
+router.get("/", (_req, res) => {
+  sendSubscriptionDecoy(res);
 });
 
 export default router;

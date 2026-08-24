@@ -391,6 +391,106 @@
         }
       }
     },
+    "/api/auth/webapp-admin-check": {
+      "post": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Проверяет Telegram initData и Admin ID для скрытого входа в панель из WebApp. Не создаёт сессию.",
+        "description": "Проверяет Telegram initData и Admin ID для скрытого входа в панель из WebApp. Не создаёт сессию.\n\n**HTTP:** `POST /api/auth/webapp-admin-check`\n\n**Файл:** `auth.ts`",
+        "responses": {
+          "200": {
+            "description": "Успех"
+          },
+          "400": {
+            "description": "Неверный запрос",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Не авторизован",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Не найдено"
+          },
+          "500": {
+            "description": "Ошибка сервера"
+          }
+        },
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/webapp-admin-login": {
+      "post": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Создаёт сессию администратора из Telegram WebApp после проверки initData и Admin ID.",
+        "description": "Создаёт сессию администратора из Telegram WebApp после проверки initData и Admin ID.\n\n**HTTP:** `POST /api/auth/webapp-admin-login`\n\n**Файл:** `auth.ts`",
+        "responses": {
+          "200": {
+            "description": "Успех"
+          },
+          "400": {
+            "description": "Неверный запрос",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Не авторизован",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Не найдено"
+          },
+          "500": {
+            "description": "Ошибка сервера"
+          }
+        },
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/communications/auto-broadcasts": {
       "get": {
         "tags": [
@@ -13912,8 +14012,8 @@
         "tags": [
           "System"
         ],
-        "summary": "Отдаёт decoy HTML-страницу вместо реальной подписки VPN.",
-        "description": "Отдаёт decoy HTML-страницу вместо реальной подписки VPN.\n\n**HTTP:** `GET /comfort`\n\n**Файл:** `index.ts`",
+        "summary": "Отдаёт HTML-витрину каталога (публичная заглушка).",
+        "description": "Отдаёт HTML-витрину каталога (публичная заглушка).\n\n**HTTP:** `GET /comfort`\n\n**Файл:** `index.ts`",
         "responses": {
           "200": {
             "description": "Успех"

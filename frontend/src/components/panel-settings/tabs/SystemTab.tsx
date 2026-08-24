@@ -164,6 +164,28 @@ export default function SystemTab({
         </div>
       </SettingsCard>
 
+      <SettingsCard
+        title="Панель в Telegram WebApp"
+        sub="Мобильная админка после пяти нажатий по иконке профиля"
+      >
+        <div className="settings-toggle-list">
+          <SettingsToggleRow
+            label="Вход в панель из WebApp"
+            hint={PANEL_HINTS.webAppAdminPanelEnabled}
+            on={draft.telegram.webAppAdminPanelEnabled !== false}
+            onToggle={() =>
+              patchDraft((d) => ({
+                ...d,
+                telegram: {
+                  ...d.telegram,
+                  webAppAdminPanelEnabled: d.telegram.webAppAdminPanelEnabled === false,
+                },
+              }))
+            }
+          />
+        </div>
+      </SettingsCard>
+
       <SettingsCard title="Смена пароля" sub="Логин остаётся прежним">
         <div className="form-field form-field--spaced">
           <FieldLabel label="Текущий пароль" hint="Пароль, которым вы сейчас входите в панель." />

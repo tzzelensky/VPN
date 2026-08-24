@@ -28,7 +28,7 @@ function readFrontendPanelVersion(appRoot: string): string {
     const text = fs.readFileSync(file, "utf8");
     const major = /PANEL_VERSION_MAJOR\s*=\s*(\d+)/.exec(text)?.[1];
     const minor = /PANEL_VERSION_MINOR\s*=\s*(\d+)/.exec(text)?.[1];
-    if (major && minor) return `${major}.${minor}`;
+    if (major && minor) return `${major}.${String(Number(minor)).padStart(2, "0")}`;
   } catch {
     /* ignore */
   }

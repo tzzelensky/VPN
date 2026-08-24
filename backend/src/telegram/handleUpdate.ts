@@ -1167,7 +1167,7 @@ async function handleCallback(q: CallbackQuery, rawUpdate?: unknown): Promise<vo
       }
       const botName = (process.env.TELEGRAM_BOT_USERNAME ?? "").trim().replace(/^@/, "");
       const link = botName ? `https://t.me/${botName}?start=ref_${linkedUser.id}` : `ref_${linkedUser.id}`;
-      const brand = getPanelSettings().panel.brandName.trim() || "HSN VPN";
+      const brand = getPanelSettings().panel.brandName.trim() || "Сервис";
       const inviteBody = applyReferralInviteVars(refCfg.invite_copy_text, {
         ref_link: link,
         discount: `${refCfg.invited_discount_percent}%`,

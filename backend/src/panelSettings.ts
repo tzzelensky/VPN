@@ -3,6 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   defaultPanelSettings,
+  normalizeDecoyShop,
   normalizeSectionOrder,
   orderPanelSectionMeta,
   PANEL_SECTION_META,
@@ -59,6 +60,7 @@ function mergeSettings(raw: Partial<PanelSettings> | null): PanelSettings {
         ...base.panel.subscriptionBanner,
         ...(rawBanner ?? {}),
       },
+      decoyShop: normalizeDecoyShop((raw.panel as { decoyShop?: unknown } | undefined)?.decoyShop ?? base.panel.decoyShop),
     },
     ui: { ...base.ui, ...(raw.ui ?? {}) },
     sections: { ...base.sections, ...(rawSections as PanelSettings["sections"]) },

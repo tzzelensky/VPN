@@ -37,7 +37,7 @@ export default function AdminPageFooter({ brandName }: Props) {
     return () => window.clearInterval(id);
   }, []);
 
-  const brand = brandName.trim() || "HSN VPN";
+  const brand = brandName.trim() || "Сервис";
 
   return (
     <footer className="admin-page-footer" role="contentinfo">

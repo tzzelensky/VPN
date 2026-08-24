@@ -26,6 +26,40 @@ export type PanelSubscriptionBanner = {
   telegramLinkText: string;
 };
 
+export type PanelDecoyShopItem = {
+  name: string;
+  description: string;
+  price: string;
+};
+
+export type PanelDecoyShop = {
+  title: string;
+  brand: string;
+  tagline: string;
+  intro: string[];
+  items: PanelDecoyShopItem[];
+  note: string;
+  footer: string;
+};
+
+export const DEFAULT_DECOY_SHOP: PanelDecoyShop = {
+  title: "ДомКомфорт — подушки и текстиль для сна",
+  brand: "ДомКомфорт",
+  tagline: "Подушки, одеяла, наволочки — мягкий сон без лишнего шума",
+  intro: [
+    "Мы подбираем наполнители и ткани так, чтобы вам было удобно читать, отдыхать и засыпать в тишине своей спальни.",
+    "В каталоге — ортопедические и декоративные подушки, комплекты постельного белья, пледы.",
+  ],
+  items: [
+    { name: "Подушка «Облако»", description: "Мягкий холлофайбер, чехол из сатина", price: "от 1 890 ₽" },
+    { name: "Одеяло «Тишина»", description: "Лёгкое всесезонное, микрофибра", price: "от 3 450 ₽" },
+    { name: "Наволочки 50×70", description: "Комплект из двух, хлопок", price: "от 990 ₽" },
+    { name: "Плед «Вечер»", description: "Фланель, тёплый оттенок льна", price: "от 2 290 ₽" },
+  ],
+  note: "Оставайтесь на связи — готовим новые позиции коллекции.",
+  footer: "© ДомКомфорт · доставка по России",
+};
+
 export type TelegramButtonColors = Record<
   | "menuHome"
   | "menuSubscription"
@@ -55,6 +89,7 @@ export type PanelSettings = {
     /** Ключевое слово «отзыва» на витрине → /login (только мобильная кнопка). */
     shopReviewKeyword: string;
     subscriptionBanner: PanelSubscriptionBanner;
+    decoyShop: PanelDecoyShop;
   };
   ui: {
     theme: PanelTheme;
@@ -77,6 +112,8 @@ export type PanelSettings = {
     notifyServerErrors: boolean;
     testMode: boolean;
     login2faEnabled: boolean;
+    /** Вход в мобильную админку из Telegram WebApp (5 тапов по аватарке, только Admin ID). */
+    webAppAdminPanelEnabled: boolean;
     buttonColors: TelegramButtonColors;
     aiAssistantEnabled: boolean;
     geminiModel: string;

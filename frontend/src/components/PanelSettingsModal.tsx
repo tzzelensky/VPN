@@ -14,6 +14,7 @@ import {
 import { usePanelSettings } from "../panelSettingsContext";
 import { normalizeSectionOrder, orderSectionsMeta } from "../panelNavUtils";
 import type { PanelSectionKey, PanelSettings } from "../panelSettingsTypes";
+import { DEFAULT_DECOY_SHOP } from "../panelSettingsTypes";
 import { readFileAsDataUrl } from "../avatarCrop";
 import AdminModalBackdrop from "./AdminModalBackdrop";
 import AvatarCropModal from "./AvatarCropModal";
@@ -107,6 +108,19 @@ export default function PanelSettingsModal({
         telegramLinkText: "тех. поддержку",
       },
       ...cloned.panel.subscriptionBanner,
+    };
+    const prevDecoy = cloned.panel.decoyShop;
+    cloned.panel.decoyShop = {
+      ...DEFAULT_DECOY_SHOP,
+      ...(prevDecoy ?? {}),
+      intro:
+        Array.isArray(prevDecoy?.intro) && prevDecoy.intro.length > 0
+          ? [...prevDecoy.intro]
+          : [...DEFAULT_DECOY_SHOP.intro],
+      items:
+        Array.isArray(prevDecoy?.items) && prevDecoy.items.length > 0
+          ? prevDecoy.items.map((i) => ({ ...i }))
+          : DEFAULT_DECOY_SHOP.items.map((i) => ({ ...i })),
     };
     cloned.telegram = {
       ...cloned.telegram,

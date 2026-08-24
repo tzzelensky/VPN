@@ -16,6 +16,26 @@ export async function authMe(): Promise<{ ok: boolean }> {
   return handle(res);
 }
 
+export async function checkWebAppAdminGate(initData: string): Promise<{ ok: boolean }> {
+  const res = await fetch("/api/auth/webapp-admin-check", {
+    method: "POST",
+    credentials: "include",
+    headers: jsonHeaders,
+    body: JSON.stringify({ init_data: initData }),
+  });
+  return handle(res);
+}
+
+export async function loginWebAppAdmin(initData: string): Promise<{ ok: boolean }> {
+  const res = await fetch("/api/auth/webapp-admin-login", {
+    method: "POST",
+    credentials: "include",
+    headers: jsonHeaders,
+    body: JSON.stringify({ init_data: initData }),
+  });
+  return handle(res);
+}
+
 export type LoginStepOneResponse = { ok: true } | { ok: false; requires_code: true };
 
 export async function login(username: string, password: string): Promise<LoginStepOneResponse> {

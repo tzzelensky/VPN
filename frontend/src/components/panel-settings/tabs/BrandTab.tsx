@@ -27,6 +27,8 @@ export default function BrandTab({
 }) {
   const [identityOpen, setIdentityOpen] = useState(false);
   const [subscriptionOpen, setSubscriptionOpen] = useState(false);
+  const [decoyOpen, setDecoyOpen] = useState(false);
+  const decoy = draft.panel.decoyShop;
 
   return (
     <div className="panel-settings-tab-content panel-settings-tab-content--animate">
@@ -66,6 +68,136 @@ export default function BrandTab({
             autoComplete="off"
             onChange={(e) =>
               patchDraft((d) => ({ ...d, panel: { ...d.panel, shopReviewKeyword: e.target.value } }))
+            }
+          />
+        </div>
+      </SettingsCard>
+
+      <SettingsCard
+        title="Публичная витрина"
+        sub="Тексты для браузеров на / и /goods"
+        collapsible
+        open={decoyOpen}
+        onToggle={() => setDecoyOpen((v) => !v)}
+      >
+        <p className="field-hint" style={{ marginTop: 0 }}>
+          {PANEL_HINTS.decoyShop}
+        </p>
+        <div className="panel-settings-grid-2">
+          <div className="form-field">
+            <FieldLabel label="Title (вкладка браузера)" hint="" />
+            <input
+              value={decoy?.title ?? ""}
+              onChange={(e) =>
+                patchDraft((d) => ({
+                  ...d,
+                  panel: { ...d.panel, decoyShop: { ...d.panel.decoyShop, title: e.target.value } },
+                }))
+              }
+            />
+          </div>
+          <div className="form-field">
+            <FieldLabel label="Бренд (заголовок)" hint="" />
+            <input
+              value={decoy?.brand ?? ""}
+              onChange={(e) =>
+                patchDraft((d) => ({
+                  ...d,
+                  panel: { ...d.panel, decoyShop: { ...d.panel.decoyShop, brand: e.target.value } },
+                }))
+              }
+            />
+          </div>
+        </div>
+        <div className="form-field">
+          <FieldLabel label="Подзаголовок" hint="" />
+          <input
+            value={decoy?.tagline ?? ""}
+            onChange={(e) =>
+              patchDraft((d) => ({
+                ...d,
+                panel: { ...d.panel, decoyShop: { ...d.panel.decoyShop, tagline: e.target.value } },
+              }))
+            }
+          />
+        </div>
+        <div className="form-field">
+          <FieldLabel label="Вступление (абзацы через пустую строку)" hint="" />
+          <textarea
+            className="comms-textarea"
+            rows={4}
+            value={(decoy?.intro ?? []).join("\n\n")}
+            onChange={(e) =>
+              patchDraft((d) => ({
+                ...d,
+                panel: {
+                  ...d.panel,
+                  decoyShop: {
+                    ...d.panel.decoyShop,
+                    intro: e.target.value
+                      .split(/\n\s*\n/)
+                      .map((x) => x.trim())
+                      .filter(Boolean),
+                  },
+                },
+              }))
+            }
+          />
+        </div>
+        <div className="form-field">
+          <FieldLabel label="Товары (имя | описание | цена — по строке)" hint="" />
+          <textarea
+            className="comms-textarea"
+            rows={5}
+            value={(decoy?.items ?? [])
+              .map((i) => `${i.name} | ${i.description} | ${i.price}`)
+              .join("\n")}
+            onChange={(e) =>
+              patchDraft((d) => ({
+                ...d,
+                panel: {
+                  ...d.panel,
+                  decoyShop: {
+                    ...d.panel.decoyShop,
+                    items: e.target.value
+                      .split("\n")
+                      .map((line) => line.trim())
+                      .filter(Boolean)
+                      .map((line) => {
+                        const [name, description, price] = line.split("|").map((x) => x.trim());
+                        return {
+                          name: name || "Товар",
+                          description: description || "",
+                          price: price || "",
+                        };
+                      }),
+                  },
+                },
+              }))
+            }
+          />
+        </div>
+        <div className="form-field">
+          <FieldLabel label="Примечание" hint="" />
+          <input
+            value={decoy?.note ?? ""}
+            onChange={(e) =>
+              patchDraft((d) => ({
+                ...d,
+                panel: { ...d.panel, decoyShop: { ...d.panel.decoyShop, note: e.target.value } },
+              }))
+            }
+          />
+        </div>
+        <div className="form-field">
+          <FieldLabel label="Подвал" hint="" />
+          <input
+            value={decoy?.footer ?? ""}
+            onChange={(e) =>
+              patchDraft((d) => ({
+                ...d,
+                panel: { ...d.panel, decoyShop: { ...d.panel.decoyShop, footer: e.target.value } },
+              }))
             }
           />
         </div>

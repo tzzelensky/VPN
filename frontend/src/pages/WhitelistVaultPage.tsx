@@ -133,6 +133,7 @@ export default function WhitelistVaultPage({ onLogout }: { onLogout: () => void 
   const [bsUsersModalOpen, setBsUsersModalOpen] = useState(false);
   const [bsUserIds, setBsUserIds] = useState<number[]>([]);
   const [bsPickUserId, setBsPickUserId] = useState(0);
+  const [bsUserQuery, setBsUserQuery] = useState("");
   const [historyKey, setHistoryKey] = useState<WhitelistVaultKeyDto | null>(null);
   const [history, setHistory] = useState<ConfigVaultCheckDto[]>([]);
   const [historyFilter, setHistoryFilter] = useState<{ status: string; triggered: string }>({
@@ -387,6 +388,7 @@ export default function WhitelistVaultPage({ onLogout }: { onLogout: () => void 
   function openBsUsersModal() {
     setBsUserIds(usersWithWhitelist.map((u) => u.id));
     setBsPickUserId(0);
+    setBsUserQuery("");
     setBsUsersModalOpen(true);
   }
 
@@ -399,13 +401,17 @@ export default function WhitelistVaultPage({ onLogout }: { onLogout: () => void 
         .sort((a, b) => a.name.localeCompare(b.name, "ru")),
     [bsUserIds, usersById],
   );
-  const bsAvailableUsers = useMemo(
-    () =>
-      users
-        .filter((u) => !bsUserIds.includes(u.id) && userHasActiveMainSub(u))
-        .sort((a, b) => a.name.localeCompare(b.name, "ru")),
-    [users, bsUserIds],
-  );
+  const bsAvailableUsers = useMemo(() => {
+    const q = bsUserQuery.trim().toLowerCase();
+    return users
+      .filter((u) => !bsUserIds.includes(u.id) && userHasActiveMainSub(u))
+      .filter((u) => {
+        if (!q) return true;
+        const hay = `${u.id} ${u.name || ""} ${u.email || ""} ${u.tg_id || ""}`.toLowerCase();
+        return hay.includes(q);
+      })
+      .sort((a, b) => a.name.localeCompare(b.name, "ru"));
+  }, [users, bsUserIds, bsUserQuery]);
 
   function whitelistSourceLabel(u: UserDto): string {
     return u.whitelist_purchased ? "Купил в боте" : "Добавлено вручную";
@@ -425,11 +431,40 @@ export default function WhitelistVaultPage({ onLogout }: { onLogout: () => void 
     }
   }
 
+  async function handleAddBsUserFromPick() {
+    const id = Math.floor(Number(bsPickUserId));
+    if (!Number.isFinite(id) || id <= 0) {
+      showToast("err", "Выберите пользователя в списке");
+      return;
+    }
+    if (bsUserIds.includes(id)) {
+      showToast("err", "Этот пользователь уже в списке");
+      return;
+    }
+    await runBusy(async () => {
+      await grantWhitelistAccessToUser(id);
+      const list = await reloadUsers();
+      setBsUserIds((prev) => (prev.includes(id) ? prev : [...prev, id]));
+      setBsPickUserId(0);
+      await reload();
+      const name = list.find((u) => u.id === id)?.name?.trim() || `#${id}`;
+      showToast("ok", `БС добавлены: ${name}. Обновите подписку в приложении.`);
+    });
+  }
+
   async function handleSaveBsUsersModal() {
-    const currentIds = new Set(usersWithWhitelist.map((u) => u.id));
+    // Если в селекте выбран пользователь, но «Добавить» не нажали — всё равно учитываем его.
+    const pendingId = Math.floor(Number(bsPickUserId));
     const nextIds = new Set(bsUserIds);
+    if (Number.isFinite(pendingId) && pendingId > 0) nextIds.add(pendingId);
+
+    const currentIds = new Set(usersWithWhitelist.map((u) => u.id));
     const toGrant = [...nextIds].filter((id) => !currentIds.has(id));
     const toRevoke = [...currentIds].filter((id) => !nextIds.has(id));
+    if (toGrant.length === 0 && toRevoke.length === 0) {
+      showToast("err", "Нечего сохранять: выберите пользователя и нажмите «Добавить»");
+      return;
+    }
     await runBusy(async () => {
       for (const id of toGrant) {
         await grantWhitelistAccessToUser(id);
@@ -439,6 +474,7 @@ export default function WhitelistVaultPage({ onLogout }: { onLogout: () => void 
       }
       await reloadUsers();
       await reload();
+      setBsPickUserId(0);
       setBsUsersModalOpen(false);
       showToast(
         "ok",
@@ -1981,9 +2017,10 @@ export default function WhitelistVaultPage({ onLogout }: { onLogout: () => void 
             </div>
             <div className="modal-body">
               <p className="muted vault-hint" style={{ marginTop: 0 }}>
-                Пользователю будут доступны все активные ключи белых списков. Ручное добавление действует до окончания
-                основной подписки; после истечения БС пропадают и при продлении сами не возвращаются. После сохранения
-                нужно обновить подписку в приложении.
+                Выберите пользователя и нажмите «Добавить» — БС подключатся сразу (все активные ключи). Ручное
+                добавление действует до окончания основной подписки; после истечения БС пропадают и при продлении сами
+                не возвращаются. «Сохранить» нужно только чтобы убрать пользователей из списка. После подключения
+                обновите подписку в приложении.
               </p>
               <div className="field">
                 <span className="muted vault-hint">Добавленные пользователи: {bsUserRows.length}</span>
@@ -2026,6 +2063,14 @@ export default function WhitelistVaultPage({ onLogout }: { onLogout: () => void 
               )}
               <div className="field" style={{ marginTop: "0.75rem" }}>
                 <span>Кого добавить</span>
+                <input
+                  className="input"
+                  type="search"
+                  placeholder="Поиск: имя, tg, id…"
+                  value={bsUserQuery}
+                  onChange={(e) => setBsUserQuery(e.target.value)}
+                  style={{ marginBottom: "0.5rem" }}
+                />
                 <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
                   <select
                     className="input"
@@ -2033,7 +2078,9 @@ export default function WhitelistVaultPage({ onLogout }: { onLogout: () => void 
                     onChange={(e) => setBsPickUserId(Number(e.target.value) || 0)}
                     style={{ flex: "1 1 16rem" }}
                   >
-                    <option value="">Выберите пользователя</option>
+                    <option value="">
+                      {bsAvailableUsers.length === 0 ? "Нет подходящих пользователей" : "Выберите пользователя"}
+                    </option>
                     {bsAvailableUsers.map((u) => (
                       <option key={u.id} value={u.id}>
                         #{u.id} {(u.name || u.email || "Пользователь").trim()}
@@ -2045,13 +2092,9 @@ export default function WhitelistVaultPage({ onLogout }: { onLogout: () => void 
                   </select>
                   <button
                     type="button"
-                    className="btn"
-                    disabled={!bsPickUserId}
-                    onClick={() => {
-                      if (!bsPickUserId) return;
-                      setBsUserIds((prev) => (prev.includes(bsPickUserId) ? prev : [...prev, bsPickUserId]));
-                      setBsPickUserId(0);
-                    }}
+                    className="btn primary"
+                    disabled={!bsPickUserId || busy}
+                    onClick={() => void handleAddBsUserFromPick()}
                   >
                     Добавить
                   </button>
@@ -2060,10 +2103,10 @@ export default function WhitelistVaultPage({ onLogout }: { onLogout: () => void 
             </div>
             <div className="modal-footer">
               <button type="button" className="btn" onClick={() => setBsUsersModalOpen(false)}>
-                Отмена
+                Закрыть
               </button>
-              <button type="button" className="btn primary" disabled={busy} onClick={() => void handleSaveBsUsersModal()}>
-                Сохранить
+              <button type="button" className="btn" disabled={busy} onClick={() => void handleSaveBsUsersModal()}>
+                Сохранить удаления
               </button>
             </div>
           </div>

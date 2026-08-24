@@ -1,4 +1,7 @@
-/** Витрина «ДомКомфорт» — корень, `/comfort` и браузерные заходы на `/sub`/`/goods`. */
+/** Витрина каталога — корень, `/comfort` и браузерные заходы на `/sub`/`/goods`. */
+
+import { getPanelSettings } from "./panelSettings.js";
+import { DEFAULT_DECOY_SHOP, type PanelDecoyShop } from "./panelSettingsTypes.js";
 
 function shopStyles(): string {
   return `
@@ -69,7 +72,15 @@ function reviewScript(): string {
 </script>`;
 }
 
-function shopShell(title: string, body: string, opts?: { reviewButton?: boolean }): string {
+function escHtml(s: string): string {
+  return String(s ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function shopShell(shop: PanelDecoyShop, body: string, opts?: { reviewButton?: boolean }): string {
   const reviewBtn = opts?.reviewButton
     ? `<div style="text-align:center"><button type="button" class="review-btn" id="shop-review-btn">Оставить отзыв</button></div>`
     : "";
@@ -79,68 +90,64 @@ function shopShell(title: string, body: string, opts?: { reviewButton?: boolean 
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>${title}</title>
+  <title>${escHtml(shop.title)}</title>
   <style>${shopStyles()}</style>
 </head>
 <body>
   <header>
-    <h1>ДомКомфорт</h1>
-    <div class="tag">Подушки, одеяла, наволочки — мягкий сон без лишнего шума</div>
+    <h1>${escHtml(shop.brand)}</h1>
+    <div class="tag">${escHtml(shop.tagline)}</div>
   </header>
   <main>${body}${reviewBtn}</main>
-  <footer>© ДомКомфорт · доставка по России</footer>
+  <footer>${escHtml(shop.footer)}</footer>
   ${script}
 </body>
 </html>`;
 }
 
+export function getDecoyShopConfig(): PanelDecoyShop {
+  try {
+    return getPanelSettings().panel.decoyShop ?? DEFAULT_DECOY_SHOP;
+  } catch {
+    return DEFAULT_DECOY_SHOP;
+  }
+}
+
 /** Главная витрина каталога-заглушки. */
 export function buildSubscriptionDecoyHtml(): string {
+  const shop = getDecoyShopConfig();
+  const introHtml = shop.intro.map((p) => `<p>${escHtml(p)}</p>`).join("\n");
+  const itemsHtml = shop.items
+    .map(
+      (it) => `
+      <div class="item">
+        <h3>${escHtml(it.name)}</h3>
+        <p class="muted">${escHtml(it.description)}</p>
+        <div class="price">${escHtml(it.price)}</div>
+      </div>`,
+    )
+    .join("");
   return shopShell(
-    "ДомКомфорт — подушки и текстиль для сна",
+    shop,
     `
     <div class="card">
-      <p>Мы подбираем наполнители и ткани так, чтобы вам было удобно читать, отдыхать и засыпать в тишине своей спальни.</p>
-      <p>В каталоге — ортопедические и декоративные подушки, комплекты постельного белья, пледы.</p>
+      ${introHtml}
     </div>
     <div class="grid" aria-label="Каталог">
-      <div class="item">
-        <h3>Подушка «Облако»</h3>
-        <p class="muted">Мягкий холлофайбер, чехол из сатина</p>
-        <div class="price">от 1 890 ₽</div>
-      </div>
-      <div class="item">
-        <h3>Одеяло «Тишина»</h3>
-        <p class="muted">Лёгкое всесезонное, микрофибра</p>
-        <div class="price">от 3 450 ₽</div>
-      </div>
-      <div class="item">
-        <h3>Наволочки 50×70</h3>
-        <p class="muted">Комплект из двух, хлопок</p>
-        <div class="price">от 990 ₽</div>
-      </div>
-      <div class="item">
-        <h3>Плед «Вечер»</h3>
-        <p class="muted">Фланель, тёплый оттенок льна</p>
-        <div class="price">от 2 290 ₽</div>
-      </div>
+      ${itemsHtml}
     </div>
-    <p class="note">Оставайтесь на связи — готовим новые позиции коллекции.</p>
+    ${shop.note ? `<p class="note">${escHtml(shop.note)}</p>` : ""}
   `,
     { reviewButton: true },
   );
 }
 
-/** @deprecated use buildSubscriptionDecoyHtml() — kept for static imports during transition */
-export const SUBSCRIPTION_DECOY_HTML = buildSubscriptionDecoyHtml();
+/** @deprecated use buildSubscriptionDecoyHtml() */
+export function getSubscriptionDecoyHtmlSnapshot(): string {
+  return buildSubscriptionDecoyHtml();
+}
 
-/** «Товар не найден» для браузерных/probe запросов к подписке. */
-export const SUBSCRIPTION_PRODUCT_NOT_FOUND_HTML = shopShell(
-  "Товар не найден — ДомКомфорт",
-  `
-    <div class="card">
-      <p>К сожалению, такой товар не найден или временно недоступен.</p>
-      <p class="muted">Проверьте адрес страницы или вернитесь в каталог на главной.</p>
-    </div>
-  `,
-);
+/** @deprecated oracle removed — same as catalog */
+export function getSubscriptionProductNotFoundHtml(): string {
+  return buildSubscriptionDecoyHtml();
+}

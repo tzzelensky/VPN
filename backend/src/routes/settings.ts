@@ -11,6 +11,7 @@ import {
 } from "../panelSettingsFiles.js";
 import {
   defaultPanelSettings,
+  normalizeDecoyShop,
   normalizeSectionOrder,
   normalizeVpnServerOrder,
   PANEL_SECTION_META,
@@ -149,7 +150,7 @@ router.get("/system", (_req, res) => {
     const text = fs.readFileSync(path.join(appRoot, "frontend", "src", "panelVersion.ts"), "utf8");
     const major = /PANEL_VERSION_MAJOR\s*=\s*(\d+)/.exec(text)?.[1];
     const minor = /PANEL_VERSION_MINOR\s*=\s*(\d+)/.exec(text)?.[1];
-    if (major && minor) panelVersion = `${major}.${minor}`;
+    if (major && minor) panelVersion = `${major}.${String(Number(minor)).padStart(2, "0")}`;
   } catch {
     /* keep npm version */
   }
@@ -233,6 +234,9 @@ router.patch("/", (req, res) => {
   } else if (!next.panel.subscriptionBanner) {
     next.panel.subscriptionBanner = { ...prevBanner };
   }
+  next.panel.decoyShop = normalizeDecoyShop(
+    body.settings?.panel?.decoyShop ?? next.panel.decoyShop ?? prev.panel.decoyShop,
+  );
   try {
     validateSections(next.sections);
   } catch {
