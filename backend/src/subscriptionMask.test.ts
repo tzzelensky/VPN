@@ -37,7 +37,7 @@ assert(!/#VPN\b/i.test(decoded), "notice payload must not use #VPN");
 assert(decoded.includes("vless://"), "notice still vless stub");
 
 const html = buildSubscriptionDecoyHtml();
-assert(html.includes('href="/favicon.ico"'), "decoy html has favicon.ico");
+assert(html.includes('href="/domcomfort-tab.png?v=200"'), "decoy html has uncached tab icon");
 assert(html.includes('src="/domcomfort-icon.png"'), "decoy html has round brand avatar");
 assert(html.includes('class="brand-mark"'), "decoy html has round avatar class");
 

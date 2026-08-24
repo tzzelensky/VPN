@@ -5,8 +5,8 @@
  * После 1.99 → 2.00 (не 1.100): major + 1, minor = 0.
  * Явный крупный релиз: major + 1, minor = 0.
  */
-export const PANEL_VERSION_MAJOR = 1;
-export const PANEL_VERSION_MINOR = 99;
+export const PANEL_VERSION_MAJOR = 2;
+export const PANEL_VERSION_MINOR = 0;
 
 /** Максимум minor до перехода на следующий major (1.99 → 2.00). */
 export const PANEL_VERSION_MINOR_MAX = 99;

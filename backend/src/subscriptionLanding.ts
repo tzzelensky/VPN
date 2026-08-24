@@ -92,9 +92,9 @@ function shopShell(shop: PanelDecoyShop, body: string, opts?: { reviewButton?: b
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>${escHtml(shop.title)}</title>
-  <link rel="icon" href="/favicon.ico" sizes="any" />
-  <link rel="icon" type="image/png" href="/favicon.png" />
-  <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+  <link rel="icon" type="image/png" href="/domcomfort-tab.png?v=200" />
+  <link rel="shortcut icon" type="image/png" href="/domcomfort-tab.png?v=200" />
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=200" />
   <style>${shopStyles()}</style>
 </head>
 <body>
