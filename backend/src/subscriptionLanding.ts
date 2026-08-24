@@ -9,6 +9,7 @@ function shopStyles(): string {
     * { box-sizing: border-box; }
     body { margin: 0; font-family: Georgia, "Times New Roman", serif; background: var(--bg); color: var(--text); line-height: 1.6; }
     header { padding: 1.5rem 1.25rem; text-align: center; border-bottom: 1px solid var(--line); background: var(--card); }
+    .brand-mark { width: 88px; height: 88px; border-radius: 50%; object-fit: cover; display: block; margin: 0 auto 0.85rem; box-shadow: 0 6px 18px rgba(44,36,24,.12); background: #fff; }
     h1 { font-size: 1.65rem; font-weight: 400; letter-spacing: 0.02em; margin: 0; }
     .tag { font-size: 0.85rem; color: var(--muted); margin-top: 0.35rem; }
     main { max-width: 40rem; margin: 0 auto; padding: 2rem 1.25rem 3rem; }
@@ -91,10 +92,14 @@ function shopShell(shop: PanelDecoyShop, body: string, opts?: { reviewButton?: b
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>${escHtml(shop.title)}</title>
+  <link rel="icon" href="/favicon.ico" sizes="any" />
+  <link rel="icon" type="image/png" href="/favicon.png" />
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
   <style>${shopStyles()}</style>
 </head>
 <body>
   <header>
+    <img class="brand-mark" src="/domcomfort-icon.png" width="88" height="88" alt="${escHtml(shop.brand)}" />
     <h1>${escHtml(shop.brand)}</h1>
     <div class="tag">${escHtml(shop.tagline)}</div>
   </header>

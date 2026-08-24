@@ -8,6 +8,10 @@ export default function DecoyShopPage() {
   const [shop, setShop] = useState<PanelDecoyShop>(DEFAULT_DECOY_SHOP);
 
   useEffect(() => {
+    document.title = shop.title;
+  }, [shop.title]);
+
+  useEffect(() => {
     let cancelled = false;
     void fetch("/api/public/decoy-shop", { credentials: "same-origin" })
       .then((r) => r.json())
@@ -52,6 +56,7 @@ export default function DecoyShopPage() {
   return (
     <div className="decoy-shop">
       <header className="decoy-shop__header">
+        <img className="decoy-shop__avatar" src="/domcomfort-icon.png" width={88} height={88} alt={shop.brand} />
         <h1>{shop.brand}</h1>
         <p className="decoy-shop__tag">{shop.tagline}</p>
       </header>
@@ -91,6 +96,16 @@ export default function DecoyShopPage() {
           padding: 1.5rem 1.25rem;
           text-align: center;
           border-bottom: 1px solid #e5ddd0;
+          background: #fff;
+        }
+        .decoy-shop__avatar {
+          width: 88px;
+          height: 88px;
+          border-radius: 50%;
+          object-fit: cover;
+          display: block;
+          margin: 0 auto 0.85rem;
+          box-shadow: 0 6px 18px rgba(44,36,24,.12);
           background: #fff;
         }
         .decoy-shop__header h1 {

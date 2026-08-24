@@ -4,6 +4,7 @@
 import { referralBrandLabel } from "./referralInviteText.js";
 import { normalizeDecoyShop, DEFAULT_DECOY_SHOP } from "./panelSettingsTypes.js";
 import { buildSubscriptionNoticePayload } from "./vlessLink.js";
+import { buildSubscriptionDecoyHtml } from "./subscriptionLanding.js";
 
 function assert(cond: unknown, msg: string): void {
   if (!cond) throw new Error(msg);
@@ -34,5 +35,10 @@ const b64 = buildSubscriptionNoticePayload(["Лимит устройств"]);
 const decoded = Buffer.from(b64, "base64").toString("utf8");
 assert(!/#VPN\b/i.test(decoded), "notice payload must not use #VPN");
 assert(decoded.includes("vless://"), "notice still vless stub");
+
+const html = buildSubscriptionDecoyHtml();
+assert(html.includes('href="/favicon.ico"'), "decoy html has favicon.ico");
+assert(html.includes('src="/domcomfort-icon.png"'), "decoy html has round brand avatar");
+assert(html.includes('class="brand-mark"'), "decoy html has round avatar class");
 
 console.log("subscriptionMask.test.ts: ok");
