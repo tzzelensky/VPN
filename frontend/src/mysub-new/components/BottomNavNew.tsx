@@ -7,6 +7,7 @@ type Props = {
   items: MySubWebAppController["bottomNavItems"];
   active: MySubNavTabId;
   onChange: (tab: MySubNavTabId) => void;
+  sidebar?: boolean;
 };
 
 type BubbleRect = { left: number; width: number };
@@ -40,7 +41,7 @@ function nearestIndex(centers: number[], x: number): number {
   return best;
 }
 
-const BottomNavNew = forwardRef<BottomNavHandle, Props>(function BottomNavNew({ items, active, onChange }, ref) {
+const BottomNavNew = forwardRef<BottomNavHandle, Props>(function BottomNavNew({ items, active, onChange, sidebar = false }, ref) {
   const innerRef = useRef<HTMLDivElement>(null);
   const bubbleRef = useRef<HTMLDivElement>(null);
   const itemRefs = useRef<(HTMLButtonElement | null)[]>([]);
@@ -112,6 +113,7 @@ const BottomNavNew = forwardRef<BottomNavHandle, Props>(function BottomNavNew({ 
 
   const setSwipeProgress = useCallback(
     (index: number, dragPx: number, pageWidth: number) => {
+      if (sidebar) return;
       if (pageWidth <= 0) return;
       swipeProgressRef.current = true;
       if (!rectsRef.current.length) measureRects();
@@ -136,7 +138,7 @@ const BottomNavNew = forwardRef<BottomNavHandle, Props>(function BottomNavNew({ 
       applyBubble(left, width, true);
       applyVisualIndex(t >= 0.5 ? to : from);
     },
-    [applyBubble, applyVisualIndex, measureRects],
+    [applyBubble, applyVisualIndex, measureRects, sidebar],
   );
 
   useImperativeHandle(ref, () => ({ setSwipeProgress, snapToIndex }), [setSwipeProgress, snapToIndex]);
@@ -162,18 +164,20 @@ const BottomNavNew = forwardRef<BottomNavHandle, Props>(function BottomNavNew({ 
   );
 
   const measure = useCallback(() => {
+    if (sidebar) return;
     measureRects();
     if (draggingRef.current || swipeProgressRef.current) return;
     snapToIndex(activeIndex, false);
-  }, [activeIndex, measureRects, snapToIndex]);
+  }, [activeIndex, measureRects, sidebar, snapToIndex]);
 
   useLayoutEffect(() => {
+    if (sidebar) return;
     measureRects();
     if (!draggingRef.current && !swipeProgressRef.current) {
       snapToIndex(activeIndex, false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [items.length]);
+  }, [items.length, sidebar]);
 
   useLayoutEffect(() => {
     if (draggingRef.current || swipeProgressRef.current) return;
@@ -189,7 +193,7 @@ const BottomNavNew = forwardRef<BottomNavHandle, Props>(function BottomNavNew({ 
 
   useLayoutEffect(() => {
     const inner = innerRef.current;
-    if (!inner || typeof ResizeObserver === "undefined") return;
+    if (!inner || sidebar || typeof ResizeObserver === "undefined") return;
     const ro = new ResizeObserver(() => measure());
     ro.observe(inner);
     return () => {
@@ -197,7 +201,7 @@ const BottomNavNew = forwardRef<BottomNavHandle, Props>(function BottomNavNew({ 
       detachWindowListeners();
       if (rafRef.current) window.cancelAnimationFrame(rafRef.current);
     };
-  }, [measure, detachWindowListeners]);
+  }, [measure, detachWindowListeners, sidebar]);
 
   const snapFromNavDrag = useCallback(
     (index: number) => {
@@ -283,7 +287,7 @@ const BottomNavNew = forwardRef<BottomNavHandle, Props>(function BottomNavNew({ 
   upHandlerRef.current = finishDrag;
 
   const onPointerDown = (e: React.PointerEvent) => {
-    if (draggingRef.current || e.pointerType === "touch") return;
+    if (sidebar || draggingRef.current || e.pointerType === "touch") return;
     measureRects();
     const inner = innerRef.current;
     if (!inner || rectsRef.current.length === 0) return;
@@ -310,7 +314,7 @@ const BottomNavNew = forwardRef<BottomNavHandle, Props>(function BottomNavNew({ 
 
   useLayoutEffect(() => {
     const inner = innerRef.current;
-    if (!inner) return;
+    if (!inner || sidebar) return;
 
     const onTouchStart = (e: TouchEvent) => {
       if (draggingRef.current || rectsRef.current.length === 0) return;
@@ -401,14 +405,14 @@ const BottomNavNew = forwardRef<BottomNavHandle, Props>(function BottomNavNew({ 
       inner.removeEventListener("touchstart", onTouchStart);
       cancelDrag();
     };
-  }, [activeIndex, applyVisualIndex, cancelDrag, measureRects, scheduleVisual, snapFromNavDrag]);
+  }, [activeIndex, applyVisualIndex, cancelDrag, measureRects, scheduleVisual, sidebar, snapFromNavDrag]);
 
   return (
     <nav className="mn-bottom-nav" aria-label="Навигация">
       <div
         ref={innerRef}
         className="mn-bottom-nav__inner"
-        style={{ gridTemplateColumns: `repeat(${Math.max(1, items.length)}, 1fr)` }}
+        style={sidebar ? undefined : { gridTemplateColumns: `repeat(${Math.max(1, items.length)}, 1fr)` }}
         onPointerDown={onPointerDown}
       >
         <div ref={bubbleRef} className="mn-bottom-nav__bubble" aria-hidden />

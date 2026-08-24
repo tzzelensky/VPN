@@ -11,12 +11,6 @@ html.tg-webapp-large .mysub-wrap {
   width: 100%;
 }
 
-@media (min-width: 768px) {
-  html.tg-webapp-large .mn-app__content {
-    max-width: 680px;
-  }
-}
-
 .mn-app {
   --mn-bg: #eef4ff;
   --mn-bg2: #dbeafe;
@@ -90,6 +84,21 @@ html.tg-webapp-large .mysub-wrap {
 
 .mn-tab-stack > .mn-card,
 .mn-tab-stack > .mn-daily-gift {
+  flex-shrink: 0;
+}
+
+.mn-home,
+.mn-profile-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  width: 100%;
+  min-width: 0;
+}
+
+.mn-home > .mn-card,
+.mn-home > .mn-home-gift,
+.mn-profile-grid > .mn-card {
   flex-shrink: 0;
 }
 
@@ -1057,6 +1066,161 @@ html.tg-webapp-large .mysub-wrap {
   fill: none;
   stroke: currentColor;
   stroke-width: 1.8;
+}
+
+/* ПК: ширина самого .mn-app ≥ 900px (ResizeObserver), не viewport — превью в админке остаётся телефоном */
+.mn-app--pc {
+  --mn-nav-h: 0px;
+  --mn-pc-sidebar: 232px;
+  display: grid;
+  grid-template-columns: var(--mn-pc-sidebar) minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  height: var(--tg-viewport-stable-height, 100dvh);
+  min-height: var(--tg-viewport-stable-height, 100dvh);
+  overflow: hidden;
+}
+
+.mn-app--pc.mn-app--hide-nav {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.mn-app--pc > .mn-app__bg,
+.mn-app--pc > .mn-toast,
+.mn-app--pc > .mn-portal-mount {
+  grid-column: 1 / -1;
+  grid-row: 1;
+}
+
+.mn-app--pc > .mn-bottom-nav {
+  grid-column: 1;
+  grid-row: 1;
+  position: relative;
+  left: auto;
+  right: auto;
+  bottom: auto;
+  top: auto;
+  height: 100%;
+  align-self: stretch;
+  padding: 0.85rem 0.65rem 0.85rem 0.85rem;
+  pointer-events: auto;
+  z-index: 2;
+}
+
+.mn-app--pc > .mn-app__content {
+  grid-column: 2;
+  grid-row: 1;
+  max-width: 1120px;
+  width: 100%;
+  margin: 0;
+  justify-self: start;
+  padding: 1.15rem 1.5rem 1.5rem;
+  overflow-x: hidden;
+  overflow-y: auto;
+  height: 100%;
+  min-height: 0;
+}
+
+.mn-app--pc.mn-app--hide-nav > .mn-app__content {
+  grid-column: 1;
+}
+
+.mn-app--pc .mn-user-header-shell {
+  --mn-header-collapse: 0 !important;
+  --mn-header-slot: 1 !important;
+  max-height: none;
+  overflow: visible;
+}
+
+.mn-app--pc .mn-user-header-shell .mn-user-header {
+  opacity: 1;
+  transform: none;
+}
+
+.mn-app--pc .mn-app__content.is-header-lifting .mn-main {
+  transform: none;
+}
+
+.mn-app--pc .mn-bottom-nav__inner {
+  max-width: none;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.28rem;
+  padding: 0.5rem;
+  box-sizing: border-box;
+}
+
+.mn-app--pc .mn-bottom-nav__bubble {
+  display: none;
+}
+
+.mn-app--pc .mn-bottom-nav__btn {
+  flex-direction: row;
+  justify-content: flex-start;
+  align-items: center;
+  gap: 0.7rem;
+  width: 100%;
+  padding: 0.72rem 0.85rem;
+  font-size: 0.88rem;
+}
+
+.mn-app--pc .mn-bottom-nav__btn.is-active,
+.mn-app--pc .mn-bottom-nav__btn.is-active:active,
+.mn-app--pc .mn-bottom-nav__btn.is-active:focus,
+.mn-app--pc .mn-bottom-nav__btn.is-active:focus-visible {
+  color: #fff;
+  background: var(--mn-primary);
+}
+
+.mn-app--pc .mn-toast {
+  left: calc(var(--mn-pc-sidebar) + (100vw - var(--mn-pc-sidebar)) / 2);
+}
+
+.mn-app--pc.mn-app--hide-nav .mn-toast {
+  left: 50%;
+}
+
+.mn-app--pc .mn-home {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 0.75rem;
+  align-items: start;
+}
+
+.mn-app--pc .mn-home-gift,
+.mn-app--pc .mn-home-sub,
+.mn-app--pc .mn-home-empty {
+  grid-column: 1 / -1;
+}
+
+.mn-app--pc .mn-home-link:last-child {
+  grid-column: 1 / -1;
+}
+
+.mn-app--pc .mn-btn--full {
+  max-width: 280px;
+}
+
+.mn-app--pc .mn-tariff-grid {
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+}
+
+.mn-app--pc .mn-profile-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
+  gap: 0.75rem;
+  align-items: start;
+}
+
+.mn-app--pc .mn-game-wrap {
+  max-width: 720px;
+  margin-inline: auto;
+}
+
+.mn-app.mn-app--pc .roulette-game__wheel-frame {
+  width: min(320px, calc(100% - 0.75rem));
 }
 
 .mn-toast {

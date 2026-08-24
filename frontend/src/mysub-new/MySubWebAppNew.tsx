@@ -130,6 +130,9 @@ function MySubWebAppNewBody({
   const headerSnapRafRef = useRef(0);
   const headerSlotRef = useRef(1);
   const HEADER_SNAP_MS = 260;
+  const [pcLayout, setPcLayout] = useState(false);
+  const pcLayoutRef = useRef(false);
+  pcLayoutRef.current = pcLayout;
 
   const computeSnapLift = useCallback((collapse: number, start: number, target: number, fromCollapsedSlot: boolean) => {
     const v = Math.max(0, Math.min(1, collapse));
@@ -143,6 +146,7 @@ function MySubWebAppNewBody({
   }, []);
   const hideNav = dropperPlaying;
   const swipeDisabled =
+    pcLayout ||
     dropperPlaying ||
     supportOpen ||
     showPickModal ||
@@ -265,8 +269,8 @@ function MySubWebAppNewBody({
   const applyHeaderSettled = useCallback(
     (instant: boolean, forceTab?: MySubNavTabId) => {
       const tabId = forceTab ?? tabRef.current;
-      const target = tabId === "game" ? 1 : 0;
-      if (instant) {
+      const target = pcLayoutRef.current ? 0 : tabId === "game" ? 1 : 0;
+      if (instant || pcLayoutRef.current) {
         finishHeaderSnap(target);
         return;
       }
@@ -277,6 +281,7 @@ function MySubWebAppNewBody({
 
   const applyHeaderCollapse = useCallback(
     (visual: SwipeVisualState | null, dragging: boolean) => {
+      if (pcLayoutRef.current) return;
       const shell = headerShellRef.current;
       if (!shell) return;
 
@@ -312,6 +317,10 @@ function MySubWebAppNewBody({
 
   const onTabTransitionStart = useCallback(
     (toIndex: number, fromIndex: number, onComplete?: () => void) => {
+      if (pcLayoutRef.current) {
+        onComplete?.();
+        return;
+      }
       const gameIdx = gameIndex;
       const id = bottomNavItems[toIndex]?.id;
       if (!id) {
@@ -333,7 +342,7 @@ function MySubWebAppNewBody({
   useLayoutEffect(() => {
     applyHeaderSettled(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [pcLayout]);
 
   useEffect(() => () => cancelHeaderSnap(), [cancelHeaderSnap]);
 
@@ -359,6 +368,7 @@ function MySubWebAppNewBody({
         navRef={navRef}
         portalMountRef={portalMountRef}
         onAvatarTap={embedInAdmin ? undefined : adminGate.onAvatarTap}
+        onPcLayoutChange={setPcLayout}
       >
         <TabSwipeViews
           items={bottomNavItems}

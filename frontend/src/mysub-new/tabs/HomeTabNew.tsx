@@ -44,9 +44,9 @@ export default function HomeTabNew({ ctrl }: Props) {
   }
 
   return (
-    <>
+    <div className="mn-home">
       {multiSub ? (
-        <Card>
+        <Card className="mn-home-sub">
           <h3 className="mn-card-title">Подписка</h3>
           <p className="mn-muted mn-card-desc">Выберите подписку — подарок и начисление будут для неё.</p>
           <select
@@ -68,16 +68,18 @@ export default function HomeTabNew({ ctrl }: Props) {
         </Card>
       ) : null}
       {showDailyGift && homeGift ? (
-        <DailyGiftBlock
-          key={homeSub?.id ?? 0}
-          ctrl={ctrl}
-          gift={homeGift}
-          multiSub={multiSub}
-          subscriptionName={homeSub ? subscriptionLabel(homeSub) : undefined}
-        />
+        <div className="mn-home-gift">
+          <DailyGiftBlock
+            key={homeSub?.id ?? 0}
+            ctrl={ctrl}
+            gift={homeGift}
+            multiSub={multiSub}
+            subscriptionName={homeSub ? subscriptionLabel(homeSub) : undefined}
+          />
+        </div>
       ) : null}
       {data.subscriptions.length === 0 ? (
-        <Card>
+        <Card className="mn-home-empty">
           {salesDisabledForNew ? (
             <p className="mn-muted">Оформление новых подписок сейчас недоступно.</p>
           ) : (
@@ -97,7 +99,7 @@ export default function HomeTabNew({ ctrl }: Props) {
         </Card>
       ) : (
         <>
-          <Card>
+          <Card className="mn-home-link">
             <h3 className="mn-card-title">Ссылка для подключения</h3>
             <p className="mn-muted mn-card-desc">Используйте эту ссылку в приложении Happ или V2Ray.</p>
             {subUrl ? (
@@ -135,7 +137,7 @@ export default function HomeTabNew({ ctrl }: Props) {
           </Card>
 
           {showDevices && homeSub?.devices ? (
-            <Card>
+            <Card className="mn-home-devices">
               <h3 className="mn-card-title">Устройства</h3>
               {(() => {
                 const dev = homeSub.devices!;
@@ -217,6 +219,6 @@ export default function HomeTabNew({ ctrl }: Props) {
           ) : null}
         </>
       )}
-    </>
+    </div>
   );
 }
