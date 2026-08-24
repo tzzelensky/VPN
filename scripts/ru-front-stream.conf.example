@@ -1,4 +1,4 @@
-# Public 443 SNI split on RU VPN node (shop/API live on NLHSN, not here):
+# Public 443 SNI split on VPN node (shop/API live on the panel host, not here):
 #   Trojan SNI www.cloudflare.com → xray 127.0.0.1:8446
 #   everything else (VLESS REALITY SNI, e.g. www.microsoft.com) → xray 127.0.0.1:8443
 

@@ -1,3 +1,4 @@
-# Shop/API are NOT hosted on the RU VPN node.
-# Do not enable this file. Domain traffic goes to NLHSN (82.25.58.78).
-# RU public 443 is nginx stream SNI only — see ru-front-stream.conf.example.
+# Shop/API are not hosted on a VPN-stream node.
+# Domain traffic: panel or Always-Free HTTP front
+# (scripts/panel-front-nginx.conf.example + setup-panel-front.sh).
+# Stream public 443 is nginx SNI only — see ru-front-stream.conf.example.

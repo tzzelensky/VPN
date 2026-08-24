@@ -8,7 +8,7 @@ from pathlib import Path
 
 import paramiko
 
-HOST = os.environ.get("RU_HOST", "138.124.180.18")
+HOST = os.environ.get("RU_HOST", "").strip()
 USER = os.environ.get("RU_SSH_USER", "root")
 PASSWORD = os.environ.get("RU_SSH_PASSWORD", "")
 REPO = Path(__file__).resolve().parents[1]
@@ -16,6 +16,8 @@ SCRIPTS = REPO / "scripts"
 
 
 def connect() -> paramiko.SSHClient:
+    if not HOST:
+        raise SystemExit("Set RU_HOST")
     if not PASSWORD:
         raise SystemExit("Set RU_SSH_PASSWORD")
     c = paramiko.SSHClient()

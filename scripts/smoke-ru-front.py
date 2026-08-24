@@ -7,11 +7,13 @@ import sys
 
 import paramiko
 
-RU = os.environ.get("RU_HOST", "138.124.180.18")
+RU = os.environ.get("RU_HOST", "").strip()
 PASSWORD = os.environ.get("RU_SSH_PASSWORD", "")
 
 
 def main() -> None:
+    if not RU:
+        raise SystemExit("Set RU_HOST")
     if not PASSWORD:
         raise SystemExit("Set RU_SSH_PASSWORD")
     c = paramiko.SSHClient()

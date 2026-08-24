@@ -1,0 +1,60 @@
+# Канал B: HTTPS reverse-proxy на купленном HTTP-фронте → панель.
+# Проксирует shop, /goods, WebApp (/mysub) и админку после 5 тапов.
+# Закрыто снаружи: парольный /login и swagger (/panel/).
+# Не ставить на VPN-stream ноду (если 443 занят SNI).
+#
+# setup-panel-front.sh подставляет DOMAIN и PANEL_ORIGIN.
+
+map $http_upgrade $connection_upgrade {
+    default upgrade;
+    ''      close;
+}
+
+# --- HTTP (ACM + redirect) ---
+server {
+    listen 80;
+    listen [::]:80;
+    server_name DOMAIN_PLACEHOLDER;
+
+    location ^~ /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+        default_type text/plain;
+    }
+
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}
+
+# --- HTTPS (denylist: block password login + swagger; proxy the rest) ---
+server {
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
+    server_name DOMAIN_PLACEHOLDER;
+    client_max_body_size 12m;
+
+    ssl_certificate     /etc/letsencrypt/live/DOMAIN_PLACEHOLDER/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/DOMAIN_PLACEHOLDER/privkey.pem;
+
+    # Password form + classic login API — не светить на публичном DNS.
+    # WebApp 5-tap использует /api/auth/webapp-admin-* (не под этим префиксом login).
+    location ^~ /login { return 404; }
+    location ^~ /api/auth/login { return 404; }
+    location ^~ /panel/ { return 404; }
+
+    location / {
+        proxy_pass PANEL_ORIGIN_PLACEHOLDER;
+        proxy_http_version 1.1;
+        proxy_ssl_server_name on;
+        proxy_ssl_name DOMAIN_PLACEHOLDER;
+        proxy_ssl_verify off;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
+        proxy_read_timeout 300s;
+        proxy_send_timeout 300s;
+    }
+}

@@ -1,10 +1,10 @@
 #!/bin/bash
-# Запускать на сервере ОДИН РАЗ от root: sudo bash server-root-once.sh
-# После этого: Nginx для devspace5.duckdns.org, systemd API, linger для user-сервиса не нужен.
+# Запускать на сервере ОДИН РАЗ от root: sudo bash server-root-once.sh <domain> [app_root]
+# Пример: sudo bash server-root-once.sh panel.example.com
 
 set -euo pipefail
 
-DOMAIN="${1:-devspace5.duckdns.org}"
+DOMAIN="${1:?Usage: $0 <domain> [app_root]}"
 APP_ROOT="${2:-/home/vpnadm/vpn-admin-app}"
 
 if [[ $(id -u) -ne 0 ]]; then

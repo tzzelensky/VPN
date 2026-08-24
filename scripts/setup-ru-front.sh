@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# RU node: VPN-only nginx stream SNI (no shop reverse-proxy, no domain redirect).
+# VPN-node stream SNI (no shop reverse-proxy). See RU-FRONT-RUNBOOK.md checklist.
 # Does NOT change DuckDNS. Does NOT touch the panel.
 #
-# Usage (on RU as root):
+# Usage (on VPN node as root):
 #   bash scripts/setup-ru-front.sh
 
 set -euo pipefail

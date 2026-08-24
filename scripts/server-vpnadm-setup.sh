@@ -24,8 +24,8 @@ upsert_env() {
   fi
 }
 
-upsert_env "FRONTEND_ORIGIN" "https://devspace5.duckdns.org"
-upsert_env "PUBLIC_API_URL" "https://devspace5.duckdns.org"
+upsert_env "FRONTEND_ORIGIN" "${FRONTEND_ORIGIN:?Set FRONTEND_ORIGIN (e.g. https://panel.example.com)}"
+upsert_env "PUBLIC_API_URL" "${PUBLIC_API_URL:?Set PUBLIC_API_URL (e.g. https://panel.example.com)}"
 upsert_env "DATA_PATH" "/opt/vpn-admin/data/data.json"
 upsert_env "COOKIE_SECURE" "1"
 

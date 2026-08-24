@@ -620,7 +620,7 @@ print_summary() {
   echo -e "${GREEN}${BOLD}  Установка завершена${NC}"
   echo -e "${GREEN}${BOLD}════════════════════════════════════════${NC}"
   echo
-  echo -e "  Откройте в браузере:  ${BOLD}${PUBLIC_BASE}${NC}"
+  echo -e "  Откройте в браузере:  ${BOLD}${PUBLIC_BASE}/login${NC}"
   echo -e "  Логин:                ${BOLD}${ADMIN_USER_PRINT:-$ADMIN_USER_DEFAULT}${NC}"
   echo -e "  Пароль:               ${BOLD}${ADMIN_PASSWORD_PRINT:-см. backend/.env}${NC}"
   echo

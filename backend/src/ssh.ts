@@ -1332,7 +1332,7 @@ export async function applySubscriptionSettingsToServer(
         opened: false,
         already_open: false,
         detail: e instanceof Error ? e.message : String(e),
-        manual_command: `sudo ufw allow ${applied.port}/tcp`,
+        manual_command: `ufw allow ${applied.port}/tcp`,
         cloud_security_group_hint: `Откройте TCP ${applied.port} в security group хостинга, если UFW не используется.`,
       };
     }

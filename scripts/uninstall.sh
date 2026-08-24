@@ -40,7 +40,7 @@ need_root() {
   fi
 }
 
-# Защита рабочей панели (devspace5 и аналоги): код в /home/vpnadm/vpn-admin-app, данные в /opt/vpn-admin/data.
+# Защита рабочей панели: код в /home/vpnadm/vpn-admin-app, данные в /opt/vpn-admin/data.
 # One-liner install/uninstall для таких хостов запрещён по умолчанию.
 refuse_managed_staging_panel() {
   if [[ "${ALLOW_EXISTING_PANEL:-0}" == "1" ]]; then

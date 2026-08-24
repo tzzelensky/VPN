@@ -1,0 +1,13 @@
+# Optional: paste into panel nginx *before* `location / { try_files ... }`
+# when DuckDNS points directly at the panel (no separate HTTP front).
+# Blocks admin SPA paths on the public hostname. Admin → Tailscale / panel IP.
+#
+# Keep /goods /sub /api/sub /api/subscription /api/public /api/health /comfort
+# and location = / (decoy) as they already are in enable-https.sh.
+
+location ^~ /login { return 404; }
+location ^~ /servers { return 404; }
+location ^~ /users { return 404; }
+location ^~ /subscription-shop { return 404; }
+location ^~ /communications { return 404; }
+location ^~ /panel/ { return 404; }
