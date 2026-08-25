@@ -9,6 +9,7 @@ import { clearUsersListCache } from "./usersListCache";
 import SectionGuard from "./components/SectionGuard";
 import HomeRedirect from "./components/HomeRedirect";
 import LoginPage from "./pages/LoginPage";
+import { usePublicSiteMeta } from "./usePublicSiteMeta";
 import ServersPage from "./pages/ServersPage";
 import UsersPage from "./pages/UsersPage";
 import SubscriptionShopPage from "./pages/SubscriptionShopPage";
@@ -109,7 +110,8 @@ function tabbedRoutes(
 }
 
 export default function App() {
-  const path = typeof window !== "undefined" ? window.location.pathname : "";
+  const location = useLocation();
+  const path = location.pathname;
   if (path.startsWith("/mysub")) {
     return (
       <Routes>
@@ -120,9 +122,11 @@ export default function App() {
     );
   }
 
+  const siteMeta = usePublicSiteMeta();
+  const secretPath = siteMeta?.panelAccessPath ?? null;
   const { ready, loggedIn, setLoggedIn } = useSession();
 
-  if (!ready) {
+  if (siteMeta === null || !ready) {
     return (
       <div className="login-wrap">
         <div className="muted">Загрузка…</div>
@@ -135,9 +139,21 @@ export default function App() {
   return (
     <PanelSettingsProvider enabled={loggedIn}>
       <PanelUpdatesProvider enabled={loggedIn}>
-      <GlobalAmbientBackdrop />
+      <GlobalAmbientBackdrop secretLoginPath={secretPath} />
       <Routes>
         <Route path="/login" element={<LoginPage onSuccess={() => setLoggedIn(true)} />} />
+        {secretPath ? (
+          <Route
+            path={`/${secretPath}`}
+            element={
+              loggedIn ? (
+                <Navigate to="/servers" replace />
+              ) : (
+                <LoginPage onSuccess={() => setLoggedIn(true)} />
+              )
+            }
+          />
+        ) : null}
         <Route
           path="/servers"
           element={

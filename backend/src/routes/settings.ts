@@ -3,6 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { requireAuth } from "../middleware/requireAuth.js";
+import { normalizePanelAccessPath, validatePanelAccessPath } from "../panelAccessPath.js";
 import {
   deletePanelAvatarFiles,
   readPanelAvatar,
@@ -265,6 +266,15 @@ router.patch("/", (req, res) => {
   }
   if (body.settings?.ui && "webAppPreviewEnabled" in body.settings.ui) {
     next.ui.webAppPreviewEnabled = body.settings.ui.webAppPreviewEnabled === true;
+  }
+  if (body.settings?.security && "panelAccessPath" in body.settings.security) {
+    const normalized = normalizePanelAccessPath(body.settings.security.panelAccessPath);
+    const pathErr = validatePanelAccessPath(normalized);
+    if (pathErr) {
+      res.status(400).json({ error: pathErr });
+      return;
+    }
+    next.security.panelAccessPath = normalized;
   }
   if (body.botToken != null && String(body.botToken).trim()) {
     const token = String(body.botToken).trim();

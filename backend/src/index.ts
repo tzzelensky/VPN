@@ -177,6 +177,13 @@ app.get("/api/public/decoy-shop", (_req, res) => {
   res.json({ shop: getPanelSettings().panel.decoyShop });
 });
 
+/** Публичные метаданные сайта (секретный путь входа в панель). */
+app.get("/api/public/site-meta", (_req, res) => {
+  res.setHeader("Cache-Control", "no-store");
+  const path = String(getPanelSettings().security.panelAccessPath ?? "").trim();
+  res.json({ panelAccessPath: path || null });
+});
+
 app.get("/comfort", (_req, res) => {
   res.type("text/html; charset=utf-8").send(buildSubscriptionDecoyHtml());
 });

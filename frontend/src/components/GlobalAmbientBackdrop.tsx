@@ -3,9 +3,9 @@ import { useLocation } from "react-router-dom";
 import AmbientBackdrop from "./AmbientBackdrop";
 
 /** Анимированный фон только на странице входа — в панели он вызывал моргание через прозрачные слои. */
-export default function GlobalAmbientBackdrop() {
+export default function GlobalAmbientBackdrop({ secretLoginPath = null }: { secretLoginPath?: string | null }) {
   const { pathname } = useLocation();
-  const isLogin = pathname === "/login";
+  const isLogin = pathname === "/login" || (secretLoginPath != null && pathname === `/${secretLoginPath}`);
   const isAdminApp = !pathname.startsWith("/mysub") && !isLogin;
 
   useEffect(() => {

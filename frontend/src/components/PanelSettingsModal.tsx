@@ -15,6 +15,8 @@ import { usePanelSettings } from "../panelSettingsContext";
 import { normalizeSectionOrder, orderSectionsMeta } from "../panelNavUtils";
 import type { PanelSectionKey, PanelSettings } from "../panelSettingsTypes";
 import { DEFAULT_DECOY_SHOP } from "../panelSettingsTypes";
+import { normalizePanelAccessPath, panelAccessPathError } from "../panelAccessPath";
+import { invalidatePublicSiteMetaCache } from "../usePublicSiteMeta";
 import { readFileAsDataUrl } from "../avatarCrop";
 import AdminModalBackdrop from "./AdminModalBackdrop";
 import AvatarCropModal from "./AvatarCropModal";
@@ -207,6 +209,11 @@ export default function PanelSettingsModal({
       setMsg({ type: "err", text: "Должен быть виден хотя бы один раздел." });
       return;
     }
+    const accessPathErr = panelAccessPathError(normalizePanelAccessPath(draft.security.panelAccessPath ?? ""));
+    if (accessPathErr) {
+      setMsg({ type: "err", text: accessPathErr });
+      return;
+    }
     setBusy(true);
     setMsg(null);
     try {
@@ -220,6 +227,7 @@ export default function PanelSettingsModal({
       if (clearGeminiKey) payload.clearGeminiApiKey = true;
       else if (geminiKeyEdit.trim()) payload.geminiApiKey = geminiKeyEdit.trim();
       const r = await applyPatch(payload);
+      invalidatePublicSiteMetaCache();
       lastSyncedAtRef.current = r.settings.updatedAt;
       setDirty(false);
       setBotTokenEdit("");

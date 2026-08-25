@@ -8,6 +8,11 @@ import SettingsToggleRow from "../../SettingsToggleRow";
 import SettingsCard from "../SettingsCard";
 import EnableHttpsModal from "../EnableHttpsModal";
 import type { MsgState, PatchDraft } from "../types";
+import {
+  normalizePanelAccessPath,
+  panelAccessPathError,
+  PANEL_ACCESS_PATH_MAX_LEN,
+} from "../../../panelAccessPath";
 
 export default function SystemTab({
   draft,
@@ -61,6 +66,8 @@ export default function SystemTab({
 
   const applying = applyPhase !== "idle" && applyPhase !== "error";
   const updateBusy = checking || applying;
+  const panelAccessPathDraft = normalizePanelAccessPath(draft.security.panelAccessPath ?? "");
+  const panelAccessPathErr = panelAccessPathError(panelAccessPathDraft);
 
   async function submitPassword() {
     if (!canSubmitPassword) return;
@@ -139,6 +146,49 @@ export default function SystemTab({
               />
             );
           })}
+        </div>
+        <div className="form-field form-field--spaced">
+          <FieldLabel label="Доступ к панели по /слову" hint={PANEL_HINTS.panelAccessPath} />
+          <input
+            type="text"
+            autoComplete="off"
+            spellCheck={false}
+            maxLength={PANEL_ACCESS_PATH_MAX_LEN}
+            placeholder="например gate42"
+            value={draft.security.panelAccessPath ?? ""}
+            disabled={busy}
+            aria-invalid={panelAccessPathErr ? true : undefined}
+            onChange={(e) => {
+              const raw = e.target.value;
+              patchDraft((d) => ({
+                ...d,
+                security: { ...d.security, panelAccessPath: raw },
+              }));
+            }}
+            onBlur={() => {
+              const normalized = normalizePanelAccessPath(draft.security.panelAccessPath ?? "");
+              if (normalized !== (draft.security.panelAccessPath ?? "")) {
+                patchDraft((d) => ({
+                  ...d,
+                  security: { ...d.security, panelAccessPath: normalized },
+                }));
+              }
+            }}
+          />
+          {panelAccessPathDraft ? (
+            <p className="field-hint">
+              Адрес входа:{" "}
+              <code>/{panelAccessPathDraft}</code>
+              {panelAccessPathErr ? null : " → страница авторизации"}
+            </p>
+          ) : (
+            <p className="field-hint">Пустое поле — секретный URL выключен (кроме WebApp и Tailscale).</p>
+          )}
+          {panelAccessPathErr ? (
+            <p className="password-confirm-hint password-confirm-hint--err" aria-live="polite">
+              {panelAccessPathErr}
+            </p>
+          ) : null}
         </div>
         <div className="form-field form-field--spaced">
           <FieldLabel label="Автовыход из панели" hint={PANEL_HINTS.autoLogout} />

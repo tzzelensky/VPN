@@ -125,6 +125,8 @@ export type PanelSettings = {
     showDiagnosticDetails: boolean;
     /** Регулировка потраченных ГБ слайдером на странице пользователей. */
     manualTrafficAdjust: boolean;
+    /** Секретный URL-сегмент → страница входа (латиница, цифры, символы; без /). */
+    panelAccessPath: string;
   };
   maintenance: { enabled: boolean };
   vpnDisplay: {

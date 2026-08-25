@@ -100,6 +100,8 @@ export type PanelSettings = {
     showDiagnosticDetails: boolean;
     /** Регулировка потраченных ГБ слайдером на странице пользователей. */
     manualTrafficAdjust: boolean;
+    /** Секретный URL-сегмент → страница входа (латиница, цифры, символы; без /). */
+    panelAccessPath: string;
   };
   maintenance: {
     enabled: boolean;
@@ -316,6 +318,7 @@ export function defaultPanelSettings(): PanelSettings {
       autoLogoutMinutes: null,
       showDiagnosticDetails: true,
       manualTrafficAdjust: false,
+      panelAccessPath: "",
     },
     maintenance: { enabled: false },
     vpnDisplay: { serverOrder: [], entryOrder: [] },
