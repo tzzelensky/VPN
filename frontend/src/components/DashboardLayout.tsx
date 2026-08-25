@@ -13,6 +13,7 @@ import PanelSettingsModal from "./PanelSettingsModal";
 import UserModal from "./UserModal";
 import { useAutoLogout } from "../useAutoLogout";
 import AdminPageFooter from "./AdminPageFooter";
+import CreateSubscriptionLoader from "./CreateSubscriptionLoader";
 import { normalizeSectionOrder } from "../panelNavUtils";
 import { usePanelSettings } from "../panelSettingsContext";
 import type { PanelSectionKey } from "../panelSettingsTypes";
@@ -320,6 +321,7 @@ export default function DashboardLayout({
   const [deployedServers, setDeployedServers] = useState<ServerDto[]>([]);
   const [createServersLoading, setCreateServersLoading] = useState(false);
   const [createFlash, setCreateFlash] = useState<{ type: "ok" | "err"; text: string } | null>(null);
+  const [creatingClient, setCreatingClient] = useState(false);
   const [renewingUserId, setRenewingUserId] = useState<number | null>(null);
   const shellRef = useRef<HTMLDivElement>(null);
   const drawerRef = useRef<HTMLElement>(null);
@@ -567,7 +569,8 @@ export default function DashboardLayout({
   }
 
   function onCreateClient(payload: CreateUserPayload) {
-    setCreateFlash({ type: "ok", text: "Создаём клиента в фоне…" });
+    setCreateFlash(null);
+    setCreatingClient(true);
     void (async () => {
       try {
         const { user } = await createUser(payload);
@@ -576,6 +579,8 @@ export default function DashboardLayout({
         setCreateFlash({ type: "ok", text: `Клиент «${user.name}» создан.` });
       } catch (e) {
         setCreateFlash({ type: "err", text: String(e) });
+      } finally {
+        setCreatingClient(false);
       }
     })();
   }
@@ -899,7 +904,10 @@ export default function DashboardLayout({
         {sectionHiddenMsg ? (
           <div className="flash err admin-section-hidden-banner">Раздел скрыт в настройках панели</div>
         ) : null}
-        {createFlash ? <div className={`flash ${createFlash.type === "ok" ? "ok" : "err"}`}>{createFlash.text}</div> : null}
+        {creatingClient ? <CreateSubscriptionLoader /> : null}
+        {createFlash && !creatingClient ? (
+          <div className={`flash ${createFlash.type === "ok" ? "ok" : "err"}`}>{createFlash.text}</div>
+        ) : null}
 
         <main className="admin-main">{children}</main>
         <AdminPageFooter brandName={brandShort} />

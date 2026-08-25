@@ -29,6 +29,7 @@ import { isAdminMobileShell } from "../adminMobile";
 import { subscriptionLabel } from "../subscriptionLabel";
 import { usePanelTabParam } from "../lib/panelTabRoute";
 import DashboardLayout from "../components/DashboardLayout";
+import CreateSubscriptionLoader from "../components/CreateSubscriptionLoader";
 import PageLoadingState from "../components/PageLoadingState";
 import Spinner from "../components/Spinner";
 import UserModal from "../components/UserModal";
@@ -258,6 +259,7 @@ export default function UsersPage({ onLogout }: { onLogout: () => void }) {
   const [users, setUsers] = useState<UserDto[]>(() => readUsersListCache()?.users ?? []);
   const [pageLoading, setPageLoading] = useState(() => !(readUsersListCache()?.users?.length));
   const [msg, setMsg] = useState<{ type: "ok" | "err"; text: string } | null>(null);
+  const [creatingUser, setCreatingUser] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [previews, setPreviews] = useState<Record<number, { count: number }>>(
     () => readUsersListCache()?.previews ?? {},
@@ -696,7 +698,8 @@ export default function UsersPage({ onLogout }: { onLogout: () => void }) {
   }
 
   function onCreateUser(payload: CreateUserPayload) {
-    setMsg({ type: "ok", text: "Создаём клиента в фоне…" });
+    setMsg(null);
+    setCreatingUser(true);
     void (async () => {
       try {
         const { user } = await createUser(payload);
@@ -705,6 +708,8 @@ export default function UsersPage({ onLogout }: { onLogout: () => void }) {
         setMsg({ type: "ok", text: `Создан клиент «${user.name}». Подписка: ${user.subscription_url}` });
       } catch (e) {
         setMsg({ type: "err", text: String(e) });
+      } finally {
+        setCreatingUser(false);
       }
     })();
   }
@@ -1172,7 +1177,8 @@ export default function UsersPage({ onLogout }: { onLogout: () => void }) {
             </article>
           </div>
         </div>
-        {msg ? <div className={`flash ${msg.type === "ok" ? "ok" : "err"}`}>{msg.text}</div> : null}
+        {creatingUser ? <CreateSubscriptionLoader /> : null}
+        {msg && !creatingUser ? <div className={`flash ${msg.type === "ok" ? "ok" : "err"}`}>{msg.text}</div> : null}
       </section>
 
       <UserModal
