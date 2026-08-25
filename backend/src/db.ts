@@ -2476,6 +2476,20 @@ export function updateUserRow(id: number, patch: Partial<CreateUserInput>): User
         : patch.subscription_server_count !== undefined
           ? subscriptionIdsFromInput({ subscription_server_count: patch.subscription_server_count }, deployedIds)
           : cur.subscription_server_ids;
+    const nextExpiry =
+      patch.expiry_time !== undefined ? coerceExpiryTimeMs(patch.expiry_time) : cur.expiry_time;
+    /** После авто-disable по истечении снова включаем доступ при продлении срока (любой путь: панель/бот/комбо). */
+    let nextEnable = patch.enable !== undefined ? (patch.enable === 0 ? 0 : 1) : cur.enable;
+    if (
+      patch.enable === undefined &&
+      patch.expiry_time !== undefined &&
+      nextExpiry > Date.now() &&
+      cur.enable === 0 &&
+      cur.expiry_time > 0 &&
+      cur.expiry_time <= Date.now()
+    ) {
+      nextEnable = 1;
+    }
     const merged: UserRow = normalizeUser({
       ...cur,
       name: patch.name !== undefined ? String(patch.name).trim() || cur.name : cur.name,
@@ -2485,8 +2499,8 @@ export function updateUserRow(id: number, patch: Partial<CreateUserInput>): User
           ? normalizeFlow(String(patch.flow)) || defaultRealityFlow()
           : normalizeFlow(cur.flow),
       total_gb: patch.total_gb !== undefined ? coerceTotalGbField(patch.total_gb) : cur.total_gb,
-      expiry_time: patch.expiry_time !== undefined ? coerceExpiryTimeMs(patch.expiry_time) : cur.expiry_time,
-      enable: patch.enable !== undefined ? (patch.enable === 0 ? 0 : 1) : cur.enable,
+      expiry_time: nextExpiry,
+      enable: nextEnable,
       tg_id: patch.tg_id !== undefined ? String(patch.tg_id).trim() : cur.tg_id,
       comment: patch.comment !== undefined ? String(patch.comment).trim() : cur.comment,
       traffic_up: patch.traffic_up !== undefined ? Number(patch.traffic_up) : cur.traffic_up,

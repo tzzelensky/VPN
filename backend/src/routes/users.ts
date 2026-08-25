@@ -392,7 +392,7 @@ router.patch("/:id(\\d+)", async (req, res) => {
     res.status(404).json({ error: "not_found" });
     return;
   }
-  // Продление срока после авто-disable при истечении — снова включить доступ.
+  // Продление срока после авто-disable — снова включить (дубль логики updateUserRow).
   if (
     patch.expiry_time !== undefined &&
     Number(patch.expiry_time) > Date.now() &&
@@ -551,6 +551,10 @@ router.post("/:id(\\d+)/renew-subscription", async (req, res) => {
     if (!next) {
       res.status(404).json({ error: "not_found" });
       return;
+    }
+    // На случай гонки с expiry-access loop: ещё раз зафиксировать enable после сброса трафика.
+    if (next.enable !== 1) {
+      next = updateUserRow(id, { enable: 1 }) ?? next;
     }
     const trafficReset = next.total_gb > 0;
     if (trafficReset) {

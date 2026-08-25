@@ -387,6 +387,7 @@ export async function activateComboPaymentSession(sess: PaymentSessionRow): Prom
       const patched = updateUserRow(row.id, {
         total_gb: subMeta.total_gb,
         expiry_time: newExpiry,
+        enable: 1,
         comment: `Комбо-подписка, тариф #${sess.plan_id}: ${offer.title}`,
       });
       if (!patched) continue;

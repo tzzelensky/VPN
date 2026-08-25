@@ -1636,9 +1636,10 @@ export async function onAdminPaymentConfirm(
   } else if (!autoCreated) {
     for (const row of targets) {
       const newExpiry = snapExpiryTimeToNoonLocal(Date.now() + subMeta.days * DAY_MS);
-      const patch: { total_gb: number; expiry_time: number; comment?: string } = {
+      const patch: { total_gb: number; expiry_time: number; enable: number; comment?: string } = {
         total_gb: subMeta.total_gb,
         expiry_time: newExpiry,
+        enable: 1,
       };
       if (
         !isTest &&
