@@ -17,7 +17,7 @@
 
 - Не менять выданные ссылки `/goods/{token}` — меняется только A-запись домена или IP нод в Servers.
 - Не ставить shop/`proxy_pass` на VPN-stream `:443` (там SNI mux).
-- Не светить парольный `/login` и `/api/auth/login` на публичном DNS — 404 на фронте. WebApp (`/mysub`) и 5 тапов (webapp-admin + `/servers`) нужны на том же домене.
+- Прямой URL `/login` на публичном DNS → 404 на фронте. Вход: секретное `/слово` (форма + `/api/auth/*`), WebApp или Tailscale.
 - На фронте **нужны** `/mysub` + `/api/mysub` + `/assets` — иначе Telegram WebApp бота даёт 404.
 - Не ждать, что маскировка спасёт один IP навсегда.
 
