@@ -36,10 +36,9 @@ server {
     ssl_certificate     /etc/letsencrypt/live/DOMAIN_PLACEHOLDER/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/DOMAIN_PLACEHOLDER/privkey.pem;
 
-    # Password form + classic login API — не светить на публичном DNS.
-    # WebApp 5-tap использует /api/auth/webapp-admin-* (не под этим префиксом login).
-    location ^~ /login { return 404; }
-    location ^~ /api/auth/login { return 404; }
+    # Прямой URL /login — 404 (вход через секретное /слово или WebApp).
+    # /api/auth/login проксируется: форма на секретном пути должна авторизоваться.
+    location = /login { return 404; }
     location ^~ /panel/ { return 404; }
 
     location / {
