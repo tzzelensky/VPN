@@ -1,10 +1,38 @@
 import { createHash, randomUUID } from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
 import type { UserRow } from "./db.js";
 import { normalizeClientIp } from "./deviceLimitSubscription.js";
 import type { DeviceLimitSettings } from "./deviceLimitSettings.js";
 import { getDeviceLimitSettings } from "./deviceLimitStore.js";
 import { deviceLimitCalcSettingsForUser, isDeviceLimitActiveForUser } from "./deviceLimitEffective.js";
-import { parseDeviceFromUserAgent, isUsefulDeviceName, stableUserAgentFingerprintKey } from "./deviceNameFromUa.js";
+import { parseDeviceFromUserAgent, isUsefulDeviceName, stableUserAgentFingerprintKey, stableHardwareIdentityKey, stripVpnClientSuffix, isGenericPlatformDeviceName } from "./deviceNameFromUa.js";
+
+// #region agent log
+function agentDebugLog(hypothesisId: string, location: string, message: string, data: Record<string, unknown>): void {
+  const payload = {
+    sessionId: "b2e4e9",
+    runId: "pre-fix",
+    hypothesisId,
+    location,
+    message,
+    data,
+    timestamp: Date.now(),
+  };
+  const line = `${JSON.stringify(payload)}\n`;
+  try {
+    const base = process.env.DATA_PATH ? path.dirname(process.env.DATA_PATH) : process.cwd();
+    fs.appendFileSync(path.join(base, "debug-b2e4e9.ndjson"), line);
+  } catch {
+    /* ignore */
+  }
+  fetch("http://127.0.0.1:7279/ingest/27535de9-78db-4923-8694-0a275bc93049", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "b2e4e9" },
+    body: JSON.stringify(payload),
+  }).catch(() => {});
+}
+// #endregion
 
 export type UserDeviceSlot = {
   id: string;
@@ -90,33 +118,88 @@ export function deviceFingerprintFromUserAgent(uaRaw: string): string {
   return `fp:${hash}`;
 }
 
+export function deviceFingerprintFromIdentity(opts: {
+  ua?: string;
+  deviceName?: string;
+  deviceType?: string;
+}): string {
+  const key = stableHardwareIdentityKey(opts);
+  if (!key) return "";
+  const hash = createHash("sha256").update(key).digest("hex").slice(0, 20);
+  return `fp:${hash}`;
+}
+
 function userAgentsMatchStable(a: string, b: string): boolean {
   const ka = stableUserAgentFingerprintKey(a);
   const kb = stableUserAgentFingerprintKey(b);
   return Boolean(ka && kb && ka === kb);
 }
 
-/** Найти существующий слот того же физического устройства (модель + тип + клиент). */
-function findSlotByStableIdentity(slots: UserDeviceSlot[], ua: string): number {
+function slotHardwareKey(s: UserDeviceSlot): string {
+  return stableHardwareIdentityKey({
+    ua: s.user_agent,
+    deviceName: s.device_name || s.label,
+    deviceType: s.device_type,
+  });
+}
+
+/** Найти существующий слот того же физического устройства (тип + модель, без VPN-клиента). */
+function findSlotByStableIdentity(slots: UserDeviceSlot[], ua: string, explicitName?: string): number {
   const trimmed = String(ua ?? "").trim();
-  if (!trimmed) return -1;
-  const parsed = parseDeviceFromUserAgent(trimmed);
-  const key = stableUserAgentFingerprintKey(trimmed);
+  const explicit = String(explicitName ?? "").trim();
+  if (!trimmed && !explicit) return -1;
+  const parsed = trimmed ? parseDeviceFromUserAgent(trimmed) : { device_name: "", device_type: "unknown" as const };
+  const incomingName = explicit || parsed.device_name;
+  const incomingKey = stableHardwareIdentityKey({
+    ua: trimmed,
+    deviceName: incomingName,
+    deviceType: parsed.device_type,
+  });
+  const incomingBase = stripVpnClientSuffix(incomingName).toLowerCase();
   const candidates: number[] = [];
+  const sameTypeActive: number[] = [];
   for (let i = 0; i < slots.length; i++) {
     const s = slots[i]!;
     if (s.active !== 1 || s.deleted_at) continue;
-    const name = String(s.device_name || s.label || "").trim();
-    const sameName = isUsefulDeviceName(parsed.device_name) && name === parsed.device_name;
     const sameType =
       s.device_type === parsed.device_type ||
       s.device_type === "unknown" ||
       parsed.device_type === "unknown";
+    if (sameType && parsed.device_type !== "unknown") sameTypeActive.push(i);
+
+    const slotKey = slotHardwareKey(s);
+    const slotBase = stripVpnClientSuffix(s.device_name || s.label || "").toLowerCase();
+    const sameHardwareKey = Boolean(incomingKey && slotKey && incomingKey === slotKey);
+    const sameModelName =
+      Boolean(incomingBase && slotBase && incomingBase === slotBase) &&
+      !isGenericPlatformDeviceName(incomingBase) &&
+      sameType;
     const slotUa = String(s.user_agent || "").trim();
-    const sameKey = key && slotUa && stableUserAgentFingerprintKey(slotUa) === key;
-    const sameUa = slotUa && userAgentsMatchStable(slotUa, trimmed);
-    if ((sameName && sameType) || sameKey || sameUa) candidates.push(i);
+    const sameUa = slotUa && trimmed && userAgentsMatchStable(slotUa, trimmed);
+    if (sameHardwareKey || sameModelName || sameUa) candidates.push(i);
   }
+  // Одно устройство данного типа + пришло с generic/platform ключом → склеить.
+  if (candidates.length === 0 && sameTypeActive.length === 1 && incomingKey.endsWith("|platform")) {
+    candidates.push(sameTypeActive[0]!);
+  }
+  // #region agent log
+  agentDebugLog("H3", "userDeviceSlots.ts:findSlotByStableIdentity", "stable identity lookup", {
+    ua: trimmed.slice(0, 120),
+    explicitName: explicit || null,
+    incomingKey,
+    incomingBase,
+    candidateCount: candidates.length,
+    candidateIds: candidates.map((i) => slots[i]!.id),
+    activeSlotSummaries: slots
+      .filter((s) => s.active === 1 && !s.deleted_at)
+      .map((s) => ({
+        id: s.id,
+        name: s.device_name,
+        type: s.device_type,
+        key: slotHardwareKey(s),
+      })),
+  });
+  // #endregion
   if (candidates.length === 0) return -1;
   candidates.sort((a, b) => Date.parse(slots[b]!.last_seen_at) - Date.parse(slots[a]!.last_seen_at));
   return candidates[0]!;
@@ -165,26 +248,15 @@ function findMigrationSlotForRequest(slots: UserDeviceSlot[], ip: string, hasUa:
   return count === 1 ? placeholderIdx : -1;
 }
 
-function preferredDeviceIdForRegistration(ua: string, explicitId: string): string {
-  const fp = ua ? deviceFingerprintFromUserAgent(ua) : "";
+function preferredDeviceIdForRegistration(ua: string, explicitId: string, deviceName?: string): string {
+  const fp = deviceFingerprintFromIdentity({ ua, deviceName: deviceName || undefined });
   if (fp) return fp;
   return normalizeDeviceId(explicitId);
 }
 
 /** Схлопнуть дубли одного физического устройства (оставить последний по активности). */
 function dedupeStableDuplicateSlots(slots: UserDeviceSlot[]): UserDeviceSlot[] {
-  const slotKey = (s: UserDeviceSlot): string => {
-    const ua = String(s.user_agent || "").trim();
-    if (ua) {
-      const k = stableUserAgentFingerprintKey(ua);
-      if (k) return k;
-    }
-    const name = String(s.device_name || s.label || "").trim();
-    if (isUsefulDeviceName(name)) {
-      return `${s.device_type || "unknown"}|${name}`.toLowerCase();
-    }
-    return "";
-  };
+  const slotKey = (s: UserDeviceSlot): string => slotHardwareKey(s);
 
   const byKey = new Map<string, number[]>();
   for (let i = 0; i < slots.length; i++) {
@@ -244,7 +316,20 @@ export function deviceFingerprintFromRequest(req: {
   headers?: Record<string, string | string[] | undefined>;
 }): string {
   const ua = String(req.headers?.["user-agent"] ?? "").trim();
-  return deviceFingerprintFromUserAgent(ua);
+  const hdr = req.headers ?? {};
+  const pick = (name: string): string => {
+    const v = hdr[name.toLowerCase()] ?? hdr[name];
+    if (Array.isArray(v)) return String(v[0] ?? "").trim();
+    return String(v ?? "").trim();
+  };
+  const modelHint = pick("x-device-model") || pick("x-device-name") || pick("x-happ-device");
+  const parsed = parseDeviceFromUserAgent(ua);
+  const deviceName = modelHint || parsed.device_name;
+  return deviceFingerprintFromIdentity({
+    ua,
+    deviceName,
+    deviceType: parsed.device_type,
+  });
 }
 
 export function resolveSubscriptionDeviceId(
@@ -390,7 +475,32 @@ export function evaluateDeviceLimitAccess(
   }
 
   let id = normalizeDeviceId(deviceId);
-  if (!id && ua) id = normalizeDeviceId(deviceFingerprintFromUserAgent(ua));
+  if (!id && ua) {
+    id = normalizeDeviceId(
+      deviceFingerprintFromIdentity({ ua, deviceName: opts?.deviceName, deviceType: parseDeviceFromUserAgent(ua).device_type }),
+    );
+  }
+
+  // Если пришёл «чужой» fp от другого приложения — сначала ищем то же устройство по модели.
+  if (id) {
+    const byId = slots.findIndex((s) => s.id === id && s.active === 1 && !s.deleted_at);
+    if (byId < 0) {
+      const stableEarly = findSlotByStableIdentity(slots, ua, opts?.deviceName);
+      if (stableEarly >= 0) {
+        // #region agent log
+        agentDebugLog("H1", "userDeviceSlots.ts:evaluateDeviceLimitAccess", "remap foreign fp to stable slot", {
+          incomingId: id,
+          ua: ua.slice(0, 120),
+          deviceName: opts?.deviceName ?? null,
+          stableSlotId: slots[stableEarly]!.id,
+          stableSlotName: slots[stableEarly]!.device_name,
+          runId: "post-fix",
+        });
+        // #endregion
+        id = slots[stableEarly]!.id;
+      }
+    }
+  }
 
   const touchSlot = (index: number, reactivate = false): UserDeviceSlot[] => {
     const next = [...slots];
@@ -552,7 +662,7 @@ export function evaluateDeviceLimitAccess(
   }
 
   if (!id) {
-    const stableIdx = findSlotByStableIdentity(slots, ua);
+    const stableIdx = findSlotByStableIdentity(slots, ua, opts?.deviceName);
     if (stableIdx >= 0) {
       return { allowed: true, slots: touchSlot(stableIdx), registered: active.length };
     }
@@ -597,7 +707,7 @@ export function evaluateDeviceLimitAccess(
     const added = newDeviceSlot(opts?.deviceName?.trim() || parsed.device_name, {
       requestIp: ip,
       userAgent: ua,
-      deviceId: preferredDeviceIdForRegistration(ua, ""),
+      deviceId: preferredDeviceIdForRegistration(ua, "", opts?.deviceName),
     });
     return {
       allowed: true,
@@ -613,7 +723,7 @@ export function evaluateDeviceLimitAccess(
   }
 
   {
-    const stableIdx = findSlotByStableIdentity(slots, ua);
+    const stableIdx = findSlotByStableIdentity(slots, ua, opts?.deviceName);
     if (stableIdx >= 0) {
       return { allowed: true, slots: bindMigrationSlot(stableIdx), registered: active.length };
     }
@@ -637,8 +747,26 @@ export function evaluateDeviceLimitAccess(
   const added = newDeviceSlot(opts?.deviceName?.trim() || parsed.device_name, {
     requestIp: ip,
     userAgent: ua,
-    deviceId: preferredDeviceIdForRegistration(ua, id),
+    deviceId: preferredDeviceIdForRegistration(ua, id, opts?.deviceName),
   });
+  // #region agent log
+  agentDebugLog("H1", "userDeviceSlots.ts:evaluateDeviceLimitAccess", "registering NEW device slot", {
+    incomingId: id,
+    incomingUa: ua.slice(0, 120),
+    incomingName: opts?.deviceName ?? null,
+    fpKey: stableHardwareIdentityKey({ ua, deviceName: opts?.deviceName }),
+    newSlotId: added.id,
+    newSlotName: added.device_name,
+    existingActive: active.map((s) => ({
+      id: s.id,
+      name: s.device_name,
+      type: s.device_type,
+      key: slotHardwareKey(s),
+    })),
+    limit,
+    runId: "post-fix",
+  });
+  // #endregion
   const next = [...slots, added];
   return { allowed: true, slots: next, registered: active.length + 1, eventType: "device_registered" };
 }

@@ -61,29 +61,69 @@ function parseHappParenthetical(ua: string): ParsedDeviceInfo | null {
 
 function parseVpnClientName(ua: string): string {
   const match =
-    ua.match(/\b(HSN\s*VPN|Happ|Nekoray|Hiddify(?:Next)?|v2rayN|v2rayNG|Shadowrocket|Streisand|FoXray|Mihomo|Clash(?:\s*Meta)?|Sing-Box|Xray(?:-core)?|SFA)\b/i) ??
+    ua.match(/\b(HSN\s*VPN|Happ|Nekoray|Hiddify(?:Next)?|v2rayN|v2rayNG|v2raytun|Shadowrocket|Streisand|FoXray|Mihomo|Clash(?:\s*Meta)?|Sing-Box|Xray(?:-core)?|SFA|INCY)\b/i) ??
     ua.match(/\b([A-Za-z][A-Za-z0-9._-]{2,24}\s*VPN)\b/i);
   if (!match?.[1]) return "";
   return sanitizeToken(match[1]);
 }
 
+/** Убрать суффикс « · Happ/v2ray…» из отображаемого имени. */
+export function stripVpnClientSuffix(nameRaw: string): string {
+  return String(nameRaw ?? "")
+    .replace(/\s*·\s*[A-Za-z0-9._ +\-]+$/u, "")
+    .trim();
+}
+
+export function isGenericPlatformDeviceName(nameRaw: string): boolean {
+  const n = stripVpnClientSuffix(nameRaw).toLowerCase();
+  return /^(ios|iphone|ipad|android|windows(?:\s*x64)?|macos|mac|linux|устройство(?:\s+\d+)?)$/i.test(n);
+}
+
 /**
- * Стабильный ключ устройства из UA (без версии Happ/Android — они меняются при каждом запросе).
- * Используется для fp:… и дедупликации слотов.
+ * Аппаратный ключ устройства без VPN-клиента.
+ * Одинаковый телефон в Happ и v2raytun → один ключ (по модели / типу).
  */
-export function stableUserAgentFingerprintKey(uaRaw: string): string {
-  const ua = String(uaRaw ?? "").trim();
-  if (!ua) return "";
-  const parsed = parseDeviceFromUserAgent(ua);
-  const client = parseVpnClientName(ua) || "client";
-  if (parsed.device_type !== "unknown" && isUsefulDeviceName(parsed.device_name)) {
-    return `${parsed.device_type}|${parsed.device_name}|${client}`.toLowerCase();
+export function stableHardwareIdentityKey(opts: {
+  ua?: string;
+  deviceName?: string;
+  deviceType?: string;
+}): string {
+  const ua = String(opts.ua ?? "").trim();
+  const parsed = ua ? parseDeviceFromUserAgent(ua) : { device_name: "", device_type: "unknown" as const };
+  const type = String(opts.deviceType || parsed.device_type || "unknown")
+    .trim()
+    .toLowerCase() || "unknown";
+  const rawName = String(opts.deviceName || parsed.device_name || "").trim();
+  const base = stripVpnClientSuffix(rawName).toLowerCase();
+  const happId = ua.match(/\bHapp\/[\d.]+\/(?:ios|Android)\/(\d{8,})/i)?.[1] ?? "";
+
+  if (type !== "unknown" && base && !isGenericPlatformDeviceName(base)) {
+    return `${type}|${base}`;
   }
+  // Без модели: Happ даёт install/device id — уникален внутри Happ, но не между приложениями.
+  // Для кросс-клиентского слияния дальше используется findSlotByStableIdentity по имени/типу.
+  if (type !== "unknown" && happId && isGenericPlatformDeviceName(base || type)) {
+    return `${type}|platform`;
+  }
+  if (type !== "unknown") {
+    return `${type}|platform`;
+  }
+  if (!ua) return "";
   return ua
     .replace(/\bHapp\/[\d.]+/gi, "Happ/x")
     .replace(/\bAndroid\s+[\d.]+/gi, "Android x")
     .replace(/\biOS\s+[\d._]+/gi, "iOS x")
+    .replace(/\bCFNetwork\/[\d.]+/gi, "CFNetwork/x")
+    .replace(/\bDarwin\/[\d.]+/gi, "Darwin/x")
     .toLowerCase();
+}
+
+/**
+ * Стабильный ключ устройства из UA (без версии Happ/Android — они меняются при каждом запросе).
+ * Используется для fp:… и дедупликации слотов. Без имени VPN-клиента.
+ */
+export function stableUserAgentFingerprintKey(uaRaw: string): string {
+  return stableHardwareIdentityKey({ ua: String(uaRaw ?? "").trim() });
 }
 
 /** Доп. подсказки из заголовков клиента (Happ и др.). */
