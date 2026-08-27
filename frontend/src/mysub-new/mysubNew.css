@@ -1071,7 +1071,7 @@ html.tg-webapp-large .mysub-wrap {
 /* ПК: ширина самого .mn-app ≥ 900px (ResizeObserver), не viewport — превью в админке остаётся телефоном */
 .mn-app--pc {
   --mn-nav-h: 0px;
-  --mn-pc-sidebar: 232px;
+  --mn-pc-sidebar: 200px;
   display: grid;
   grid-template-columns: var(--mn-pc-sidebar) minmax(0, 1fr);
   grid-template-rows: minmax(0, 1fr);
@@ -1101,7 +1101,7 @@ html.tg-webapp-large .mysub-wrap {
   top: auto;
   height: 100%;
   align-self: stretch;
-  padding: 0.85rem 0.65rem 0.85rem 0.85rem;
+  padding: 0.75rem 0.55rem 0.75rem 0.65rem;
   pointer-events: auto;
   z-index: 2;
 }
@@ -1111,8 +1111,8 @@ html.tg-webapp-large .mysub-wrap {
   grid-row: 1;
   max-width: 1120px;
   width: 100%;
-  margin: 0;
-  justify-self: start;
+  margin-inline: auto;
+  justify-self: stretch;
   padding: 1.15rem 1.5rem 1.5rem;
   overflow-x: hidden;
   overflow-y: auto;
@@ -1147,8 +1147,8 @@ html.tg-webapp-large .mysub-wrap {
   margin: 0;
   display: flex;
   flex-direction: column;
-  gap: 0.28rem;
-  padding: 0.5rem;
+  gap: 0.2rem;
+  padding: 0.35rem;
   box-sizing: border-box;
 }
 
@@ -1160,10 +1160,24 @@ html.tg-webapp-large .mysub-wrap {
   flex-direction: row;
   justify-content: flex-start;
   align-items: center;
-  gap: 0.7rem;
+  gap: 0.65rem;
   width: 100%;
-  padding: 0.72rem 0.85rem;
-  font-size: 0.88rem;
+  padding: 0.62rem 0.7rem;
+  font-size: 0.86rem;
+  border-radius: 12px;
+}
+
+.mn-app--pc .mn-bottom-nav__icon {
+  flex: 0 0 1.35rem;
+  width: 1.35rem;
+  min-width: 1.35rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.mn-app--pc .mn-bottom-nav__btn:not(.is-active):hover {
+  background: color-mix(in srgb, var(--mn-text, #0f172a) 6%, transparent);
 }
 
 .mn-app--pc .mn-bottom-nav__btn.is-active,
@@ -1199,8 +1213,52 @@ html.tg-webapp-large .mysub-wrap {
   grid-column: 1 / -1;
 }
 
-.mn-app--pc .mn-btn--full {
-  max-width: 280px;
+.mn-app--pc .mn-device-card__actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.5rem;
+  align-items: stretch;
+}
+
+.mn-app--pc .mn-device-card__actions .mn-btn,
+.mn-app--pc .mn-device-card__actions .mn-link-danger {
+  width: 100%;
+  min-height: 2.6rem;
+  box-sizing: border-box;
+}
+
+.mn-app--pc .mn-device-card__actions .mn-link-danger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 14px;
+  padding: 0.72rem 1rem;
+  border: 1px solid color-mix(in srgb, #ef4444 28%, var(--mn-border));
+  background: color-mix(in srgb, #ef4444 8%, var(--mn-card));
+  font-weight: 700;
+}
+
+.mn-app--pc .mn-device-card__actions--disabled {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.mn-app--pc .mn-daily-gift__reminder {
+  width: 100%;
+  max-width: none;
+  box-sizing: border-box;
+}
+
+.mn-app--pc .mn-row-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.5rem;
+}
+
+.mn-app--pc .mn-row-actions .mn-btn {
+  width: 100%;
 }
 
 .mn-app--pc .mn-tariff-grid {

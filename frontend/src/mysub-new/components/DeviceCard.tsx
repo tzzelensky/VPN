@@ -48,7 +48,9 @@ export default function DeviceCard({ device, purchasePriceRub, onRename, onRemov
             Удалить устройство
           </button>
           {onAddSlot && purchasePriceRub ? (
-            <PrimaryButton onClick={onAddSlot}>Добавить место · {purchasePriceRub} ₽</PrimaryButton>
+            <PrimaryButton fullWidth onClick={onAddSlot}>
+              Добавить место · {purchasePriceRub} ₽
+            </PrimaryButton>
           ) : null}
         </div>
       </Card>
@@ -65,7 +67,9 @@ export default function DeviceCard({ device, purchasePriceRub, onRename, onRemov
         </div>
       </div>
       <div className="mn-device-card__actions">
-        <SecondaryButton onClick={onRename}>Переименовать</SecondaryButton>
+        <SecondaryButton fullWidth onClick={onRename}>
+          Переименовать
+        </SecondaryButton>
         <button type="button" className="mn-link-danger" onClick={onRemove}>
           Удалить
         </button>

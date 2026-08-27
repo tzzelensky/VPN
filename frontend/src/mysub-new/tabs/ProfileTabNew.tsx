@@ -48,9 +48,13 @@ export default function ProfileTabNew({ ctrl }: Props) {
               whitelist={data.whitelist}
               subscriptionTitle={subscriptionProfileHeading(sub, data.plans)}
             />
-            <div className="mn-row-actions" style={{ marginTop: "0.65rem" }}>
-              <PrimaryButton onClick={() => void copySubscription(sub.subscription_url)}>Скопировать ссылку</PrimaryButton>
-              <SecondaryButton onClick={() => setShowInstruction(true)}>Инструкция</SecondaryButton>
+            <div style={{ marginTop: "0.65rem", display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+              <PrimaryButton fullWidth onClick={() => void copySubscription(sub.subscription_url)}>
+                Скопировать ссылку
+              </PrimaryButton>
+              <SecondaryButton fullWidth onClick={() => setShowInstruction(true)}>
+                Инструкция
+              </SecondaryButton>
             </div>
           </Card>
         ) : (
