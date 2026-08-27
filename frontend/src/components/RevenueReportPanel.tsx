@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   createRevenueEntry,
+  deleteRevenueEntry,
   listUsers,
   loadRevenueReport,
   patchRevenueAmount,
@@ -85,6 +86,7 @@ export default function RevenueReportPanel() {
   const [addAmount, setAddAmount] = useState("");
   const [addDate, setAddDate] = useState("");
   const [adding, setAdding] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const refresh = useCallback(async (m: string) => {
     setLoading(true);
@@ -179,6 +181,38 @@ export default function RevenueReportPanel() {
       setError(String(e));
     } finally {
       setAdding(false);
+    }
+  }
+
+  function recomputeFromRows(rows: RevenueReportRowDto[]): Pick<RevenueReportDto, "rows" | "total_rub" | "count" | "by_channel"> {
+    const total_rub = rows.reduce((s, r) => s + Math.max(0, Math.round(r.amount_rub) || 0), 0);
+    const by_channel = { chat: 0, webapp: 0, admin: 0 };
+    for (const r of rows) {
+      const a = Math.max(0, Math.round(r.amount_rub) || 0);
+      if (r.channel === "webapp") by_channel.webapp += a;
+      else if (r.channel === "admin") by_channel.admin += a;
+      else by_channel.chat += a;
+    }
+    return { rows, total_rub, count: rows.length, by_channel };
+  }
+
+  async function onDeleteRow(row: RevenueReportRowDto) {
+    if (row.channel !== "admin") return;
+    const name = clientLabel(row);
+    if (!window.confirm(`Удалить «${name}» из выручки?`)) return;
+    setDeletingId(row.id);
+    setError(null);
+    try {
+      await deleteRevenueEntry(row.id);
+      setReport((prev) => {
+        if (!prev) return prev;
+        return { ...prev, ...recomputeFromRows(prev.rows.filter((r) => r.id !== row.id)) };
+      });
+      if (editingId === row.id) cancelEdit();
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setDeletingId(null);
     }
   }
 
@@ -336,11 +370,13 @@ export default function RevenueReportPanel() {
                     <th>Тариф</th>
                     <th>Источник</th>
                     <th>Сумма</th>
+                    <th></th>
                   </tr>
                 </thead>
                 <tbody>
                   {report.rows.map((row) => {
                     const editing = editingId === row.id;
+                    const canDelete = row.channel === "admin";
                     return (
                       <tr key={row.id}>
                         <td>{formatWhen(row.completed_at || row.created_at, timeZone)}</td>
@@ -393,6 +429,20 @@ export default function RevenueReportPanel() {
                                 : ""}
                             </button>
                           )}
+                        </td>
+                        <td>
+                          {canDelete ? (
+                            <button
+                              type="button"
+                              className="btn secondary"
+                              style={{ padding: "0.2rem 0.55rem", color: "var(--danger, #c44)" }}
+                              disabled={deletingId === row.id}
+                              onClick={() => void onDeleteRow(row)}
+                              title="Удалить из выручки"
+                            >
+                              {deletingId === row.id ? <Spinner /> : "Удалить"}
+                            </button>
+                          ) : null}
                         </td>
                       </tr>
                     );

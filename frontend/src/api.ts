@@ -1371,6 +1371,14 @@ export async function createRevenueEntry(body: {
   return handle(res);
 }
 
+export async function deleteRevenueEntry(id: string): Promise<{ ok: boolean; id: string }> {
+  const res = await fetch(`/api/subscription-shop/revenue/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+    credentials: "include",
+  });
+  return handle(res);
+}
+
 export async function pushAllUserClients(): Promise<{ ok: boolean }> {
   const res = await fetch("/api/users/push-all", { method: "POST", credentials: "include" });
   return handle(res);

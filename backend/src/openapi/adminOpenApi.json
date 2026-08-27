@@ -9619,6 +9619,49 @@
       }
     },
     "/api/sub-shop/revenue/{id}": {
+      "delete": {
+        "tags": [
+          "Subscription shop"
+        ],
+        "summary": "`DELETE /api/sub-shop/revenue/{id}`",
+        "description": "**HTTP:** `DELETE /api/sub-shop/revenue/{id}`\n\n**Файл:** `subscriptionShop.ts (alias)`\n\n**Требуется сессия**",
+        "responses": {
+          "200": {
+            "description": "Успех"
+          },
+          "400": {
+            "description": "Неверный запрос",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Не авторизован",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Не найдено"
+          },
+          "500": {
+            "description": "Ошибка сервера"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ]
+      },
       "patch": {
         "tags": [
           "Subscription shop"
@@ -10185,6 +10228,49 @@
       }
     },
     "/api/subscription-shop/revenue/{id}": {
+      "delete": {
+        "tags": [
+          "Subscription shop"
+        ],
+        "summary": "`DELETE /api/subscription-shop/revenue/{id}`",
+        "description": "**HTTP:** `DELETE /api/subscription-shop/revenue/{id}`\n\n**Файл:** `subscriptionShop.ts`\n\n**Требуется сессия**",
+        "responses": {
+          "200": {
+            "description": "Успех"
+          },
+          "400": {
+            "description": "Неверный запрос",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Не авторизован",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Не найдено"
+          },
+          "500": {
+            "description": "Ошибка сервера"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ]
+      },
       "patch": {
         "tags": [
           "Subscription shop"
@@ -14695,6 +14781,49 @@
       }
     },
     "/sub-shop/revenue/{id}": {
+      "delete": {
+        "tags": [
+          "Subscription shop"
+        ],
+        "summary": "`DELETE /sub-shop/revenue/{id}`",
+        "description": "**HTTP:** `DELETE /sub-shop/revenue/{id}`\n\n**Файл:** `subscriptionShop.ts (alias)`\n\n**Требуется сессия**",
+        "responses": {
+          "200": {
+            "description": "Успех"
+          },
+          "400": {
+            "description": "Неверный запрос",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Не авторизован",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Не найдено"
+          },
+          "500": {
+            "description": "Ошибка сервера"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ]
+      },
       "patch": {
         "tags": [
           "Subscription shop"

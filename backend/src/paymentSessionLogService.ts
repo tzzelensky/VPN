@@ -18,6 +18,7 @@ import {
   getPaymentSessionLog,
   listPaymentSessionLogs,
   updatePaymentSessionLogAmount,
+  deletePaymentSessionLogById,
   type PaymentSessionLogChannel,
   type PaymentSessionLogRow,
   type PaymentSessionLogStatus,
@@ -332,4 +333,14 @@ export function createManualRevenueEntry(opts: {
 
 export function patchRevenueAmount(id: string, amountRub: number): PaymentSessionLogRow | undefined {
   return updatePaymentSessionLogAmount(id, amountRub);
+}
+
+/** Удаление строки выручки (только channel=admin: ручные и продления админом). */
+export function deleteRevenueEntry(id: string): PaymentSessionLogRow | undefined {
+  const key = String(id ?? "").trim();
+  if (!key) return undefined;
+  const row = getPaymentSessionLog(key);
+  if (!row) return undefined;
+  if (row.channel !== "admin") return undefined;
+  return deletePaymentSessionLogById(key);
 }

@@ -17,8 +17,10 @@ import {
   patchRevenueAmount,
   backfillAdminRenewalsFromCommunicationLog,
   createManualRevenueEntry,
+  deleteRevenueEntry,
 } from "../paymentSessionLogService.js";
 import type { PaymentSessionLogRow } from "../paymentSessionLogStore.js";
+import { getPaymentSessionLog } from "../paymentSessionLogStore.js";
 import { subscriptionPublicName } from "../telegram/format.js";
 import { getTestPlanRuntimeMeta } from "../testSubscription.js";
 import { refreshTestSubscriptionSegment } from "../db.js";
@@ -345,6 +347,29 @@ router.patch("/revenue/:id", (req, res) => {
       completed_at: updated.completed_at ?? null,
     },
   });
+});
+
+router.delete("/revenue/:id", (req, res) => {
+  const id = String(req.params.id ?? "").trim();
+  if (!id) {
+    res.status(400).json({ error: "id_required" });
+    return;
+  }
+  const existing = getPaymentSessionLog(id);
+  if (!existing) {
+    res.status(404).json({ error: "not_found" });
+    return;
+  }
+  if (existing.channel !== "admin") {
+    res.status(400).json({ error: "only_admin_rows_deletable" });
+    return;
+  }
+  const removed = deleteRevenueEntry(id);
+  if (!removed) {
+    res.status(404).json({ error: "not_found" });
+    return;
+  }
+  res.json({ ok: true, id: removed.id });
 });
 
 router.put("/", (req, res) => {

@@ -344,3 +344,16 @@ export function deletePaymentSessionLogsMatching(opts?: PaymentSessionLogFilter)
   });
   return removed;
 }
+
+export function deletePaymentSessionLogById(id: string): PaymentSessionLogRow | undefined {
+  const key = String(id ?? "").trim();
+  if (!key) return undefined;
+  let removed: PaymentSessionLogRow | undefined;
+  mutate((store) => {
+    const i = store.sessions.findIndex((s) => s.id === key);
+    if (i === -1) return;
+    removed = store.sessions[i];
+    store.sessions.splice(i, 1);
+  });
+  return removed;
+}
