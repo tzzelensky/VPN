@@ -15,11 +15,12 @@ import DashboardLayout from "../components/DashboardLayout";
 import PanelTabs from "../components/PanelTabs";
 import PageLoadingState from "../components/PageLoadingState";
 import PaymentSessionsPanel from "../components/PaymentSessionsPanel";
+import RevenueReportPanel from "../components/RevenueReportPanel";
 import ComboSubscriptionsPanel from "../components/ComboSubscriptionsPanel";
 import Spinner from "../components/Spinner";
 import { usePanelTabParam } from "../lib/panelTabRoute";
 
-const SHOP_TABS = ["settings", "combo", "payment-sessions"] as const;
+const SHOP_TABS = ["settings", "combo", "payment-sessions", "revenue"] as const;
 
 function cloneShop(s: SubscriptionShopDto): SubscriptionShopDto {
   return {
@@ -161,6 +162,7 @@ export default function SubscriptionShopPage({ onLogout }: { onLogout: () => voi
           { id: "settings", label: "Тарифы" },
           { id: "combo", label: "Комбо-подписки" },
           { id: "payment-sessions", label: "Сессии оплаты" },
+          { id: "revenue", label: "Выручка" },
         ]}
         value={mainTab}
         onChange={setMainTab}
@@ -170,6 +172,8 @@ export default function SubscriptionShopPage({ onLogout }: { onLogout: () => voi
         <ComboSubscriptionsPanel />
       ) : mainTab === "payment-sessions" ? (
         <PaymentSessionsPanel />
+      ) : mainTab === "revenue" ? (
+        <RevenueReportPanel />
       ) : loading || !shop ? (
         <section className="panel">
           <PageLoadingState />

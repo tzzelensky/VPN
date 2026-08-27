@@ -102,6 +102,7 @@ export default function UserModal({
   onOpenWebAppPreview,
 }: Props) {
   const [enable, setEnable] = useState(true);
+  const [excludeFromRevenue, setExcludeFromRevenue] = useState(false);
   const [email, setEmail] = useState("");
   const [remark, setRemark] = useState("");
   const [uuid, setUuid] = useState("");
@@ -159,6 +160,7 @@ export default function UserModal({
       if (formInitKeyRef.current === "create") return;
       formInitKeyRef.current = "create";
       setEnable(true);
+      setExcludeFromRevenue(false);
       setEmail("");
       setRemark("");
       setTgId("");
@@ -177,6 +179,7 @@ export default function UserModal({
     if (formInitKeyRef.current === initKey) return;
     formInitKeyRef.current = initKey;
     setEnable(user.enable);
+    setExcludeFromRevenue(user.exclude_from_revenue === true);
     setEmail(user.email);
     setRemark(user.name);
     setUuid(user.vless_uuid);
@@ -260,6 +263,7 @@ export default function UserModal({
       total_gb: Math.max(0, Math.min(1e9, Number.parseFloat(String(totalGb).replace(",", ".")) || 0)),
       expiry_time: expiryMs > 0 && Number.isFinite(expiryMs) ? expiryMs : 0,
       enable,
+      exclude_from_revenue: excludeFromRevenue,
       tg_id: tgId.trim(),
       comment: comment.trim(),
       subscription_server_ids: selectedServerIds,
@@ -427,6 +431,18 @@ export default function UserModal({
                 className={`toggle ${enable ? "on" : ""}`}
                 onClick={() => setEnable(!enable)}
                 aria-pressed={enable}
+              />
+            </div>
+            <div className="user-modal-toggle-row" style={{ marginTop: "0.85rem" }}>
+              <div>
+                <div className="user-modal-label-lg">Не учитывать в выручке</div>
+                <p className="user-modal-hint">Покупки и продления этого клиента не попадут в отчёт «Выручка».</p>
+              </div>
+              <button
+                type="button"
+                className={`toggle ${excludeFromRevenue ? "on" : ""}`}
+                onClick={() => setExcludeFromRevenue(!excludeFromRevenue)}
+                aria-pressed={excludeFromRevenue}
               />
             </div>
             <p className="user-modal-hint" style={{ margin: 0 }}>

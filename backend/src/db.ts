@@ -127,6 +127,8 @@ export type CreateUserInput = {
   connection_profile?: "legacy" | "reality";
   /** 1 = тестовая подписка (скрыта из раздела «Пользователи»). */
   is_test_subscription?: number;
+  /** 1 = не учитывать покупки/продления этого клиента в отчёте выручки. */
+  exclude_from_revenue?: number;
   /** Дополнительные VLESS-строки в подписке (вне узлов панели). */
   extra_vless_links?: ExtraVlessLink[];
 };
@@ -194,6 +196,8 @@ export type UserRow = {
   dropper_tickets: number;
   /** 1 = клиент создан по тестовой подписке (не показывается в разделе «Пользователи»). */
   is_test_subscription: number;
+  /** 1 = не учитывать в отчёте выручки. */
+  exclude_from_revenue: number;
   /** Доп. VLESS-ключи, добавленные вручную в подписку. */
   extra_vless_links: ExtraVlessLink[];
   created_at: string;
@@ -1695,6 +1699,7 @@ function normalizeUser(u: UserRow, deployedIdsForNormalize?: number[]): UserRow 
     connection_profile: mode === "reality" ? "reality" : "legacy",
     dropper_tickets: Math.max(0, Math.floor(Number((u as { dropper_tickets?: unknown }).dropper_tickets) || 0)),
     is_test_subscription: Number((u as { is_test_subscription?: unknown }).is_test_subscription) === 1 ? 1 : 0,
+    exclude_from_revenue: Number((u as { exclude_from_revenue?: unknown }).exclude_from_revenue) === 1 ? 1 : 0,
     extra_vless_links: normalizeExtraVlessLinks((u as { extra_vless_links?: unknown }).extra_vless_links),
     created_at: u.created_at ?? new Date().toISOString(),
     updated_at: u.updated_at ?? u.created_at ?? new Date().toISOString(),
@@ -2454,6 +2459,7 @@ export function createUser(input: CreateUserInput = {}): UserRow {
       connection_profile,
       dropper_tickets: 0,
       is_test_subscription: input.is_test_subscription === 1 ? 1 : 0,
+      exclude_from_revenue: input.exclude_from_revenue === 1 ? 1 : 0,
       extra_vless_links: normalizeExtraVlessLinks(input.extra_vless_links ?? []),
       created_at: now,
       updated_at: now,
@@ -2641,6 +2647,12 @@ export function updateUserRow(id: number, patch: Partial<CreateUserInput>): User
             ? 1
             : 0
           : cur.is_test_subscription,
+      exclude_from_revenue:
+        patch.exclude_from_revenue !== undefined
+          ? patch.exclude_from_revenue === 1
+            ? 1
+            : 0
+          : cur.exclude_from_revenue,
       extra_vless_links:
         patch.extra_vless_links !== undefined
           ? normalizeExtraVlessLinks(patch.extra_vless_links)

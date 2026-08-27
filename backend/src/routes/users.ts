@@ -8,6 +8,7 @@ import {
   deleteUser,
   dropperWinsForClientRow,
   findUserByVlessUuid,
+  getSubscriptionShop,
   getUser,
   listUsers,
   removeUserDeviceSlot,
@@ -48,6 +49,7 @@ import { refreshMissingSubscriptionHintsIfDue } from "../subscriptionHintsRefres
 import { resetUserTrafficCounters, setUserTrafficUsedBytes, usedGbToBytes } from "../trafficReset.js";
 import { getPanelSettings } from "../panelSettings.js";
 import { coerceExtraVlessLinksInput, isValidVlessUri } from "../extraVless.js";
+import { appendAdminRenewalRevenue } from "../paymentSessionLogService.js";
 import { isDeviceLimitGloballyEnabled, isDeviceLimitActiveForUser } from "../deviceLimitEffective.js";
 import { activeDeviceSlots, userDeviceTotalLimit } from "../userDeviceSlots.js";
 import { migrateUserDeviceSlotsFromOnline } from "../deviceLimitMigration.js";
@@ -214,6 +216,7 @@ function userDto(u: UserRow, opts?: { includeVaultLinks?: boolean }) {
     total_gb: u.total_gb,
     expiry_time: u.expiry_time,
     enable: u.enable === 1,
+    exclude_from_revenue: u.exclude_from_revenue === 1,
     tg_id: u.tg_id,
     comment: u.comment,
     traffic_up: u.traffic_up,
@@ -288,6 +291,16 @@ function parseCreateBody(req: import("express").Request): CreateUserInput & { na
         : b.enable === false || b.enable === 0
           ? 0
           : b.enable === true || b.enable === 1
+            ? 1
+            : undefined,
+    exclude_from_revenue:
+      typeof b.exclude_from_revenue === "boolean"
+        ? b.exclude_from_revenue
+          ? 1
+          : 0
+        : b.exclude_from_revenue === false || b.exclude_from_revenue === 0
+          ? 0
+          : b.exclude_from_revenue === true || b.exclude_from_revenue === 1
             ? 1
             : undefined,
     tg_id: b.tg_id != null ? String(b.tg_id) : undefined,
@@ -564,6 +577,24 @@ router.post("/:id(\\d+)/renew-subscription", async (req, res) => {
     void pushClientListToAllDeployedServers().catch((e) => {
       console.error("[users] push after renew:", e);
     });
+
+    if (next.exclude_from_revenue !== 1) {
+      const shop = getSubscriptionShop();
+      const plan = shop.plans.find((p) => p.total_gb === next.total_gb);
+      const amountRub = plan ? Math.max(0, Math.round(Number(plan.price_rub) || 0)) : 0;
+      const planTitle = plan?.title?.trim() || "Продление админом (без тарифа)";
+      try {
+        appendAdminRenewalRevenue({
+          user: next,
+          amount_rub: amountRub,
+          plan_title: planTitle,
+          tariff_line: planTitle,
+          plan_id: plan?.id,
+        });
+      } catch (e) {
+        console.error("[users] renew revenue log:", e);
+      }
+    }
 
     let telegram_notified = false;
     let telegram_error: string | undefined;

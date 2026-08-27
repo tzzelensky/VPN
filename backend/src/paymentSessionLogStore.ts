@@ -20,7 +20,7 @@ export type PaymentSessionLogStatus =
   | "rejected"
   | "cancelled";
 
-export type PaymentSessionLogChannel = "chat" | "webapp";
+export type PaymentSessionLogChannel = "chat" | "webapp" | "admin";
 
 export type PaymentSessionChatMessage = {
   at: string;
@@ -112,7 +112,8 @@ function normalizeRow(raw: unknown): PaymentSessionLogRow | null {
   const id = String(r.id ?? "").trim();
   const kind = normalizeKind(r.kind);
   const status = normalizeStatus(r.status);
-  const channel = r.channel === "webapp" ? "webapp" : r.channel === "chat" ? "chat" : null;
+  const channel =
+    r.channel === "webapp" ? "webapp" : r.channel === "admin" ? "admin" : r.channel === "chat" ? "chat" : null;
   const tg_chat_id = Number(r.tg_chat_id);
   const tg_user_id = Number(r.tg_user_id);
   const plan_id = Number(r.plan_id);
@@ -215,6 +216,25 @@ export function upsertPaymentSessionLog(row: PaymentSessionLogRow): void {
   });
 }
 
+/** Правка суммы в отчёте выручки; исходник сохраняется в amount_original_rub один раз. */
+export function updatePaymentSessionLogAmount(id: string, amountRub: number): PaymentSessionLogRow | undefined {
+  let out: PaymentSessionLogRow | undefined;
+  mutate((store) => {
+    const i = store.sessions.findIndex((s) => s.id === id);
+    if (i === -1) return;
+    const prev = store.sessions[i]!;
+    const amount = Math.max(0, Math.round(Number(amountRub) || 0));
+    const amount_original_rub =
+      prev.amount_original_rub != null && Number.isFinite(Number(prev.amount_original_rub))
+        ? prev.amount_original_rub
+        : prev.amount_rub;
+    const now = new Date().toISOString();
+    out = { ...prev, amount_rub: amount, amount_original_rub, updated_at: now };
+    store.sessions[i] = out;
+  });
+  return out;
+}
+
 export function updatePaymentSessionLogStatus(
   id: string,
   status: PaymentSessionLogStatus,
@@ -306,7 +326,7 @@ function paymentSessionLogMatchesFilter(s: PaymentSessionLogRow, opts?: PaymentS
 }
 
 export function listPaymentSessionLogs(opts?: PaymentSessionLogFilter & { limit?: number }): PaymentSessionLogRow[] {
-  const limit = Math.max(1, Math.min(1000, Math.floor(Number(opts?.limit) || 300)));
+  const limit = Math.max(1, Math.min(5000, Math.floor(Number(opts?.limit) || 300)));
 
   return readFile()
     .sessions.filter((s) => paymentSessionLogMatchesFilter(s, opts))

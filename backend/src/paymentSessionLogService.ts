@@ -5,6 +5,7 @@ import {
   getUser,
   listPaymentSessions,
   type PaymentSessionRow,
+  type UserRow,
 } from "./db.js";
 import { getPaymentSessionPricing } from "./adminPaymentReceipt.js";
 import {
@@ -14,6 +15,7 @@ import {
   findActivePaymentSessionLogByChat,
   getPaymentSessionLog,
   listPaymentSessionLogs,
+  updatePaymentSessionLogAmount,
   type PaymentSessionLogChannel,
   type PaymentSessionLogRow,
   type PaymentSessionLogStatus,
@@ -205,4 +207,41 @@ export function clearPaymentSessionsReport(opts?: {
     botSessionsCancelled++;
   }
   return { removed: removed.length, bot_sessions_cancelled: botSessionsCancelled };
+}
+
+/** Ручное продление админом → confirmed-строка в ledger выручки. */
+export function appendAdminRenewalRevenue(opts: {
+  user: UserRow;
+  amount_rub: number;
+  plan_title: string;
+  tariff_line: string;
+  plan_id?: number;
+}): PaymentSessionLogRow {
+  const now = new Date().toISOString();
+  const tgChatId = Math.floor(Number(String(opts.user.tg_id ?? "").trim()));
+  const chatId = Number.isFinite(tgChatId) && tgChatId > 0 ? tgChatId : 0;
+  const row: PaymentSessionLogRow = {
+    id: `admin-renew-${opts.user.id}-${Date.now()}`,
+    tg_chat_id: chatId,
+    tg_user_id: chatId,
+    kind: "subscription",
+    plan_id: opts.plan_id ?? 0,
+    status: "confirmed",
+    channel: "admin",
+    amount_rub: Math.max(0, Math.round(Number(opts.amount_rub) || 0)),
+    tariff_line: opts.tariff_line,
+    plan_title: opts.plan_title,
+    created_at: now,
+    updated_at: now,
+    completed_at: now,
+    messages: [],
+    target_user_id: opts.user.id,
+    target_user_name: subscriptionPublicName(opts.user),
+  };
+  upsertPaymentSessionLog(row);
+  return row;
+}
+
+export function patchRevenueAmount(id: string, amountRub: number): PaymentSessionLogRow | undefined {
+  return updatePaymentSessionLogAmount(id, amountRub);
 }

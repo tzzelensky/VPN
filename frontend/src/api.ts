@@ -632,6 +632,8 @@ export type UserDto = {
   total_gb: number;
   expiry_time: number;
   enable: boolean;
+  /** Не учитывать покупки/продления в отчёте выручки. */
+  exclude_from_revenue?: boolean;
   tg_id: string;
   comment: string;
   traffic_up: number;
@@ -730,6 +732,7 @@ export type CreateUserPayload = {
   total_gb?: number;
   expiry_time?: number;
   enable?: boolean;
+  exclude_from_revenue?: boolean;
   tg_id?: string;
   comment?: string;
   traffic_up?: number;
@@ -1305,6 +1308,49 @@ export async function clearPaymentSessionsReport(opts?: {
       to: opts?.to ?? "",
       status: opts?.status ?? "all",
     }),
+  });
+  return handle(res);
+}
+
+export type RevenueReportRowDto = {
+  id: string;
+  kind: string;
+  channel: "chat" | "webapp" | "admin" | string;
+  payer_name: string;
+  target_user_id: number | null;
+  target_user_name: string;
+  plan_title: string;
+  tariff_line: string;
+  amount_rub: number;
+  amount_original_rub: number | null;
+  created_at: string;
+  completed_at: string | null;
+};
+
+export type RevenueReportDto = {
+  month: string;
+  total_rub: number;
+  count: number;
+  by_channel: { chat: number; webapp: number; admin: number };
+  rows: RevenueReportRowDto[];
+};
+
+export async function loadRevenueReport(month: string): Promise<RevenueReportDto> {
+  const q = new URLSearchParams();
+  if (month) q.set("month", month);
+  const res = await fetch(`/api/subscription-shop/revenue?${q}`, { credentials: "include" });
+  return handle(res);
+}
+
+export async function patchRevenueAmount(
+  id: string,
+  amount_rub: number,
+): Promise<{ ok: boolean; row: RevenueReportRowDto }> {
+  const res = await fetch(`/api/subscription-shop/revenue/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    credentials: "include",
+    headers: jsonHeaders,
+    body: JSON.stringify({ amount_rub }),
   });
   return handle(res);
 }

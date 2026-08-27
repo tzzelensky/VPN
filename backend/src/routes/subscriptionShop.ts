@@ -10,13 +10,19 @@ import {
   type SubscriptionShopConfig,
 } from "../db.js";
 import { requireAuth } from "../middleware/requireAuth.js";
-import { listPaymentSessionReport, payerDisplayName, clearPaymentSessionsReport } from "../paymentSessionLogService.js";
+import {
+  listPaymentSessionReport,
+  payerDisplayName,
+  clearPaymentSessionsReport,
+  patchRevenueAmount,
+} from "../paymentSessionLogService.js";
 import type { PaymentSessionLogRow } from "../paymentSessionLogStore.js";
 import { subscriptionPublicName } from "../telegram/format.js";
 import { getTestPlanRuntimeMeta } from "../testSubscription.js";
 import { refreshTestSubscriptionSegment } from "../db.js";
 import { removeUserUuidFromAllServers, pushClientListToAllDeployedServers } from "../userSync.js";
 import { resolveClientPaymentUrl } from "../paymentUrl.js";
+import { localYmdInTz, projectTimezone } from "../projectTime.js";
 
 const router = Router();
 router.use(requireAuth);
@@ -143,6 +149,126 @@ router.post("/payment-sessions/clear", (req, res) => {
   const status = String(body.status ?? req.query.status ?? "all").trim();
   const result = clearPaymentSessionsReport({ from, to, status });
   res.json(result);
+});
+
+function revenueExcludedLookup(): { byId: Set<number>; byTg: Set<number> } {
+  const byId = new Set<number>();
+  const byTg = new Set<number>();
+  for (const u of listUsers()) {
+    if (u.exclude_from_revenue !== 1) continue;
+    byId.add(u.id);
+    const tg = Math.floor(Number(String(u.tg_id ?? "").trim()));
+    if (Number.isFinite(tg) && tg > 0) byTg.add(tg);
+  }
+  return { byId, byTg };
+}
+
+function revenueRowExcluded(
+  row: PaymentSessionLogRow,
+  lookup: { byId: Set<number>; byTg: Set<number> },
+): boolean {
+  if (row.target_user_id != null && row.target_user_id > 0) {
+    return lookup.byId.has(row.target_user_id);
+  }
+  return lookup.byTg.has(row.tg_user_id) || lookup.byTg.has(row.tg_chat_id);
+}
+
+function revenueMonthKey(row: PaymentSessionLogRow, tz: string): string {
+  const iso = String(row.completed_at || row.created_at || "").trim();
+  const ms = Date.parse(iso);
+  if (!Number.isFinite(ms)) return "";
+  return localYmdInTz(ms, tz).slice(0, 7);
+}
+
+function parseMonthQuery(raw: unknown): string | null {
+  const s = String(raw ?? "").trim();
+  if (/^\d{4}-\d{2}$/.test(s)) return s;
+  return null;
+}
+
+router.get("/revenue", (req, res) => {
+  const tz = projectTimezone();
+  const nowMonth = localYmdInTz(Date.now(), tz).slice(0, 7);
+  const month = parseMonthQuery(req.query.month) ?? nowMonth;
+  const lookup = revenueExcludedLookup();
+  const sessions = listPaymentSessionReport({ status: "confirmed", limit: 5000 });
+  const filtered = sessions
+    .filter((row) => row.status === "confirmed")
+    .filter((row) => revenueMonthKey(row, tz) === month)
+    .filter((row) => !revenueRowExcluded(row, lookup))
+    .sort((a, b) => {
+      const ta = Date.parse(String(a.completed_at || a.created_at));
+      const tb = Date.parse(String(b.completed_at || b.created_at));
+      return (Number.isFinite(tb) ? tb : 0) - (Number.isFinite(ta) ? ta : 0);
+    });
+
+  let totalRub = 0;
+  const byChannel = { chat: 0, webapp: 0, admin: 0 };
+  const rows = filtered.map((row) => {
+    const amount = Math.max(0, Math.round(Number(row.amount_rub) || 0));
+    totalRub += amount;
+    if (row.channel === "webapp") byChannel.webapp += amount;
+    else if (row.channel === "admin") byChannel.admin += amount;
+    else byChannel.chat += amount;
+    return {
+      id: row.id,
+      kind: row.kind,
+      channel: row.channel,
+      payer_name: payerDisplayName(row),
+      target_user_id: row.target_user_id ?? null,
+      target_user_name: row.target_user_name ?? "",
+      plan_title: row.plan_title,
+      tariff_line: row.tariff_line,
+      amount_rub: amount,
+      amount_original_rub: row.amount_original_rub ?? null,
+      created_at: row.created_at,
+      completed_at: row.completed_at ?? null,
+    };
+  });
+
+  res.json({
+    month,
+    total_rub: totalRub,
+    count: rows.length,
+    by_channel: byChannel,
+    rows,
+  });
+});
+
+router.patch("/revenue/:id", (req, res) => {
+  const id = String(req.params.id ?? "").trim();
+  if (!id) {
+    res.status(400).json({ error: "id_required" });
+    return;
+  }
+  const body = (req.body ?? {}) as { amount_rub?: unknown };
+  const amount = Math.round(Number(body.amount_rub));
+  if (!Number.isFinite(amount) || amount < 0) {
+    res.status(400).json({ error: "invalid_amount_rub" });
+    return;
+  }
+  const updated = patchRevenueAmount(id, amount);
+  if (!updated) {
+    res.status(404).json({ error: "not_found" });
+    return;
+  }
+  res.json({
+    ok: true,
+    row: {
+      id: updated.id,
+      kind: updated.kind,
+      channel: updated.channel,
+      payer_name: payerDisplayName(updated),
+      target_user_id: updated.target_user_id ?? null,
+      target_user_name: updated.target_user_name ?? "",
+      plan_title: updated.plan_title,
+      tariff_line: updated.tariff_line,
+      amount_rub: updated.amount_rub,
+      amount_original_rub: updated.amount_original_rub ?? null,
+      created_at: updated.created_at,
+      completed_at: updated.completed_at ?? null,
+    },
+  });
 });
 
 router.put("/", (req, res) => {
