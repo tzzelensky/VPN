@@ -873,6 +873,7 @@ export type DeviceLimitSubscriptionRowDto = {
   device_limit_enabled: boolean;
   devices_used: number;
   device_limit: number | null;
+  device_default_limit?: number;
   device_extra_slots: number;
   last_device_name: string;
   devices: Array<UserDeviceSlotDto & { device_id_masked?: string; device_icon?: string }>;
@@ -950,6 +951,20 @@ export async function addAdminDeviceSlots(subscriptionId: number, slots: number,
     credentials: "include",
     headers: jsonHeaders,
     body: JSON.stringify({ slots, comment }),
+  });
+  return handle(res);
+}
+
+export async function setAdminDeviceLimitTotal(
+  subscriptionId: number,
+  total: number,
+  comment?: string,
+): Promise<{ row: DeviceLimitSubscriptionRowDto }> {
+  const res = await fetch(`/api/device-limit/subscriptions/${subscriptionId}/limit-total`, {
+    method: "PUT",
+    credentials: "include",
+    headers: jsonHeaders,
+    body: JSON.stringify({ total, ...(comment ? { comment } : {}) }),
   });
   return handle(res);
 }

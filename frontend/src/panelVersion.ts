@@ -6,7 +6,7 @@
  * Явный крупный релиз: major + 1, minor = 0.
  */
 export const PANEL_VERSION_MAJOR = 2;
-export const PANEL_VERSION_MINOR = 8;
+export const PANEL_VERSION_MINOR = 9;
 
 /** Максимум minor до перехода на следующий major (1.99 → 2.00). */
 export const PANEL_VERSION_MINOR_MAX = 99;

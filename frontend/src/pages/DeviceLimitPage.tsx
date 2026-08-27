@@ -17,6 +17,7 @@ import {
   renameAdminDevice,
   resetAdminDevices,
   saveDeviceLimitSettings,
+  setAdminDeviceLimitTotal,
   setAllSubscriptionDeviceLimit,
   setSubscriptionDeviceLimit,
   type DeviceLimitOverviewDto,
@@ -105,6 +106,7 @@ export default function DeviceLimitPage({ onLogout }: { onLogout: () => void }) 
   const [purchases, setPurchases] = useState<Awaited<ReturnType<typeof loadDeviceLimitPurchases>>["purchases"]>([]);
   const [events, setEvents] = useState<Awaited<ReturnType<typeof loadDeviceLimitOverview>>["events"]>([]);
   const [devicesModal, setDevicesModal] = useState<DeviceLimitSubscriptionRowDto | null>(null);
+  const [limitEditBusy, setLimitEditBusy] = useState(false);
   const [atLimitModalOpen, setAtLimitModalOpen] = useState(false);
   const [diagSubId, setDiagSubId] = useState("");
   const [diagDid, setDiagDid] = useState("");
@@ -1029,11 +1031,79 @@ export default function DeviceLimitPage({ onLogout }: { onLogout: () => void }) 
             <div className="modal card device-limit-modal" onClick={(e) => e.stopPropagation()}>
               <div className="device-limit-modal__head">
                 <h3>{devicesModal.subscription_name}</h3>
-                <p className="sub">
-                  {devicesModal.device_limit != null
-                    ? `Лимит: ${devicesModal.devices_used}/${devicesModal.device_limit} · свободно: ${Math.max(0, devicesModal.device_limit - devicesModal.devices_used)} · докуплено: ${devicesModal.device_extra_slots}`
-                    : `Лимит: без ограничений · докуплено: ${devicesModal.device_extra_slots}`}
-                </p>
+                {devicesModal.device_limit != null ? (
+                  <div className="device-limit-quota">
+                    <div className="device-limit-quota__row">
+                      <div className="device-limit-quota__copy">
+                        <span className="device-limit-quota__label">Лимит мест</span>
+                        <span className="device-limit-quota__meta">
+                          занято {devicesModal.devices_used} из {devicesModal.device_limit}
+                          {devicesModal.device_extra_slots > 0
+                            ? ` · докуплено +${devicesModal.device_extra_slots}`
+                            : ""}
+                        </span>
+                      </div>
+                      <div className="device-limit-quota__stepper" role="group" aria-label="Изменить лимит мест">
+                        <button
+                          type="button"
+                          className="device-limit-quota__btn"
+                          disabled={limitEditBusy || (devicesModal.device_limit ?? 1) <= 1}
+                          onClick={() => {
+                            const next = Math.max(1, (devicesModal.device_limit ?? 1) - 1);
+                            if (next === devicesModal.device_limit) return;
+                            setLimitEditBusy(true);
+                            void setAdminDeviceLimitTotal(devicesModal.subscription_id, next)
+                              .then((r) => {
+                                setDevicesModal(r.row);
+                                setRows((prev) =>
+                                  prev.map((x) => (x.subscription_id === r.row.subscription_id ? r.row : x)),
+                                );
+                              })
+                              .catch((e) => setToast({ type: "err", text: e instanceof Error ? e.message : "Ошибка" }))
+                              .finally(() => setLimitEditBusy(false));
+                          }}
+                          aria-label="Уменьшить лимит"
+                        >
+                          −
+                        </button>
+                        <strong className="device-limit-quota__value">
+                          {limitEditBusy ? "…" : devicesModal.device_limit}
+                        </strong>
+                        <button
+                          type="button"
+                          className="device-limit-quota__btn"
+                          disabled={limitEditBusy || (devicesModal.device_limit ?? 1) >= 50}
+                          onClick={() => {
+                            const next = Math.min(50, (devicesModal.device_limit ?? 1) + 1);
+                            if (next === devicesModal.device_limit) return;
+                            setLimitEditBusy(true);
+                            void setAdminDeviceLimitTotal(devicesModal.subscription_id, next)
+                              .then((r) => {
+                                setDevicesModal(r.row);
+                                setRows((prev) =>
+                                  prev.map((x) => (x.subscription_id === r.row.subscription_id ? r.row : x)),
+                                );
+                              })
+                              .catch((e) => setToast({ type: "err", text: e instanceof Error ? e.message : "Ошибка" }))
+                              .finally(() => setLimitEditBusy(false));
+                          }}
+                          aria-label="Увеличить лимит"
+                        >
+                          +
+                        </button>
+                      </div>
+                    </div>
+                    <p className="device-limit-quota__hint">
+                      Базово {devicesModal.device_default_limit ?? settings?.default_slots ?? 1}
+                      {" · "}
+                      − убирает докупленные места, + добавляет
+                    </p>
+                  </div>
+                ) : (
+                  <p className="sub">
+                    Лимит: без ограничений · докуплено: {devicesModal.device_extra_slots}
+                  </p>
+                )}
               </div>
               <div className="device-limit-modal__body">
                 <ul className="device-slot-list">

@@ -2906,6 +2906,58 @@ export function addAdminDeviceExtraSlots(
   return out;
 }
 
+/**
+ * Задать итоговый лимит мест (базовый default + докупка).
+ * Меняет device_extra_slots так, чтобы total = default_slots + extra.
+ */
+export function setAdminDeviceLimitTotal(
+  userId: number,
+  totalSlots: number,
+  comment?: string,
+): UserRow | undefined {
+  let out: UserRow | undefined;
+  mutate((store) => {
+    const i = store.users.findIndex((u) => u.id === userId);
+    if (i === -1) return;
+    const cur = store.users[i]!;
+    const settings = getDeviceLimitSettings();
+    const base = Math.max(1, Math.floor(Number(settings.default_slots) || 1));
+    const total = Math.max(1, Math.min(50, Math.floor(Number(totalSlots) || 1)));
+    const extra = Math.max(0, total - base);
+    const prevExtra = Math.max(0, Math.floor(Number(cur.device_extra_slots) || 0));
+    const deployedIds = deployedIdsFromServerRows(store.servers);
+    let next = normalizeUser(
+      {
+        ...cur,
+        device_limit_count: base,
+        device_extra_slots: extra,
+        updated_at: new Date().toISOString(),
+      },
+      deployedIds,
+    );
+    if (isDeviceLimitActiveForUser(next)) {
+      next = normalizeUser(
+        { ...next, device_slots: reconcileUserDeviceSlots(next), updated_at: new Date().toISOString() },
+        deployedIds,
+      );
+    }
+    store.users[i] = next;
+    out = next;
+    appendDeviceLimitEvent({
+      user_id: cur.id,
+      subscription_id: cur.id,
+      device_id: "",
+      event_type: "admin_limit_set",
+      message:
+        `Админ задал лимит ${total} (базово ${base} + докупка ${extra}` +
+        (prevExtra !== extra ? `, было докупки ${prevExtra}` : "") +
+        `)${comment ? `: ${comment}` : ""}`,
+      metadata_json: JSON.stringify({ total, base, extra, prev_extra: prevExtra }),
+    });
+  });
+  return out;
+}
+
 export function resetUserDeviceSlots(userId: number): UserRow | undefined {
   let out: UserRow | undefined;
   mutate((store) => {

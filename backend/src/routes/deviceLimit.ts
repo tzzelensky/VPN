@@ -18,6 +18,7 @@ import {
   renameUserDeviceSlot,
   reconcileAllUsersDeviceSlots,
   resetUserDeviceSlots,
+  setAdminDeviceLimitTotal,
   updateUserRow,
   userAllowedOnServers,
   type UserRow,
@@ -313,6 +314,24 @@ router.post("/subscriptions/:id(\\d+)/add-slots", (req, res) => {
   const slots = Math.max(1, Math.floor(Number((req.body as { slots?: unknown })?.slots) || 1));
   const comment = String((req.body as { comment?: unknown })?.comment ?? "").trim();
   const next = addAdminDeviceExtraSlots(id, slots, comment);
+  if (!next) {
+    res.status(404).json({ error: "not_found" });
+    return;
+  }
+  res.json({ row: subscriptionRowDto(next) });
+});
+
+/** Задать итоговый лимит мест подписки (базово + докупка). */
+router.put("/subscriptions/:id(\\d+)/limit-total", (req, res) => {
+  const id = Number(req.params.id);
+  const body = (req.body ?? {}) as { total?: unknown; comment?: unknown };
+  const total = Math.floor(Number(body.total));
+  if (!Number.isFinite(total) || total < 1 || total > 50) {
+    res.status(400).json({ error: "invalid_total" });
+    return;
+  }
+  const comment = String(body.comment ?? "").trim();
+  const next = setAdminDeviceLimitTotal(id, total, comment || undefined);
   if (!next) {
     res.status(404).json({ error: "not_found" });
     return;

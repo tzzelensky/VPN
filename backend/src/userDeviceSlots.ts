@@ -1,6 +1,4 @@
 import { createHash, randomUUID } from "node:crypto";
-import fs from "node:fs";
-import path from "node:path";
 import type { UserRow } from "./db.js";
 import { normalizeClientIp } from "./deviceLimitSubscription.js";
 import type { DeviceLimitSettings } from "./deviceLimitSettings.js";
@@ -8,31 +6,6 @@ import { getDeviceLimitSettings } from "./deviceLimitStore.js";
 import { deviceLimitCalcSettingsForUser, isDeviceLimitActiveForUser } from "./deviceLimitEffective.js";
 import { parseDeviceFromUserAgent, isUsefulDeviceName, stableUserAgentFingerprintKey, stableHardwareIdentityKey, stripVpnClientSuffix, isGenericPlatformDeviceName } from "./deviceNameFromUa.js";
 
-// #region agent log
-function agentDebugLog(hypothesisId: string, location: string, message: string, data: Record<string, unknown>): void {
-  const payload = {
-    sessionId: "b2e4e9",
-    runId: "pre-fix",
-    hypothesisId,
-    location,
-    message,
-    data,
-    timestamp: Date.now(),
-  };
-  const line = `${JSON.stringify(payload)}\n`;
-  try {
-    const base = process.env.DATA_PATH ? path.dirname(process.env.DATA_PATH) : process.cwd();
-    fs.appendFileSync(path.join(base, "debug-b2e4e9.ndjson"), line);
-  } catch {
-    /* ignore */
-  }
-  fetch("http://127.0.0.1:7279/ingest/27535de9-78db-4923-8694-0a275bc93049", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "b2e4e9" },
-    body: JSON.stringify(payload),
-  }).catch(() => {});
-}
-// #endregion
 
 export type UserDeviceSlot = {
   id: string;
@@ -182,24 +155,6 @@ function findSlotByStableIdentity(slots: UserDeviceSlot[], ua: string, explicitN
   if (candidates.length === 0 && sameTypeActive.length === 1 && incomingKey.endsWith("|platform")) {
     candidates.push(sameTypeActive[0]!);
   }
-  // #region agent log
-  agentDebugLog("H3", "userDeviceSlots.ts:findSlotByStableIdentity", "stable identity lookup", {
-    ua: trimmed.slice(0, 120),
-    explicitName: explicit || null,
-    incomingKey,
-    incomingBase,
-    candidateCount: candidates.length,
-    candidateIds: candidates.map((i) => slots[i]!.id),
-    activeSlotSummaries: slots
-      .filter((s) => s.active === 1 && !s.deleted_at)
-      .map((s) => ({
-        id: s.id,
-        name: s.device_name,
-        type: s.device_type,
-        key: slotHardwareKey(s),
-      })),
-  });
-  // #endregion
   if (candidates.length === 0) return -1;
   candidates.sort((a, b) => Date.parse(slots[b]!.last_seen_at) - Date.parse(slots[a]!.last_seen_at));
   return candidates[0]!;
@@ -487,16 +442,6 @@ export function evaluateDeviceLimitAccess(
     if (byId < 0) {
       const stableEarly = findSlotByStableIdentity(slots, ua, opts?.deviceName);
       if (stableEarly >= 0) {
-        // #region agent log
-        agentDebugLog("H1", "userDeviceSlots.ts:evaluateDeviceLimitAccess", "remap foreign fp to stable slot", {
-          incomingId: id,
-          ua: ua.slice(0, 120),
-          deviceName: opts?.deviceName ?? null,
-          stableSlotId: slots[stableEarly]!.id,
-          stableSlotName: slots[stableEarly]!.device_name,
-          runId: "post-fix",
-        });
-        // #endregion
         id = slots[stableEarly]!.id;
       }
     }
@@ -749,24 +694,6 @@ export function evaluateDeviceLimitAccess(
     userAgent: ua,
     deviceId: preferredDeviceIdForRegistration(ua, id, opts?.deviceName),
   });
-  // #region agent log
-  agentDebugLog("H1", "userDeviceSlots.ts:evaluateDeviceLimitAccess", "registering NEW device slot", {
-    incomingId: id,
-    incomingUa: ua.slice(0, 120),
-    incomingName: opts?.deviceName ?? null,
-    fpKey: stableHardwareIdentityKey({ ua, deviceName: opts?.deviceName }),
-    newSlotId: added.id,
-    newSlotName: added.device_name,
-    existingActive: active.map((s) => ({
-      id: s.id,
-      name: s.device_name,
-      type: s.device_type,
-      key: slotHardwareKey(s),
-    })),
-    limit,
-    runId: "post-fix",
-  });
-  // #endregion
   const next = [...slots, added];
   return { allowed: true, slots: next, registered: active.length + 1, eventType: "device_registered" };
 }
