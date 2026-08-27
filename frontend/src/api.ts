@@ -1356,11 +1356,12 @@ export async function patchRevenueAmount(
 }
 
 export async function createRevenueEntry(body: {
-  user_id: number;
+  user_id?: number;
+  user_ids?: number[];
   amount_rub: number;
   completed_at?: string;
   plan_title?: string;
-}): Promise<{ ok: boolean; row: RevenueReportRowDto }> {
+}): Promise<{ ok: boolean; added?: number; row: RevenueReportRowDto; rows?: RevenueReportRowDto[] }> {
   const res = await fetch("/api/subscription-shop/revenue", {
     method: "POST",
     credentials: "include",

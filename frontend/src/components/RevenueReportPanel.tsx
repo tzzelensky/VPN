@@ -81,7 +81,7 @@ export default function RevenueReportPanel() {
   const [draftAmount, setDraftAmount] = useState("");
   const [savingId, setSavingId] = useState<string | null>(null);
   const [users, setUsers] = useState<UserDto[]>([]);
-  const [addUserId, setAddUserId] = useState("");
+  const [addUserIds, setAddUserIds] = useState<number[]>([]);
   const [addAmount, setAddAmount] = useState("");
   const [addDate, setAddDate] = useState("");
   const [adding, setAdding] = useState(false);
@@ -152,10 +152,9 @@ export default function RevenueReportPanel() {
   }
 
   async function onAddManual() {
-    const userId = Math.floor(Number(addUserId));
     const amount = Math.round(Number(String(addAmount).replace(",", ".")));
-    if (!Number.isFinite(userId) || userId <= 0) {
-      setError("Выберите клиента");
+    if (addUserIds.length === 0) {
+      setError("Выберите хотя бы одного клиента");
       return;
     }
     if (!Number.isFinite(amount) || amount < 0) {
@@ -169,12 +168,12 @@ export default function RevenueReportPanel() {
         ? new Date(`${addDate.trim()}T12:00:00`).toISOString()
         : undefined;
       await createRevenueEntry({
-        user_id: userId,
+        user_ids: addUserIds,
         amount_rub: amount,
         ...(completed_at ? { completed_at } : {}),
       });
       setAddAmount("");
-      setAddUserId("");
+      setAddUserIds([]);
       await refresh(month);
     } catch (e) {
       setError(String(e));
@@ -183,10 +182,30 @@ export default function RevenueReportPanel() {
     }
   }
 
-  const sortedUsers = useMemo(
-    () => [...users].sort((a, b) => a.name.localeCompare(b.name, "ru")),
-    [users],
+  const alreadyInReport = useMemo(() => {
+    const ids = new Set<number>();
+    for (const row of report?.rows ?? []) {
+      const id = Math.floor(Number(row.target_user_id) || 0);
+      if (id > 0) ids.add(id);
+    }
+    return ids;
+  }, [report]);
+
+  const availableUsers = useMemo(
+    () =>
+      [...users]
+        .filter((u) => !alreadyInReport.has(u.id))
+        .sort((a, b) => a.name.localeCompare(b.name, "ru")),
+    [users, alreadyInReport],
   );
+
+  useEffect(() => {
+    setAddUserIds((prev) => prev.filter((id) => availableUsers.some((u) => u.id === id)));
+  }, [availableUsers]);
+
+  function toggleAddUser(id: number) {
+    setAddUserIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  }
 
   return (
     <section className="panel pay-sess-panel">
@@ -249,18 +268,40 @@ export default function RevenueReportPanel() {
             </div>
           </div>
 
-          <div className="pay-sess-filters" style={{ marginTop: "1rem" }}>
-            <label className="pay-sess-filter pay-sess-filter--grow">
-              <span>Добавить вручную</span>
-              <select value={addUserId} onChange={(e) => setAddUserId(e.target.value)}>
-                <option value="">Клиент…</option>
-                {sortedUsers.map((u) => (
-                  <option key={u.id} value={u.id}>
-                    {u.name}
-                  </option>
-                ))}
-              </select>
-            </label>
+          <div className="pay-sess-filters" style={{ marginTop: "1rem", alignItems: "flex-start" }}>
+            <div className="pay-sess-filter pay-sess-filter--grow">
+              <span>Добавить вручную{addUserIds.length ? ` (${addUserIds.length})` : ""}</span>
+              {availableUsers.length === 0 ? (
+                <p className="pay-sess-sub" style={{ margin: "0.35rem 0 0" }}>
+                  Все клиенты уже есть в отчёте за этот месяц.
+                </p>
+              ) : (
+                <div
+                  style={{
+                    maxHeight: "11rem",
+                    overflow: "auto",
+                    border: "1px solid var(--border, #333)",
+                    borderRadius: "0.4rem",
+                    padding: "0.35rem 0.5rem",
+                    display: "grid",
+                    gap: "0.2rem",
+                  }}
+                >
+                  {availableUsers.map((u) => {
+                    const checked = addUserIds.includes(u.id);
+                    return (
+                      <label
+                        key={u.id}
+                        style={{ display: "flex", gap: "0.45rem", alignItems: "center", cursor: "pointer" }}
+                      >
+                        <input type="checkbox" checked={checked} onChange={() => toggleAddUser(u.id)} />
+                        <span>{u.name}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
             <label className="pay-sess-filter">
               <span>Сумма ₽</span>
               <input type="number" min={0} step={1} value={addAmount} onChange={(e) => setAddAmount(e.target.value)} />
@@ -269,7 +310,13 @@ export default function RevenueReportPanel() {
               <span>Дата</span>
               <input type="date" value={addDate} onChange={(e) => setAddDate(e.target.value)} />
             </label>
-            <button type="button" className="btn" disabled={adding} onClick={() => void onAddManual()}>
+            <button
+              type="button"
+              className="btn"
+              disabled={adding || addUserIds.length === 0 || availableUsers.length === 0}
+              onClick={() => void onAddManual()}
+              style={{ marginTop: "1.35rem" }}
+            >
               {adding ? <Spinner /> : "Добавить"}
             </button>
           </div>

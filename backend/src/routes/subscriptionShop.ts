@@ -241,22 +241,17 @@ router.get("/revenue", (req, res) => {
 router.post("/revenue", (req, res) => {
   const body = (req.body ?? {}) as {
     user_id?: unknown;
+    user_ids?: unknown;
     amount_rub?: unknown;
     completed_at?: unknown;
     plan_title?: unknown;
   };
-  const userId = Math.floor(Number(body.user_id));
-  if (!Number.isFinite(userId) || userId <= 0) {
+  const idsRaw = Array.isArray(body.user_ids) ? body.user_ids : body.user_id != null ? [body.user_id] : [];
+  const userIds = idsRaw
+    .map((x) => Math.floor(Number(x)))
+    .filter((n, i, arr) => Number.isFinite(n) && n > 0 && arr.indexOf(n) === i);
+  if (userIds.length === 0) {
     res.status(400).json({ error: "user_id_required" });
-    return;
-  }
-  const user = getUser(userId);
-  if (!user) {
-    res.status(404).json({ error: "not_found" });
-    return;
-  }
-  if (user.exclude_from_revenue === 1) {
-    res.status(400).json({ error: "user_excluded_from_revenue" });
     return;
   }
   const amount = Math.round(Number(body.amount_rub));
@@ -266,19 +261,29 @@ router.post("/revenue", (req, res) => {
   }
   const completedAt = String(body.completed_at ?? "").trim();
   const planTitle = String(body.plan_title ?? "").trim();
-  const created = createManualRevenueEntry({
-    user,
-    amount_rub: amount,
-    ...(completedAt ? { completed_at: completedAt } : {}),
-    ...(planTitle ? { plan_title: planTitle } : {}),
-  });
-  if (!created) {
-    res.status(400).json({ error: "create_failed" });
-    return;
-  }
-  res.json({
-    ok: true,
-    row: {
+  const rows = [];
+  const errors: { user_id: number; error: string }[] = [];
+  for (const userId of userIds) {
+    const user = getUser(userId);
+    if (!user) {
+      errors.push({ user_id: userId, error: "not_found" });
+      continue;
+    }
+    if (user.exclude_from_revenue === 1) {
+      errors.push({ user_id: userId, error: "user_excluded_from_revenue" });
+      continue;
+    }
+    const created = createManualRevenueEntry({
+      user,
+      amount_rub: amount,
+      ...(completedAt ? { completed_at: completedAt } : {}),
+      ...(planTitle ? { plan_title: planTitle } : {}),
+    });
+    if (!created) {
+      errors.push({ user_id: userId, error: "create_failed" });
+      continue;
+    }
+    rows.push({
       id: created.id,
       kind: created.kind,
       channel: created.channel,
@@ -291,7 +296,18 @@ router.post("/revenue", (req, res) => {
       amount_original_rub: created.amount_original_rub ?? null,
       created_at: created.created_at,
       completed_at: created.completed_at ?? null,
-    },
+    });
+  }
+  if (rows.length === 0) {
+    res.status(400).json({ error: errors[0]?.error ?? "create_failed", errors });
+    return;
+  }
+  res.json({
+    ok: true,
+    added: rows.length,
+    rows,
+    ...(rows[0] ? { row: rows[0] } : {}),
+    ...(errors.length ? { errors } : {}),
   });
 });
 
