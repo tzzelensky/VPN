@@ -1,9 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
+  createRevenueEntry,
+  listUsers,
   loadRevenueReport,
   patchRevenueAmount,
   type RevenueReportDto,
   type RevenueReportRowDto,
+  type UserDto,
 } from "../api";
 import PageLoadingState from "./PageLoadingState";
 import Spinner from "./Spinner";
@@ -77,6 +80,11 @@ export default function RevenueReportPanel() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draftAmount, setDraftAmount] = useState("");
   const [savingId, setSavingId] = useState<string | null>(null);
+  const [users, setUsers] = useState<UserDto[]>([]);
+  const [addUserId, setAddUserId] = useState("");
+  const [addAmount, setAddAmount] = useState("");
+  const [addDate, setAddDate] = useState("");
+  const [adding, setAdding] = useState(false);
 
   const refresh = useCallback(async (m: string) => {
     setLoading(true);
@@ -95,6 +103,12 @@ export default function RevenueReportPanel() {
   useEffect(() => {
     void refresh(month);
   }, [month, refresh]);
+
+  useEffect(() => {
+    void listUsers()
+      .then((rows) => setUsers(rows.filter((u) => !u.exclude_from_revenue)))
+      .catch(() => setUsers([]));
+  }, []);
 
   function startEdit(row: RevenueReportRowDto) {
     setEditingId(row.id);
@@ -136,6 +150,43 @@ export default function RevenueReportPanel() {
       setSavingId(null);
     }
   }
+
+  async function onAddManual() {
+    const userId = Math.floor(Number(addUserId));
+    const amount = Math.round(Number(String(addAmount).replace(",", ".")));
+    if (!Number.isFinite(userId) || userId <= 0) {
+      setError("Выберите клиента");
+      return;
+    }
+    if (!Number.isFinite(amount) || amount < 0) {
+      setError("Сумма должна быть числом ≥ 0");
+      return;
+    }
+    setAdding(true);
+    setError(null);
+    try {
+      const completed_at = addDate.trim()
+        ? new Date(`${addDate.trim()}T12:00:00`).toISOString()
+        : undefined;
+      await createRevenueEntry({
+        user_id: userId,
+        amount_rub: amount,
+        ...(completed_at ? { completed_at } : {}),
+      });
+      setAddAmount("");
+      setAddUserId("");
+      await refresh(month);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setAdding(false);
+    }
+  }
+
+  const sortedUsers = useMemo(
+    () => [...users].sort((a, b) => a.name.localeCompare(b.name, "ru")),
+    [users],
+  );
 
   return (
     <section className="panel pay-sess-panel">
@@ -196,6 +247,31 @@ export default function RevenueReportPanel() {
               <span>Админ</span>
               <strong>{report.by_channel.admin.toLocaleString("ru-RU")} ₽</strong>
             </div>
+          </div>
+
+          <div className="pay-sess-filters" style={{ marginTop: "1rem" }}>
+            <label className="pay-sess-filter pay-sess-filter--grow">
+              <span>Добавить вручную</span>
+              <select value={addUserId} onChange={(e) => setAddUserId(e.target.value)}>
+                <option value="">Клиент…</option>
+                {sortedUsers.map((u) => (
+                  <option key={u.id} value={u.id}>
+                    {u.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="pay-sess-filter">
+              <span>Сумма ₽</span>
+              <input type="number" min={0} step={1} value={addAmount} onChange={(e) => setAddAmount(e.target.value)} />
+            </label>
+            <label className="pay-sess-filter">
+              <span>Дата</span>
+              <input type="date" value={addDate} onChange={(e) => setAddDate(e.target.value)} />
+            </label>
+            <button type="button" className="btn" disabled={adding} onClick={() => void onAddManual()}>
+              {adding ? <Spinner /> : "Добавить"}
+            </button>
           </div>
 
           {report.rows.length === 0 ? (

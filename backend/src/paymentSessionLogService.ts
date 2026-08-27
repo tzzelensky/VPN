@@ -2,8 +2,10 @@ import {
   deletePaymentSession,
   findUsersByTelegramChatId,
   getPaymentSession,
+  getSubscriptionShop,
   getUser,
   listPaymentSessions,
+  listPanelSubscriptionRenewalMessages,
   type PaymentSessionRow,
   type UserRow,
 } from "./db.js";
@@ -216,12 +218,17 @@ export function appendAdminRenewalRevenue(opts: {
   plan_title: string;
   tariff_line: string;
   plan_id?: number;
-}): PaymentSessionLogRow {
+  id?: string;
+  completed_at?: string;
+}): PaymentSessionLogRow | null {
+  const id = String(opts.id ?? `admin-renew-${opts.user.id}-${Date.now()}`).trim();
+  if (!id || getPaymentSessionLog(id)) return null;
+  const completedAt = String(opts.completed_at ?? "").trim() || new Date().toISOString();
   const now = new Date().toISOString();
   const tgChatId = Math.floor(Number(String(opts.user.tg_id ?? "").trim()));
   const chatId = Number.isFinite(tgChatId) && tgChatId > 0 ? tgChatId : 0;
   const row: PaymentSessionLogRow = {
-    id: `admin-renew-${opts.user.id}-${Date.now()}`,
+    id,
     tg_chat_id: chatId,
     tg_user_id: chatId,
     kind: "subscription",
@@ -231,15 +238,96 @@ export function appendAdminRenewalRevenue(opts: {
     amount_rub: Math.max(0, Math.round(Number(opts.amount_rub) || 0)),
     tariff_line: opts.tariff_line,
     plan_title: opts.plan_title,
-    created_at: now,
+    created_at: completedAt,
     updated_at: now,
-    completed_at: now,
+    completed_at: completedAt,
     messages: [],
     target_user_id: opts.user.id,
     target_user_name: subscriptionPublicName(opts.user),
   };
   upsertPaymentSessionLog(row);
   return row;
+}
+
+/** Тариф по total_gb: точное совпадение, иначе ближайший (безлимит только к безлимиту). */
+export function resolveShopPlanForUserGb(totalGb: number): {
+  id: number;
+  title: string;
+  price_rub: number;
+  total_gb: number;
+} | null {
+  const plans = getSubscriptionShop().plans ?? [];
+  if (plans.length === 0) return null;
+  const gb = Number(totalGb);
+  const exact = plans.find((p) => p.total_gb === gb);
+  if (exact) return exact;
+  if (gb === 0) return plans.find((p) => p.total_gb === 0) ?? null;
+  const finite = plans.filter((p) => p.total_gb > 0);
+  if (finite.length === 0) return null;
+  return finite.reduce((best, p) =>
+    Math.abs(p.total_gb - gb) < Math.abs(best.total_gb - gb) ? p : best,
+  );
+}
+
+export function adminRenewalPricingForUser(user: UserRow): {
+  amount_rub: number;
+  plan_title: string;
+  tariff_line: string;
+  plan_id?: number;
+} {
+  const plan = resolveShopPlanForUserGb(user.total_gb);
+  const planTitle = plan?.title?.trim() || "Продление админом (без тарифа)";
+  return {
+    amount_rub: plan ? Math.max(0, Math.round(Number(plan.price_rub) || 0)) : 0,
+    plan_title: planTitle,
+    tariff_line: planTitle,
+    ...(plan ? { plan_id: plan.id } : {}),
+  };
+}
+
+/** Исторические «Продлить» из журнала сообщений → ledger (идемпотентно). */
+export function backfillAdminRenewalsFromCommunicationLog(): { added: number } {
+  let added = 0;
+  for (const msg of listPanelSubscriptionRenewalMessages()) {
+    for (const rec of msg.recipients) {
+      const userId = Math.floor(Number(rec.user_id) || 0);
+      if (userId <= 0) continue;
+      const user = getUser(userId);
+      if (!user || user.exclude_from_revenue === 1) continue;
+      const id = `admin-renew-comm-${msg.id}-${userId}`;
+      if (getPaymentSessionLog(id)) continue;
+      const pricing = adminRenewalPricingForUser(user);
+      const row = appendAdminRenewalRevenue({
+        user,
+        ...pricing,
+        id,
+        completed_at: msg.sent_at,
+      });
+      if (row) added += 1;
+    }
+  }
+  return { added };
+}
+
+export function createManualRevenueEntry(opts: {
+  user: UserRow;
+  amount_rub: number;
+  completed_at?: string;
+  plan_title?: string;
+}): PaymentSessionLogRow | null {
+  if (opts.user.exclude_from_revenue === 1) return null;
+  const pricing = adminRenewalPricingForUser(opts.user);
+  const title = String(opts.plan_title ?? "").trim() || pricing.plan_title;
+  const completedAt = String(opts.completed_at ?? "").trim() || new Date().toISOString();
+  return appendAdminRenewalRevenue({
+    user: opts.user,
+    amount_rub: opts.amount_rub,
+    plan_title: title,
+    tariff_line: title,
+    plan_id: pricing.plan_id,
+    id: `admin-manual-${opts.user.id}-${Date.now()}`,
+    completed_at: completedAt,
+  });
 }
 
 export function patchRevenueAmount(id: string, amountRub: number): PaymentSessionLogRow | undefined {

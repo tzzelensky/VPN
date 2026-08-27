@@ -1355,6 +1355,21 @@ export async function patchRevenueAmount(
   return handle(res);
 }
 
+export async function createRevenueEntry(body: {
+  user_id: number;
+  amount_rub: number;
+  completed_at?: string;
+  plan_title?: string;
+}): Promise<{ ok: boolean; row: RevenueReportRowDto }> {
+  const res = await fetch("/api/subscription-shop/revenue", {
+    method: "POST",
+    credentials: "include",
+    headers: jsonHeaders,
+    body: JSON.stringify(body),
+  });
+  return handle(res);
+}
+
 export async function pushAllUserClients(): Promise<{ ok: boolean }> {
   const res = await fetch("/api/users/push-all", { method: "POST", credentials: "include" });
   return handle(res);

@@ -8,7 +8,6 @@ import {
   deleteUser,
   dropperWinsForClientRow,
   findUserByVlessUuid,
-  getSubscriptionShop,
   getUser,
   listUsers,
   removeUserDeviceSlot,
@@ -49,7 +48,7 @@ import { refreshMissingSubscriptionHintsIfDue } from "../subscriptionHintsRefres
 import { resetUserTrafficCounters, setUserTrafficUsedBytes, usedGbToBytes } from "../trafficReset.js";
 import { getPanelSettings } from "../panelSettings.js";
 import { coerceExtraVlessLinksInput, isValidVlessUri } from "../extraVless.js";
-import { appendAdminRenewalRevenue } from "../paymentSessionLogService.js";
+import { appendAdminRenewalRevenue, adminRenewalPricingForUser } from "../paymentSessionLogService.js";
 import { isDeviceLimitGloballyEnabled, isDeviceLimitActiveForUser } from "../deviceLimitEffective.js";
 import { activeDeviceSlots, userDeviceTotalLimit } from "../userDeviceSlots.js";
 import { migrateUserDeviceSlotsFromOnline } from "../deviceLimitMigration.js";
@@ -424,6 +423,25 @@ router.patch("/:id(\\d+)", async (req, res) => {
   }
   backfillDeployedServerRealityFromUser(u);
 
+  // Ручное удлинение срока в карточке (без кнопки «Продлить») → в выручку.
+  if (
+    before.exclude_from_revenue !== 1 &&
+    patch.expiry_time !== undefined &&
+    Number.isFinite(Number(patch.expiry_time)) &&
+    Number(patch.expiry_time) - before.expiry_time >= 20 * 86_400_000
+  ) {
+    try {
+      appendAdminRenewalRevenue({
+        user: u,
+        ...adminRenewalPricingForUser(u),
+        id: `admin-expiry-patch-${u.id}-${before.expiry_time}-${Number(patch.expiry_time)}`,
+        completed_at: new Date().toISOString(),
+      });
+    } catch (e) {
+      console.error("[users] patch expiry revenue log:", e);
+    }
+  }
+
   const explicitlyEnabledNow = patch.device_limit_enabled === 1;
   const turnedOnInPatch = before.device_limit_enabled !== 1 && explicitlyEnabledNow;
   const becameLimitActive = !isDeviceLimitActiveForUser(before) && isDeviceLimitActiveForUser(u);
@@ -579,17 +597,10 @@ router.post("/:id(\\d+)/renew-subscription", async (req, res) => {
     });
 
     if (next.exclude_from_revenue !== 1) {
-      const shop = getSubscriptionShop();
-      const plan = shop.plans.find((p) => p.total_gb === next.total_gb);
-      const amountRub = plan ? Math.max(0, Math.round(Number(plan.price_rub) || 0)) : 0;
-      const planTitle = plan?.title?.trim() || "Продление админом (без тарифа)";
       try {
         appendAdminRenewalRevenue({
           user: next,
-          amount_rub: amountRub,
-          plan_title: planTitle,
-          tariff_line: planTitle,
-          plan_id: plan?.id,
+          ...adminRenewalPricingForUser(next),
         });
       } catch (e) {
         console.error("[users] renew revenue log:", e);

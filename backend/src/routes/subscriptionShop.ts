@@ -15,6 +15,8 @@ import {
   payerDisplayName,
   clearPaymentSessionsReport,
   patchRevenueAmount,
+  backfillAdminRenewalsFromCommunicationLog,
+  createManualRevenueEntry,
 } from "../paymentSessionLogService.js";
 import type { PaymentSessionLogRow } from "../paymentSessionLogStore.js";
 import { subscriptionPublicName } from "../telegram/format.js";
@@ -187,6 +189,7 @@ function parseMonthQuery(raw: unknown): string | null {
 }
 
 router.get("/revenue", (req, res) => {
+  backfillAdminRenewalsFromCommunicationLog();
   const tz = projectTimezone();
   const nowMonth = localYmdInTz(Date.now(), tz).slice(0, 7);
   const month = parseMonthQuery(req.query.month) ?? nowMonth;
@@ -232,6 +235,63 @@ router.get("/revenue", (req, res) => {
     count: rows.length,
     by_channel: byChannel,
     rows,
+  });
+});
+
+router.post("/revenue", (req, res) => {
+  const body = (req.body ?? {}) as {
+    user_id?: unknown;
+    amount_rub?: unknown;
+    completed_at?: unknown;
+    plan_title?: unknown;
+  };
+  const userId = Math.floor(Number(body.user_id));
+  if (!Number.isFinite(userId) || userId <= 0) {
+    res.status(400).json({ error: "user_id_required" });
+    return;
+  }
+  const user = getUser(userId);
+  if (!user) {
+    res.status(404).json({ error: "not_found" });
+    return;
+  }
+  if (user.exclude_from_revenue === 1) {
+    res.status(400).json({ error: "user_excluded_from_revenue" });
+    return;
+  }
+  const amount = Math.round(Number(body.amount_rub));
+  if (!Number.isFinite(amount) || amount < 0) {
+    res.status(400).json({ error: "invalid_amount_rub" });
+    return;
+  }
+  const completedAt = String(body.completed_at ?? "").trim();
+  const planTitle = String(body.plan_title ?? "").trim();
+  const created = createManualRevenueEntry({
+    user,
+    amount_rub: amount,
+    ...(completedAt ? { completed_at: completedAt } : {}),
+    ...(planTitle ? { plan_title: planTitle } : {}),
+  });
+  if (!created) {
+    res.status(400).json({ error: "create_failed" });
+    return;
+  }
+  res.json({
+    ok: true,
+    row: {
+      id: created.id,
+      kind: created.kind,
+      channel: created.channel,
+      payer_name: payerDisplayName(created),
+      target_user_id: created.target_user_id ?? null,
+      target_user_name: created.target_user_name ?? "",
+      plan_title: created.plan_title,
+      tariff_line: created.tariff_line,
+      amount_rub: created.amount_rub,
+      amount_original_rub: created.amount_original_rub ?? null,
+      created_at: created.created_at,
+      completed_at: created.completed_at ?? null,
+    },
   });
 });
 

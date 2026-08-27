@@ -4800,7 +4800,7 @@ export function listCommunicationMessageLog(
   limit = 200,
   opts?: { fromYmd?: string; toYmd?: string; manualOnly?: boolean },
 ): CommunicationMessageLogRow[] {
-  const cap = Math.max(1, Math.min(500, Math.floor(limit) || 200));
+  const cap = Math.max(1, Math.min(5000, Math.floor(limit) || 200));
   const tz = projectTimezone();
   const fromYmd = String(opts?.fromYmd ?? "").trim();
   const toYmd = String(opts?.toYmd ?? "").trim();
@@ -4826,6 +4826,11 @@ export function listCommunicationMessageLog(
       return (Number.isFinite(tb) ? tb : 0) - (Number.isFinite(ta) ? ta : 0);
     })
     .slice(0, cap);
+}
+
+/** Все уведомления «Панель: продление подписки» (для бэкфилла выручки). */
+export function listPanelSubscriptionRenewalMessages(): CommunicationMessageLogRow[] {
+  return readCommunicationLogFile().filter((r) => r.source_label === "Панель: продление подписки");
 }
 
 export function getCommunicationMessageLogById(id: string): CommunicationMessageLogRow | undefined {
