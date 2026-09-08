@@ -1,12 +1,32 @@
-# Развёртывание с нуля на пустом VPS (Ubuntu)
+# Развёртывание с нуля на пустом VPS (Ubuntu / Debian)
 
 > Краткая установка «для чайников» и команда в одну строку — в **[README.md](README.md)**.  
 > Удаление панели: `bash <(curl -fsSL https://raw.githubusercontent.com/tzzelensky/VPN/main/scripts/uninstall.sh)`  
 > Ниже — подробная ручная инструкция по шагам.
 
-Пошаговая инструкция для **нового VPS** с **Ubuntu 22.04 или 24.04 LTS**: обновление системы, firewall, Node.js, Nginx, SSL, клонирование проекта, сборка, systemd, проверка.
+Пошаговая инструкция для **нового VPS** с **Ubuntu 22.04/24.04 LTS** или **Debian 12**: обновление системы, firewall, Node.js, Nginx, SSL, клонирование проекта, сборка, systemd, проверка.
 
 Предполагается: у вас есть **домен** (например `vpn.example.com`), **A-запись** указывает на IP VPS. Без домена панель можно открыть по `http://IP`, но для Telegram-вебхука и нормальных подписок нужен **HTTPS + домен**.
+
+### Текущий прод-стенд (не путать с путём «с нуля»)
+
+На живом сервере раскладка **уже не совпадает** один-в-один с разделами 6–9 ниже (там путь `/opt/vpn-admin` для чистой установки):
+
+| Что | Путь / значение |
+|-----|-----------------|
+| Код API + frontend (systemd `WorkingDirectory`) | `/home/vpnadm/vpn-admin-app` |
+| Данные панели (`DATA_PATH`) | `/opt/vpn-admin/data/data.json` |
+| Старый git-клон (данные рядом, код не обслуживает запросы) | `/opt/vpn-admin` |
+| Домен (пример) | `devspace5.duckdns.org` |
+| Сервис | `vpn-admin-api.service` → `node dist/index.js` |
+
+Перед обновлением **всегда** проверяйте активный каталог:
+
+```bash
+systemctl show -p WorkingDirectory -p EnvironmentFiles -p Environment vpn-admin-api.service
+```
+
+Если `WorkingDirectory=/home/vpnadm/vpn-admin-app/backend`, а `DATA_PATH` указывает на `/opt/vpn-admin/data/...` — обновляйте код в **home**, данные не трогайте. Каталог live-приложения может быть **без `.git`** (раскатка архивом/`rsync`) — тогда `git pull` там не сработает, см. §13.2.
 
 ---
 
@@ -280,6 +300,17 @@ WantedBy=multi-user.target
 
 Сохраните файл: в **nano** — `Ctrl+O`, Enter, затем `Ctrl+X`.
 
+Если позже код перенесёте в `/home/vpnadm/vpn-admin-app`, а данные оставите в `/opt/vpn-admin/data`, поправьте `WorkingDirectory`/`EnvironmentFile` в unit и при необходимости добавьте override:
+
+```bash
+sudo systemctl edit vpn-admin-api
+```
+
+```ini
+[Service]
+Environment=DATA_PATH=/opt/vpn-admin/data/data.json
+```
+
 Проверка синтаксиса (опционально):
 
 ```bash
@@ -419,14 +450,21 @@ sudo systemctl restart vpn-admin-api
 
 ## 13. Обновление кода на сервере
 
+Сначала узнайте активный каталог (`systemctl show … WorkingDirectory`). Для **прод-стенда** это обычно `/home/vpnadm/vpn-admin-app`, не `/opt/vpn-admin`.
+
+Если в активном каталоге есть `.git` и дерево чистое:
+
 ```bash
-cd /opt/vpn-admin
+APP=/home/vpnadm/vpn-admin-app   # или /opt/vpn-admin на чистой установке
+cd "$APP"
 sudo -u vpnadm git pull
 cd backend && sudo -u vpnadm npm ci && sudo -u vpnadm npm run build
 cd ../frontend && sudo -u vpnadm npm ci && sudo -u vpnadm npm run build
 sudo systemctl restart vpn-admin-api
 sudo systemctl reload nginx
 ```
+
+Если `.git` нет или дерево грязное — сразу §13.2 (архив / `rsync`).
 
 ### 13.1. Пересборка без обрыва SSH (`tsc` / `npm` долгие)
 
@@ -443,7 +481,7 @@ tail -f /root/vpn-rebuild-api.log
 
 ### 13.2. Практический сценарий: раскатка на стенд
 
-Ниже — более «боевой» порядок, который пригодился на реальном стенде, когда на сервере уже есть история ручных правок и не всё идеально чисто.
+Ниже — более «боевой» порядок для реального стенда (`/home/vpnadm/vpn-admin-app` + данные в `/opt/vpn-admin/data`), когда на сервере уже есть история ручных правок и не всё идеально чисто.
 
 #### Шаг 1. Сначала зафиксируйте нужные правки локально
 

@@ -22,6 +22,33 @@ import { usePanelTabParam } from "../lib/panelTabRoute";
 
 const SHOP_TABS = ["settings", "combo", "payment-sessions", "revenue"] as const;
 
+function testSubStatus(e: TestSubscriptionEntryDto): {
+  key: "active" | "expired" | "disabled";
+  label: string;
+  hint: string;
+} {
+  const expiry = Number(e.expiry_time) || 0;
+  const enable = e.enable === undefined ? 1 : e.enable === 1 ? 1 : 0;
+  const expired = expiry > 0 && expiry <= Date.now();
+  const active = e.active ?? (enable === 1 && !expired);
+  const key = e.status ?? (active ? "active" : enable !== 1 ? "disabled" : "expired");
+  if (key === "active") {
+    const until =
+      expiry > 0
+        ? `до ${new Date(expiry).toLocaleString("ru-RU", { dateStyle: "short", timeStyle: "short" })}`
+        : "без срока";
+    return { key, label: "Активна", hint: until };
+  }
+  if (key === "disabled") {
+    return { key, label: "Выключена", hint: "доступ отключён" };
+  }
+  const until =
+    expiry > 0
+      ? `истекла ${new Date(expiry).toLocaleString("ru-RU", { dateStyle: "short", timeStyle: "short" })}`
+      : "срок истёк";
+  return { key: "expired", label: "Истекла", hint: until };
+}
+
 function cloneShop(s: SubscriptionShopDto): SubscriptionShopDto {
   return {
     sales_disabled: s.sales_disabled,
@@ -435,35 +462,52 @@ export default function SubscriptionShopPage({ onLogout }: { onLogout: () => voi
               </div>
               <aside className="shop-feed" aria-label="Оформленные тестовые подписки">
                 <label className="referral-feed-label">Тестовые подписки</label>
-                <p className="field-hint referral-feed-hint">Клиенты с активной тестовой подпиской. Удаление отключает доступ.</p>
+                <p className="field-hint referral-feed-hint">
+                  Кто оформил тест: статус «Активна» / «Истекла» / «Выключена». Удаление отключает доступ.
+                </p>
                 <div className="ref-ios-wheel" role="log">
                   <div className="ref-ios-wheel-mask" aria-hidden="true" />
                   <div className="ref-ios-wheel-scroll">
                     {testSubs.length === 0 ? (
                       <p className="sub ref-ios-empty">Пока нет тестовых подписок.</p>
                     ) : (
-                      testSubs.map((e) => (
-                        <div key={e.id} className="ref-ios-row shop-test-sub-row">
-                          <div className="shop-test-sub-main">
-                            <span className="ref-ios-line">{e.line}</span>
-                            <span className="ref-ios-date">
-                              {e.created_at
-                                ? new Date(e.created_at).toLocaleString("ru-RU", { dateStyle: "short", timeStyle: "short" })
-                                : ""}
-                            </span>
-                          </div>
-                          <button
-                            type="button"
-                            className="ghost shop-test-sub-delete"
-                            title="Удалить тестовую подписку"
-                            aria-label={`Удалить тестовую подписку ${e.name}`}
-                            disabled={testDeleteBusyId === e.id}
-                            onClick={() => void onDeleteTestSubscription(e.id)}
+                      testSubs.map((e) => {
+                        const st = testSubStatus(e);
+                        return (
+                          <div
+                            key={e.id}
+                            className={`ref-ios-row shop-test-sub-row shop-test-sub-row--${st.key}`}
                           >
-                            🗑
-                          </button>
-                        </div>
-                      ))
+                            <div className="shop-test-sub-main">
+                              <span className="ref-ios-line">{e.line}</span>
+                              <div className="shop-test-sub-meta">
+                                <span className={`shop-test-sub-status shop-test-sub-status--${st.key}`}>
+                                  {st.label}
+                                </span>
+                                <span className="ref-ios-date" title={st.hint}>
+                                  {st.hint}
+                                  {e.created_at
+                                    ? ` · оформлена ${new Date(e.created_at).toLocaleString("ru-RU", {
+                                        dateStyle: "short",
+                                        timeStyle: "short",
+                                      })}`
+                                    : ""}
+                                </span>
+                              </div>
+                            </div>
+                            <button
+                              type="button"
+                              className="ghost shop-test-sub-delete"
+                              title="Удалить тестовую подписку"
+                              aria-label={`Удалить тестовую подписку ${e.name}`}
+                              disabled={testDeleteBusyId === e.id}
+                              onClick={() => void onDeleteTestSubscription(e.id)}
+                            >
+                              🗑
+                            </button>
+                          </div>
+                        );
+                      })
                     )}
                   </div>
                 </div>

@@ -40,16 +40,26 @@ router.get("/", (_req, res) => {
 router.get("/test-subscriptions", (_req, res) => {
   const meta = getTestPlanRuntimeMeta();
   const gb = meta.total_gb > 0 ? `${meta.total_gb} ГБ` : "безлимит";
+  const now = Date.now();
   const entries = listUsers()
     .filter((u) => u.is_test_subscription === 1)
-    .map((u) => ({
-      id: u.id,
-      name: subscriptionPublicName(u),
-      tg_id: String(u.tg_id ?? "").trim(),
-      line: `${subscriptionPublicName(u)} — ${meta.title} (${gb} / ${meta.days} дн.)`,
-      created_at: u.created_at,
-      expiry_time: u.expiry_time,
-    }))
+    .map((u) => {
+      const enable = u.enable === 1 ? 1 : 0;
+      const expiry_time = Number(u.expiry_time) || 0;
+      const expired = expiry_time > 0 && expiry_time <= now;
+      const active = enable === 1 && !expired;
+      return {
+        id: u.id,
+        name: subscriptionPublicName(u),
+        tg_id: String(u.tg_id ?? "").trim(),
+        line: `${subscriptionPublicName(u)} — ${meta.title} (${gb} / ${meta.days} дн.)`,
+        created_at: u.created_at,
+        expiry_time,
+        enable,
+        active,
+        status: active ? "active" : enable !== 1 ? "disabled" : "expired",
+      };
+    })
     .sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at));
   res.json({ entries });
 });

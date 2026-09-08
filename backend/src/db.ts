@@ -4200,6 +4200,12 @@ export function initDb(): void {
   repairUsersRealityFromPeers();
 }
 
+/** Test-only: wipe data.json to empty store and clear cache. */
+export function resetStoreForTests(): void {
+  storeCache = null;
+  writeStore(emptyStore());
+}
+
 export function listPromoCodes(): PromoCodeRow[] {
   const rows = readStore().promo_codes ?? [];
   return [...rows].sort((a, b) => {

@@ -1226,6 +1226,9 @@ export type TestSubscriptionEntryDto = {
   line: string;
   created_at: string;
   expiry_time: number;
+  enable?: number;
+  active?: boolean;
+  status?: "active" | "expired" | "disabled";
 };
 
 export async function loadTestSubscriptions(): Promise<{ entries: TestSubscriptionEntryDto[] }> {

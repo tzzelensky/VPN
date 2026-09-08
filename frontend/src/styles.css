@@ -5343,6 +5343,46 @@ html.admin-mobile-app .modal.user-modal-panel .modal-footer,
   min-width: 0;
 }
 
+.shop-feed .shop-test-sub-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem 0.55rem;
+  margin-top: 0.2rem;
+}
+
+.shop-feed .shop-test-sub-status {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.1rem 0.45rem;
+  border-radius: 999px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  line-height: 1.25;
+  white-space: nowrap;
+}
+
+.shop-feed .shop-test-sub-status--active {
+  color: color-mix(in srgb, var(--ok, #16a34a) 92%, var(--text));
+  background: color-mix(in srgb, var(--ok, #16a34a) 16%, transparent);
+}
+
+.shop-feed .shop-test-sub-status--expired {
+  color: color-mix(in srgb, var(--warn, #d97706) 92%, var(--text));
+  background: color-mix(in srgb, var(--warn, #d97706) 14%, transparent);
+}
+
+.shop-feed .shop-test-sub-status--disabled {
+  color: var(--muted);
+  background: color-mix(in srgb, var(--muted) 14%, transparent);
+}
+
+.shop-feed .shop-test-sub-row--expired,
+.shop-feed .shop-test-sub-row--disabled {
+  opacity: 0.82;
+}
+
 .shop-feed .shop-test-sub-delete {
   flex-shrink: 0;
   padding: 0.25rem 0.45rem;
@@ -5549,41 +5589,37 @@ html.admin-mobile-app .modal.user-modal-panel .modal-footer,
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 1.75rem;
+  gap: 0.25rem;
+  min-width: 1.75rem;
   height: 1.75rem;
-  padding: 0;
-  border: none;
+  padding: 0 0.4rem;
+  border: 1px solid color-mix(in srgb, var(--border) 90%, transparent);
   border-radius: 6px;
-  background: transparent;
+  background: color-mix(in srgb, var(--panel) 88%, transparent);
   color: var(--muted);
   cursor: pointer;
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 0.15s ease, color 0.15s ease, background 0.15s ease;
-}
-
-.users-dash-refresh-col:hover .ud-show-hidden-btn,
-.ud-show-hidden-btn:focus-visible,
-.ud-show-hidden-btn.active {
   opacity: 1;
   pointer-events: auto;
+  transition: color 0.15s ease, background 0.15s ease, border-color 0.15s ease;
+}
+
+.ud-show-hidden-btn__count {
+  font-size: 0.72rem;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
 }
 
 .ud-show-hidden-btn:hover:not(:disabled),
 .ud-show-hidden-btn.active {
   color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
   background: color-mix(in srgb, var(--accent) 12%, transparent);
 }
 
 .ud-show-hidden-btn:focus-visible {
   outline: 2px solid color-mix(in srgb, var(--accent) 45%, transparent);
   outline-offset: 2px;
-}
-
-.ud-show-hidden-btn--placeholder {
-  opacity: 0 !important;
-  pointer-events: none !important;
-  visibility: hidden;
 }
 
 .users-tabs-row {
@@ -6499,6 +6535,15 @@ html[data-theme="light"] .ud-expiry-ok {
   position: absolute;
   top: 0;
   right: 0;
+  opacity: 1;
+  pointer-events: auto;
+}
+
+@media (hover: none) {
+  .ud-hide-user-btn {
+    opacity: 0.7;
+    pointer-events: auto;
+  }
 }
 
 .ud-row--hidden-preview,

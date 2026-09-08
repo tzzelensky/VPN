@@ -1397,10 +1397,9 @@ export default function UsersPage({ onLogout }: { onLogout: () => void }) {
                   onClick={() => setShowHiddenUsers((v) => !v)}
                 >
                   <IconEye />
+                  <span className="ud-show-hidden-btn__count">{hiddenUserIds.length}</span>
                 </button>
-              ) : (
-                <span className="ud-show-hidden-btn ud-show-hidden-btn--placeholder" aria-hidden="true" />
-              )}
+              ) : null}
               <button
                 type="button"
                 className="ghost ud-sync-all"
