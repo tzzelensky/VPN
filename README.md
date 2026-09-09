@@ -29,7 +29,7 @@ ssh root@ВАШ_IP
 bash <(curl -fsSL https://raw.githubusercontent.com/tzzelensky/VPN/main/scripts/install.sh)
 ```
 
-С доменом сразу (удобнее, сразу HTTPS):
+С доменом сразу (удобнее, сразу HTTPS ):
 
 ```bash
 bash <(curl -fsSL https://raw.githubusercontent.com/tzzelensky/VPN/main/scripts/install.sh) -- vpn.example.com
