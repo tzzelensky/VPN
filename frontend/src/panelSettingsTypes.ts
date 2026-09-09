@@ -26,6 +26,17 @@ export type PanelSubscriptionBanner = {
   telegramLinkText: string;
 };
 
+export type PanelWhitelistOffer = {
+  enabled: boolean;
+  text: string;
+};
+
+export const DEFAULT_WHITELIST_OFFER_TEXT = "Подключи обход глушилок всего за {price} рублей!";
+export const DEFAULT_WHITELIST_OFFER: PanelWhitelistOffer = {
+  enabled: false,
+  text: DEFAULT_WHITELIST_OFFER_TEXT,
+};
+
 export type PanelDecoyShopItem = {
   name: string;
   description: string;
@@ -89,6 +100,7 @@ export type PanelSettings = {
     /** Ключевое слово «отзыва» на витрине → /login (только мобильная кнопка). */
     shopReviewKeyword: string;
     subscriptionBanner: PanelSubscriptionBanner;
+    whitelistOffer: PanelWhitelistOffer;
     decoyShop: PanelDecoyShop;
   };
   ui: {

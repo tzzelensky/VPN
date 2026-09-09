@@ -7,6 +7,7 @@ import { parseVpnEntryKey } from "./vpnDisplayOrder.js";
 import { buildHysteria2UriForUser } from "./hysteria2Link.js";
 import { buildTrojanUriForUser } from "./trojanLink.js";
 import { buildVlessUriFromSubscriptionSettings } from "./vlessLink.js";
+import { whitelistOfferNoticeUriForUser } from "./whitelistOfferSubscription.js";
 
 export function isHappUserAgent(ua: string | undefined | null): boolean {
   return /happ/i.test(String(ua ?? ""));
@@ -244,6 +245,9 @@ export function buildHappJsonSubscriptionBody(
     if (key) used.add(key);
     profiles.push(profile);
   };
+
+  const offerUri = whitelistOfferNoticeUriForUser(user);
+  if (offerUri) pushProfile(shareLinkToHappProfile(offerUri), offerUri);
 
   const entryOrder = resolveVpnDisplayEntryOrderForUser(user);
   if (entryOrder.length > 0) {

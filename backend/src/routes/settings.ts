@@ -13,6 +13,7 @@ import {
 import {
   defaultPanelSettings,
   normalizeDecoyShop,
+  normalizeWhitelistOffer,
   normalizeSectionOrder,
   normalizeVpnServerOrder,
   PANEL_SECTION_META,
@@ -234,6 +235,12 @@ router.patch("/", (req, res) => {
     };
   } else if (!next.panel.subscriptionBanner) {
     next.panel.subscriptionBanner = { ...prevBanner };
+  }
+  const offerIn = body.settings?.panel?.whitelistOffer;
+  if (offerIn !== undefined) {
+    next.panel.whitelistOffer = normalizeWhitelistOffer(offerIn);
+  } else {
+    next.panel.whitelistOffer = normalizeWhitelistOffer(next.panel.whitelistOffer ?? prev.panel.whitelistOffer);
   }
   next.panel.decoyShop = normalizeDecoyShop(
     body.settings?.panel?.decoyShop ?? next.panel.decoyShop ?? prev.panel.decoyShop,

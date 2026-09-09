@@ -29,6 +29,30 @@ export type PanelSubscriptionBanner = {
   telegramLinkText: string;
 };
 
+/** Рекламный фейковый сервер в подписке (предложение купить белые списки). */
+export type PanelWhitelistOffer = {
+  enabled: boolean;
+  /** Шаблон имени узла. `{price}` / `{n}` — текущая цена БС. */
+  text: string;
+};
+
+export const DEFAULT_WHITELIST_OFFER_TEXT = "Подключи обход глушилок всего за {price} рублей!";
+export const DEFAULT_WHITELIST_OFFER: PanelWhitelistOffer = {
+  enabled: false,
+  text: DEFAULT_WHITELIST_OFFER_TEXT,
+};
+
+export function normalizeWhitelistOffer(raw: unknown): PanelWhitelistOffer {
+  const base = DEFAULT_WHITELIST_OFFER;
+  if (!raw || typeof raw !== "object") return { ...base };
+  const o = raw as Record<string, unknown>;
+  const text = String(o.text ?? "").trim().slice(0, 200);
+  return {
+    enabled: o.enabled === true,
+    text: text || base.text,
+  };
+}
+
 /** Публичная HTML-витрина (ДомКомфорт и аналоги) для браузеров на /goods|/sub. */
 export type PanelDecoyShopItem = {
   name: string;
@@ -58,6 +82,8 @@ export type PanelSettings = {
     /** Ключевое слово «отзыва» на витрине → переход на /login (мобильная кнопка). */
     shopReviewKeyword: string;
     subscriptionBanner: PanelSubscriptionBanner;
+    /** Фейковый сервер-реклама БС в списке подписки. */
+    whitelistOffer: PanelWhitelistOffer;
     decoyShop: PanelDecoyShop;
   };
   ui: {
@@ -281,6 +307,7 @@ export function defaultPanelSettings(): PanelSettings {
         telegramUrl: "",
         telegramLinkText: "тех. поддержку",
       },
+      whitelistOffer: { ...DEFAULT_WHITELIST_OFFER },
       decoyShop: {
         ...DEFAULT_DECOY_SHOP,
         intro: [...DEFAULT_DECOY_SHOP.intro],

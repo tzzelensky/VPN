@@ -14,7 +14,7 @@ import {
 import { usePanelSettings } from "../panelSettingsContext";
 import { normalizeSectionOrder, orderSectionsMeta } from "../panelNavUtils";
 import type { PanelSectionKey, PanelSettings } from "../panelSettingsTypes";
-import { DEFAULT_DECOY_SHOP } from "../panelSettingsTypes";
+import { DEFAULT_DECOY_SHOP, DEFAULT_WHITELIST_OFFER_TEXT } from "../panelSettingsTypes";
 import { normalizePanelAccessPath, panelAccessPathError } from "../panelAccessPath";
 import { invalidatePublicSiteMetaCache } from "../usePublicSiteMeta";
 import { readFileAsDataUrl } from "../avatarCrop";
@@ -110,6 +110,10 @@ export default function PanelSettingsModal({
         telegramLinkText: "тех. поддержку",
       },
       ...cloned.panel.subscriptionBanner,
+    };
+    cloned.panel.whitelistOffer = {
+      enabled: cloned.panel.whitelistOffer?.enabled === true,
+      text: cloned.panel.whitelistOffer?.text?.trim() || DEFAULT_WHITELIST_OFFER_TEXT,
     };
     const prevDecoy = cloned.panel.decoyShop;
     cloned.panel.decoyShop = {

@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import {
   defaultPanelSettings,
   normalizeDecoyShop,
+  normalizeWhitelistOffer,
   normalizeSectionOrder,
   orderPanelSectionMeta,
   PANEL_SECTION_META,
@@ -60,6 +61,7 @@ function mergeSettings(raw: Partial<PanelSettings> | null): PanelSettings {
         ...base.panel.subscriptionBanner,
         ...(rawBanner ?? {}),
       },
+      whitelistOffer: normalizeWhitelistOffer((raw.panel as { whitelistOffer?: unknown } | undefined)?.whitelistOffer),
       decoyShop: normalizeDecoyShop((raw.panel as { decoyShop?: unknown } | undefined)?.decoyShop ?? base.panel.decoyShop),
     },
     ui: { ...base.ui, ...(raw.ui ?? {}) },

@@ -8,7 +8,7 @@
     "build": "node scripts/generate-openapi-spec.mjs && tsc && node scripts/copy-openapi-spec.mjs",
     "start": "node dist/index.js",
     "test": "vitest run && npm run test:unit",
-    "test:unit": "tsx src/subscriptionClientDetect.test.ts && tsx src/subscriptionMask.test.ts",
+    "test:unit": "tsx src/subscriptionClientDetect.test.ts && tsx src/subscriptionMask.test.ts && tsx src/whitelistOfferSubscription.test.ts",
     "test:api": "vitest run test/api",
     "test:api:contract": "vitest run test/api/openapi.contract.test.ts",
     "test:watch": "vitest"

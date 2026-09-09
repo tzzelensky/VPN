@@ -23,6 +23,7 @@ import { HAPP_WHITELIST_SUBSCRIPTION_LINE } from "./happWhitelistLine.js";
 import { buildVlessUriFromSubscriptionSettings } from "./vlessLink.js";
 import { resolveVpnDisplayEntryOrderForUser } from "./vpnDisplayCatalog.js";
 import { parseVpnEntryKey } from "./vpnDisplayOrder.js";
+import { whitelistOfferNoticeUriForUser } from "./whitelistOfferSubscription.js";
 
 function vlessUriForRow(user: UserRow, r: ServerRow): string {
   const settings = getServerSubscriptionSettings(r);
@@ -60,6 +61,8 @@ function appendUniqueSubscriptionUris(out: string[], seen: Set<string>, uris: st
 export function subscriptionVlessLinksForUser(user: UserRow): string[] {
   const seen = new Set<string>();
   const out: string[] = [];
+  const offerUri = whitelistOfferNoticeUriForUser(user);
+  if (offerUri) appendUniqueSubscriptionUris(out, seen, [offerUri]);
   const servers = new Map(listDeployedServers().map((s) => [s.id, s]));
   const vaultById = new Map(configVaultLinksForUser(user).map((x) => [x.vault_key_id, x]));
   const wlById = new Map(subscriptionWhitelistEntriesForUser(user).map((x) => [x.key_id, x]));

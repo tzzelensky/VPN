@@ -275,7 +275,7 @@ export function buildSubscriptionPayload(links: string[], opts?: { happDirective
   return Buffer.from(body, "utf8").toString("base64");
 }
 
-function buildNoticeVlessUri(label: string): string {
+export function buildNoticeVlessUri(label: string): string {
   const enc = encodeURIComponent(label.trim() || "Уведомление");
   // Специальная «заглушка» для клиентов подписки: показывается как сервер в списке,
   // но подключение к ней не рабочее и лишь доносит текст уведомления пользователю.

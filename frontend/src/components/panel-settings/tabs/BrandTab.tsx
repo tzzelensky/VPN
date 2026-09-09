@@ -1,5 +1,9 @@
 import { useState, type RefObject } from "react";
-import type { PanelSettings } from "../../../panelSettingsTypes";
+import {
+  DEFAULT_WHITELIST_OFFER,
+  DEFAULT_WHITELIST_OFFER_TEXT,
+  type PanelSettings,
+} from "../../../panelSettingsTypes";
 import { PANEL_HINTS } from "../../../panelSettingsHints";
 import { FieldLabel } from "../../SettingHint";
 import SettingsToggleRow from "../../SettingsToggleRow";
@@ -349,6 +353,52 @@ export default function BrandTab({
                     }
                   />
                 </div>
+              </div>
+            </div>
+          ) : null}
+        </div>
+        <div className="panel-subscription-text-block">
+          <div className="settings-toggle-list">
+            <SettingsToggleRow
+              label="Предложение белых списков"
+              hint={PANEL_HINTS.whitelistOffer}
+              on={draft.panel.whitelistOffer?.enabled ?? false}
+              onToggle={() =>
+                patchDraft((d) => ({
+                  ...d,
+                  panel: {
+                    ...d.panel,
+                    whitelistOffer: {
+                      ...(d.panel.whitelistOffer ?? DEFAULT_WHITELIST_OFFER),
+                      enabled: !(d.panel.whitelistOffer?.enabled ?? false),
+                    },
+                  },
+                }))
+              }
+            />
+          </div>
+          {draft.panel.whitelistOffer?.enabled ? (
+            <div className="panel-subscription-text-fields">
+              <div className="form-field">
+                <FieldLabel label="Текст предложения" hint={PANEL_HINTS.whitelistOfferText} />
+                <textarea
+                  className="comms-textarea"
+                  rows={2}
+                  placeholder={DEFAULT_WHITELIST_OFFER_TEXT}
+                  value={draft.panel.whitelistOffer.text ?? DEFAULT_WHITELIST_OFFER_TEXT}
+                  onChange={(e) =>
+                    patchDraft((d) => ({
+                      ...d,
+                      panel: {
+                        ...d.panel,
+                        whitelistOffer: {
+                          ...(d.panel.whitelistOffer ?? DEFAULT_WHITELIST_OFFER),
+                          text: e.target.value,
+                        },
+                      },
+                    }))
+                  }
+                />
               </div>
             </div>
           ) : null}
