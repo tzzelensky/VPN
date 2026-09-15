@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useSearchParams } from "react-router-dom";
 import DashboardLayout from "../components/DashboardLayout";
+import PageSectionHero from "../components/PageSectionHero";
 import {
   clearAiLogs,
   clearServerXrayLogs,
@@ -17,13 +19,30 @@ import { usePanelTabParam } from "../lib/panelTabRoute";
 
 const LOG_LEVELS: XrayLogLevel[] = ["none", "error", "warning", "info", "debug"];
 const TAIL_LINES = 300;
-const AUTO_REFRESH_MS = 4000;
+const AUTO_REFRESH_MS = 6000;
 const LS_SERVER = "xray_logs_server_id";
 const LS_AUTO = "xray_logs_auto_refresh";
 const LS_SOURCE = "panel_logs_source";
 
 const LOG_TABS = ["error", "access"] as const;
 type LogSource = "ai" | "xray";
+type LogStreamKind = (typeof LOG_TABS)[number];
+
+const LOG_HINT_BY_KIND: Record<string, string> = {
+  error: "Ошибка Xray ([Error]) — запрос или обработчик завершился сбоем.",
+  warning: "Предупреждение ([Warning]) — не фатально, но стоит проверить.",
+  failed: "Операция failed — обычно сбой соединения, маршрута или рукопожатия.",
+  rejected: "Соединение rejected — клиент или outbound отклонил сессию.",
+  timeout: "Таймаут (timeout / i/o timeout) — удалённая сторона не ответила вовремя.",
+  handshake: "Проблема handshake — сбой TLS/REALITY на этапе рукопожатия.",
+  tls: "Событие TLS — шифрование, сертификат или обрыв TLS-сессии.",
+  reality: "Событие REALITY — маскировка/проверка Reality не прошла или логируется.",
+  dns: "DNS: не удалось разрешить имя (no such host / NXDOMAIN).",
+  refused: "Connection refused — порт закрыт или сервис на цели не слушает.",
+  eof: "EOF — удалённая сторона закрыла соединение.",
+  accepted: "Accepted — входящее соединение принято (нормальный access).",
+  proxy: "Строка proxy/… — трафик ушёл в outbound (нормальный access).",
+};
 
 function readLogSource(): LogSource {
   const v = localStorage.getItem(LS_SOURCE);
@@ -35,6 +54,14 @@ const MASK_RE =
 
 function isMaskedPart(part: string): boolean {
   return /(\*{8,}|\[masked\]|(?:\*{4}-){3}\*{4}|\*{8}-\*{4}-\*{4}-\*{4}-\*{12})/.test(part);
+}
+
+function hintForKinds(kinds: string[]): string | undefined {
+  for (const k of kinds) {
+    const h = LOG_HINT_BY_KIND[k];
+    if (h) return h;
+  }
+  return undefined;
 }
 
 function IconServer() {
@@ -99,18 +126,6 @@ function IconSearch() {
     <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
       <circle cx="11" cy="11" r="7" />
       <path d="M20 20l-3-3" strokeLinecap="round" />
-    </svg>
-  );
-}
-
-function IconFullscreen({ exit }: { exit?: boolean }) {
-  return exit ? (
-    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
-      <path d="M9 3H3v6M15 3h6v6M9 21H3v-6M15 21h6v-6" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  ) : (
-    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
-      <path d="M8 3H3v5M16 3h5v5M8 21H3v-5M16 21h5v-5" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
 }
@@ -194,6 +209,67 @@ function highlightSearch(text: string, query: string): ReactNode {
   return nodes;
 }
 
+function LogSearchControl({
+  value,
+  onChange,
+  inputRef,
+  placeholder,
+  open,
+  onOpenChange,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  inputRef: React.RefObject<HTMLInputElement>;
+  placeholder: string;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
+  useEffect(() => {
+    if (open) {
+      const t = window.setTimeout(() => inputRef.current?.focus(), 180);
+      return () => window.clearTimeout(t);
+    }
+  }, [open, inputRef]);
+
+  return (
+    <div className={`xray-log-search-wrap${open ? " is-open" : ""}`}>
+      <button
+        type="button"
+        className="ghost xray-log-search-toggle"
+        aria-label="Поиск по логам"
+        aria-expanded={open}
+        title="Поиск (Ctrl+F)"
+        onClick={() => onOpenChange(!open)}
+      >
+        <IconSearch />
+      </button>
+      <div className="xray-log-search-panel" aria-hidden={!open}>
+        <input
+          ref={inputRef}
+          type="search"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder={placeholder}
+          aria-label={placeholder}
+          tabIndex={open ? 0 : -1}
+          onBlur={() => {
+            if (!value.trim()) onOpenChange(false);
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") {
+              if (value) onChange("");
+              else {
+                onOpenChange(false);
+                (e.target as HTMLInputElement).blur();
+              }
+            }
+          }}
+        />
+      </div>
+    </div>
+  );
+}
+
 function LogTerminal({
   stream,
   search,
@@ -229,14 +305,11 @@ function LogTerminal({
             const kinds = stream.highlights[i] ?? [];
             const hl = kinds.map((k) => `xray-log-hl-${k}`).join(" ");
             const lvl = lineLevelClass(line);
+            const tip = hintForKinds(kinds);
             const cls = ["xray-log-line", hl, lvl].filter(Boolean).join(" ");
             return (
-              <div key={i} className={cls}>
-                {q ? (
-                  highlightSearch(line, search)
-                ) : (
-                  <LogLineContent line={line} />
-                )}
+              <div key={i} className={cls} title={tip}>
+                {q ? highlightSearch(line, search) : <LogLineContent line={line} />}
               </div>
             );
           })
@@ -270,10 +343,33 @@ function LogTerminal({
   );
 }
 
+function mergeStreamSnapshot(
+  prev: XrayLogsSnapshotDto | null,
+  next: XrayLogsSnapshotDto,
+  stream: LogStreamKind | "both",
+): XrayLogsSnapshotDto {
+  if (!prev || stream === "both") return next;
+  return {
+    ...next,
+    access: stream === "access" ? next.access : prev.access,
+    error: stream === "error" ? next.error : prev.error,
+  };
+}
+
 export default function LogsPage({ onLogout }: { onLogout: () => void }) {
-  const [source, setSource] = useState<LogSource>(() => readLogSource());
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [source, setSource] = useState<LogSource>(() => {
+    const q = new URLSearchParams(window.location.search).get("source");
+    if (q === "xray" || q === "ai") return q;
+    return readLogSource();
+  });
   const [servers, setServers] = useState<ServerDto[]>([]);
-  const [serverId, setServerId] = useState<number | "">("");
+  const [serverId, setServerId] = useState<number | "">(() => {
+    const q = Number(new URLSearchParams(window.location.search).get("server"));
+    if (Number.isFinite(q) && q > 0) return q;
+    const saved = Number(localStorage.getItem(LS_SERVER));
+    return Number.isFinite(saved) && saved > 0 ? saved : "";
+  });
   const [snapshot, setSnapshot] = useState<XrayLogsSnapshotDto | null>(null);
   const [aiEntries, setAiEntries] = useState<AiLogEntryDto[]>([]);
   const [loading, setLoading] = useState(false);
@@ -282,8 +378,39 @@ export default function LogsPage({ onLogout }: { onLogout: () => void }) {
   const [msg, setMsg] = useState<{ type: "ok" | "err"; text: string } | null>(null);
   const { tab: activeTab, setTab: setActiveTab } = usePanelTabParam("/logs", LOG_TABS);
   const [search, setSearch] = useState("");
-  const [fullscreen, setFullscreen] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
+  const abortRef = useRef<AbortController | null>(null);
+  const prefetchAbortRef = useRef<AbortController | null>(null);
+  const serverIdRef = useRef(serverId);
+  serverIdRef.current = serverId;
+  const activeTabRef = useRef(activeTab);
+  activeTabRef.current = activeTab;
+
+  useEffect(() => {
+    const src = searchParams.get("source");
+    const sidRaw = searchParams.get("server");
+    let changed = false;
+    if (src === "xray" || src === "ai") {
+      setSource(src);
+      localStorage.setItem(LS_SOURCE, src);
+      changed = true;
+    }
+    if (sidRaw) {
+      const sid = Number(sidRaw);
+      if (Number.isFinite(sid) && sid > 0) {
+        setServerId(sid);
+        localStorage.setItem(LS_SERVER, String(sid));
+        changed = true;
+      }
+    }
+    if (changed && (src || sidRaw)) {
+      const next = new URLSearchParams(searchParams);
+      next.delete("source");
+      next.delete("server");
+      setSearchParams(next, { replace: true });
+    }
+  }, [searchParams, setSearchParams]);
 
   const loadServers = useCallback(async () => {
     const list = await listServers();
@@ -309,19 +436,49 @@ export default function LogsPage({ onLogout }: { onLogout: () => void }) {
     }
   }, []);
 
-  const loadLogs = useCallback(async (silent = false) => {
-    if (!serverId || typeof serverId !== "number") return;
-    if (!silent) setLoading(true);
-    setMsg(null);
-    try {
-      const data = await fetchServerXrayLogs(serverId, TAIL_LINES);
-      setSnapshot(data);
-    } catch (e) {
-      setMsg({ type: "err", text: String(e) });
-    } finally {
-      if (!silent) setLoading(false);
-    }
-  }, [serverId]);
+  const loadLogs = useCallback(
+    async (opts?: { silent?: boolean; stream?: LogStreamKind | "both"; prefetchOther?: boolean }) => {
+      const sid = serverIdRef.current;
+      if (!sid || typeof sid !== "number") return;
+      const silent = opts?.silent ?? false;
+      const stream = opts?.stream ?? activeTabRef.current;
+      const prefetchOther = opts?.prefetchOther ?? stream !== "both";
+
+      abortRef.current?.abort();
+      const ac = new AbortController();
+      abortRef.current = ac;
+
+      if (!silent) setLoading(true);
+      if (!silent) setMsg(null);
+
+      try {
+        const data = await fetchServerXrayLogs(sid, TAIL_LINES, { stream, signal: ac.signal });
+        if (ac.signal.aborted || serverIdRef.current !== sid) return;
+        setSnapshot((prev) => mergeStreamSnapshot(prev, data, stream));
+
+        if (prefetchOther && stream !== "both") {
+          const other: LogStreamKind = stream === "error" ? "access" : "error";
+          prefetchAbortRef.current?.abort();
+          const pac = new AbortController();
+          prefetchAbortRef.current = pac;
+          void fetchServerXrayLogs(sid, TAIL_LINES, { stream: other, signal: pac.signal })
+            .then((otherData) => {
+              if (pac.signal.aborted || serverIdRef.current !== sid) return;
+              setSnapshot((prev) => mergeStreamSnapshot(prev, otherData, other));
+            })
+            .catch(() => {});
+        }
+      } catch (e) {
+        if (ac.signal.aborted) return;
+        const name = e instanceof Error ? e.name : "";
+        if (name === "AbortError") return;
+        setMsg({ type: "err", text: String(e) });
+      } finally {
+        if (!silent && !ac.signal.aborted) setLoading(false);
+      }
+    },
+    [],
+  );
 
   useEffect(() => {
     localStorage.setItem(LS_SOURCE, source);
@@ -339,40 +496,55 @@ export default function LogsPage({ onLogout }: { onLogout: () => void }) {
     if (source !== "xray") return;
     if (typeof serverId === "number") {
       localStorage.setItem(LS_SERVER, String(serverId));
-      loadLogs().catch(() => {});
+      setSnapshot(null);
+      void loadLogs({ stream: activeTabRef.current, prefetchOther: true });
     }
+    return () => {
+      abortRef.current?.abort();
+      prefetchAbortRef.current?.abort();
+    };
   }, [source, serverId, loadLogs]);
+
+  useEffect(() => {
+    if (source !== "xray" || typeof serverId !== "number" || !snapshot) return;
+    const stream = activeTab === "error" ? snapshot.error : snapshot.access;
+    const notFetched = stream.message === "Не запрошен.";
+    if (notFetched) {
+      void loadLogs({ silent: true, stream: activeTab, prefetchOther: false });
+    }
+  }, [activeTab, source, serverId, snapshot, loadLogs]);
 
   useEffect(() => {
     localStorage.setItem(LS_AUTO, autoRefresh ? "1" : "0");
     if (!autoRefresh) return;
-    if (source === "ai") {
-      const t = window.setInterval(() => {
-        loadAiLogs(true).catch(() => {});
-      }, AUTO_REFRESH_MS);
-      return () => window.clearInterval(t);
-    }
-    if (typeof serverId !== "number") return;
-    const t = window.setInterval(() => {
-      loadLogs(true).catch(() => {});
-    }, AUTO_REFRESH_MS);
-    return () => window.clearInterval(t);
-  }, [autoRefresh, source, serverId, loadLogs, loadAiLogs]);
 
-  useEffect(() => {
-    if (!fullscreen) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setFullscreen(false);
+    const tick = () => {
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
+      if (source === "ai") {
+        loadAiLogs(true).catch(() => {});
+        return;
+      }
+      if (typeof serverIdRef.current !== "number") return;
+      void loadLogs({ silent: true, stream: activeTabRef.current, prefetchOther: false });
     };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [fullscreen]);
+
+    const t = window.setInterval(tick, AUTO_REFRESH_MS);
+    const onVis = () => {
+      if (document.visibilityState === "visible") tick();
+    };
+    document.addEventListener("visibilitychange", onVis);
+    return () => {
+      window.clearInterval(t);
+      document.removeEventListener("visibilitychange", onVis);
+    };
+  }, [autoRefresh, source, loadLogs, loadAiLogs]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "f") {
         e.preventDefault();
-        searchRef.current?.focus();
+        setSearchOpen(true);
+        window.setTimeout(() => searchRef.current?.focus(), 180);
       }
     };
     window.addEventListener("keydown", onKey);
@@ -474,22 +646,39 @@ export default function LogsPage({ onLogout }: { onLogout: () => void }) {
 
   const logLevel = snapshot?.log.loglevel ?? "warning";
   const loggingOff = logLevel === "none";
-  const activeStream = snapshot ? (activeTab === "error" ? snapshot.error : snapshot.access) : null;
-  const tailHint = `Показаны последние ${TAIL_LINES} строк · секреты маскируются · error/failed/TLS/REALITY/DNS подсвечиваются`;
+  const activeStream = snapshot
+    ? activeTab === "error"
+      ? snapshot.error
+      : snapshot.access
+    : null;
+  const tailHint =
+    "Показаны последние строки · секреты маскируются · наведите на подсвеченную строку — подсказка";
 
   return (
     <DashboardLayout onLogout={onLogout}>
-      <div className={`xray-logs-page${fullscreen ? " xray-logs-page--fullscreen-active" : ""}`}>
-        <header className="xray-logs-head">
-          <h1 className="xray-logs-title">{source === "ai" ? "Логи AI" : "Логи Xray"}</h1>
-          <p className="xray-logs-sub">
-            {source === "ai"
-              ? "Журнал диалогов с Gemini в Telegram-боте: запросы, ответы и ошибки."
-              : "Просмотр access/error логов на VPN-сервере, смена loglevel и перезапуск Xray."}
-          </p>
-        </header>
-
-        {msg ? <div className={`banner banner--${msg.type}`}>{msg.text}</div> : null}
+      <div className="xray-logs-page">
+        <PageSectionHero
+          title="Логи"
+          helpCards={[
+            {
+              kicker: "AI",
+              title: "Логи помощника",
+              text: "Журнал диалогов с Gemini в Telegram-боте: запросы, ответы и ошибки.",
+            },
+            {
+              kicker: "Xray",
+              title: "Access / Error",
+              text: "Просмотр access и error логов на VPN-сервере, смена loglevel.",
+            },
+            {
+              kicker: "Сервер",
+              title: "Выбор источника",
+              text: "Переключение между AI и Xray, выбор сервера и автообновление.",
+            },
+          ]}
+        >
+          {msg ? <div className={`banner banner--${msg.type}`}>{msg.text}</div> : null}
+        </PageSectionHero>
 
         <div className="xray-logs-toolbar card">
           <div className="xray-logs-toolbar-main">
@@ -525,7 +714,8 @@ export default function LogsPage({ onLogout }: { onLogout: () => void }) {
                     <option value="">— выберите сервер —</option>
                     {servers.map((s) => (
                       <option key={s.id} value={s.id}>
-                        {s.name || s.host} ({s.host}){s.vless_deployed ? "" : " · не развёрнут"}
+                        {s.name || s.host} ({s.host})
+                        {s.vless_deployed ? "" : " · не развёрнут"}
                       </option>
                     ))}
                   </select>
@@ -565,7 +755,11 @@ export default function LogsPage({ onLogout }: { onLogout: () => void }) {
               <button
                 type="button"
                 className="btn xray-btn-primary"
-                onClick={() => void (source === "ai" ? loadAiLogs() : loadLogs())}
+                onClick={() =>
+                  void (source === "ai"
+                    ? loadAiLogs()
+                    : loadLogs({ stream: activeTab, prefetchOther: true }))
+                }
                 disabled={loading || (source === "xray" && !serverId)}
               >
                 <IconRefresh spin={loading} />
@@ -605,27 +799,16 @@ export default function LogsPage({ onLogout }: { onLogout: () => void }) {
         </div>
 
         {source === "ai" ? (
-          <div className={`ai-logs-panel card${fullscreen ? " ai-logs-panel--fullscreen" : ""}`}>
+          <div className="ai-logs-panel card">
             <div className="ai-logs-toolbar">
-              <label className="xray-log-search">
-                <IconSearch />
-                <input
-                  ref={searchRef}
-                  type="search"
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  placeholder="Поиск по AI-логам… (Ctrl+F)"
-                  aria-label="Поиск по AI-логам"
-                />
-              </label>
-              <button
-                type="button"
-                className="ghost xray-terminal-fs-btn"
-                onClick={() => setFullscreen((v) => !v)}
-                title={fullscreen ? "Выйти из полноэкранного режима (Esc)" : "На весь экран"}
-              >
-                <IconFullscreen exit={fullscreen} />
-              </button>
+              <LogSearchControl
+                value={search}
+                onChange={setSearch}
+                inputRef={searchRef}
+                placeholder="Поиск по AI-логам…"
+                open={searchOpen}
+                onOpenChange={setSearchOpen}
+              />
             </div>
             {filteredAi.length === 0 ? (
               <div className="ai-logs-empty">
@@ -701,7 +884,7 @@ export default function LogsPage({ onLogout }: { onLogout: () => void }) {
             ) : null}
 
             {snapshot && activeStream ? (
-              <div className={`xray-terminal card${fullscreen ? " xray-terminal--fullscreen" : ""}`}>
+              <div className="xray-terminal card">
                 <div className="xray-terminal-toolbar">
                   <div className="xray-log-tabs" role="tablist">
                     <button
@@ -726,30 +909,20 @@ export default function LogsPage({ onLogout }: { onLogout: () => void }) {
                     </button>
                   </div>
                   <div className="xray-terminal-tools">
-                    <label className="xray-log-search">
-                      <IconSearch />
-                      <input
-                        ref={searchRef}
-                        type="search"
-                        value={search}
-                        onChange={(e) => setSearch(e.target.value)}
-                        placeholder="Поиск по логам… (Ctrl+F)"
-                        aria-label="Поиск по логам"
-                      />
-                    </label>
-                    <button
-                      type="button"
-                      className="ghost xray-terminal-fs-btn"
-                      onClick={() => setFullscreen((v) => !v)}
-                      title={fullscreen ? "Выйти из полноэкранного режима (Esc)" : "На весь экран"}
-                      aria-label={fullscreen ? "Свернуть" : "Развернуть на весь экран"}
-                    >
-                      <IconFullscreen exit={fullscreen} />
-                    </button>
+                    <LogSearchControl
+                      value={search}
+                      onChange={setSearch}
+                      inputRef={searchRef}
+                      placeholder="Поиск по логам…"
+                      open={searchOpen}
+                      onOpenChange={setSearchOpen}
+                    />
                   </div>
                 </div>
                 <LogTerminal stream={activeStream} search={search} tailHint={tailHint} />
               </div>
+            ) : loading && serverId ? (
+              <div className="card xray-logs-placeholder">Загрузка логов…</div>
             ) : !loading && serverId ? (
               <div className="card xray-logs-placeholder">Нажмите «Обновить», чтобы загрузить логи.</div>
             ) : null}

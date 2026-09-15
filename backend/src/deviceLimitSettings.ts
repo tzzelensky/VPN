@@ -7,7 +7,6 @@ export type DeviceLimitSettings = {
   /** all = все подписки; selected = только отмеченные на вкладке «Подписки». */
   limit_scope: DeviceLimitScope;
   default_slots: number;
-  auto_bind: boolean;
   on_limit_exceeded: DeviceLimitExceededMode;
   purchase_enabled: boolean;
   purchase_price_rub: number;
@@ -21,7 +20,6 @@ export function defaultDeviceLimitSettings(): DeviceLimitSettings {
     enabled: false,
     limit_scope: "selected",
     default_slots: 2,
-    auto_bind: true,
     on_limit_exceeded: "stub",
     purchase_enabled: true,
     purchase_price_rub: 99,
@@ -53,7 +51,6 @@ export function normalizeDeviceLimitSettings(raw: unknown): DeviceLimitSettings 
     enabled: prevEnabled,
     limit_scope,
     default_slots: Math.max(1, Math.min(20, Math.floor(Number(o.default_slots) || d.default_slots))),
-    auto_bind: o.auto_bind === false || o.auto_bind === 0 ? false : true,
     on_limit_exceeded:
       exceeded === "empty" || exceeded === "instruction" ? exceeded : "stub",
     purchase_enabled: o.purchase_enabled === false || o.purchase_enabled === 0 ? false : true,

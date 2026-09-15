@@ -33,11 +33,8 @@ export type SshConfig = {
 };
 
 export type SshLog = (message: string) => void;
-/** maxIPs и bufferSize через policy.levels[level]; у клиента выставляется `level`. */
-export type ManagedClientInput = { id: string; deviceLimit?: number; speedLimitMbps?: number };
-
-const SPEED_POLICY_BASE = 10000;
-const COMBINED_POLICY_BASE = 50000;
+/** maxIPs через policy.levels[level]; у клиента выставляется `level`. */
+export type ManagedClientInput = { id: string; deviceLimit?: number };
 
 /** Уровень политики = base + N, где N — max одновременных исходящих IP для UUID. */
 export function deviceLimitPolicyLevel(maxIps: number): number {
@@ -45,31 +42,10 @@ export function deviceLimitPolicyLevel(maxIps: number): number {
   return 200 + n;
 }
 
-function speedLimitPolicyLevel(mbps: number): number {
-  const m = Math.max(1, Math.min(9999, Math.floor(mbps)));
-  return SPEED_POLICY_BASE + m;
-}
-
-function combinedLimitPolicyLevel(maxIps: number, mbps: number): number {
-  const n = Math.max(1, Math.min(99, Math.floor(maxIps)));
-  const m = Math.max(1, Math.min(9999, Math.floor(mbps)));
-  return COMBINED_POLICY_BASE + n * 10000 + m;
-}
-
-export function clientPolicyLevel(entry: Pick<ManagedClientInput, "deviceLimit" | "speedLimitMbps">): number {
+export function clientPolicyLevel(entry: Pick<ManagedClientInput, "deviceLimit">): number {
   const dev = Number(entry.deviceLimit);
-  const spd = Number(entry.speedLimitMbps);
-  const hasDev = Number.isFinite(dev) && dev > 0;
-  const hasSpd = Number.isFinite(spd) && spd > 0;
-  if (!hasDev && !hasSpd) return 0;
-  if (hasDev && !hasSpd) return deviceLimitPolicyLevel(Math.floor(dev));
-  if (!hasDev && hasSpd) return speedLimitPolicyLevel(Math.floor(spd));
-  return combinedLimitPolicyLevel(Math.floor(dev), Math.floor(spd));
-}
-
-function bufferSizeKbFromMbps(mbps: number): number {
-  const m = Math.max(1, Math.min(9999, Math.floor(mbps)));
-  return Math.max(4, Math.min(256, Math.ceil(m * 8)));
+  if (Number.isFinite(dev) && dev > 0) return deviceLimitPolicyLevel(Math.floor(dev));
+  return 0;
 }
 
 export const TZADMIN_XRAY_CONFIG_PATH = "/etc/tzadmin-xray/config.json";
@@ -493,41 +469,35 @@ export function ensureXrayStatsPolicyApi(config: Record<string, unknown>): void 
   config.routing = { ...prevRouting, rules };
 }
 
-/** Добавляет в config.policy.levels записи maxIPs и bufferSize. Вызывать до ensureXrayStatsPolicyApi. */
+/** Добавляет в config.policy.levels записи maxIPs. Вызывать до ensureXrayStatsPolicyApi. */
 export function ensureClientPolicyLevels(
   config: Record<string, unknown>,
   clientEntries: ManagedClientInput[],
 ): void {
   const prevPol = (config.policy as Record<string, unknown>) || {};
   const levels = { ...((prevPol.levels as Record<string, Record<string, unknown>>) || {}) };
-  const byLevel = new Map<
-    number,
-    { maxIPs?: number; speedLimitMbps?: number }
-  >();
+  const byLevel = new Map<number, { maxIPs?: number }>();
   for (const e of clientEntries) {
     const dev = Number(e.deviceLimit);
-    const spd = Number(e.speedLimitMbps);
     const hasDev = Number.isFinite(dev) && dev > 0;
-    const hasSpd = Number.isFinite(spd) && spd > 0;
-    if (!hasDev && !hasSpd) continue;
+    if (!hasDev) continue;
     const lv = clientPolicyLevel(e);
     const cur = byLevel.get(lv) ?? {};
-    if (hasDev) cur.maxIPs = Math.floor(dev);
-    if (hasSpd) cur.speedLimitMbps = Math.floor(spd);
+    cur.maxIPs = Math.floor(dev);
     byLevel.set(lv, cur);
+  }
+  for (const k of Object.keys(levels)) {
+    const n = Number(k);
+    if (Number.isFinite(n) && n >= 10000) delete levels[k];
   }
   for (const [lvNum, spec] of byLevel) {
     const k = String(lvNum);
     const lv = { ...(levels[k] || {}) };
     if (spec.maxIPs != null) lv.maxIPs = spec.maxIPs;
     else delete lv.maxIPs;
-    if (spec.speedLimitMbps != null) {
-      lv.bufferSize = bufferSizeKbFromMbps(spec.speedLimitMbps);
-      lv.uplinkOnly = 0;
-      lv.downlinkOnly = 0;
-    } else {
-      delete lv.bufferSize;
-    }
+    delete lv.bufferSize;
+    delete lv.uplinkOnly;
+    delete lv.downlinkOnly;
     levels[k] = lv;
   }
   config.policy = { ...prevPol, levels };
@@ -846,7 +816,6 @@ export async function alterInboundUsersViaApi(
           addById.set(norm.toLowerCase(), {
             id: norm,
             deviceLimit: c.deviceLimit,
-            speedLimitMbps: c.speedLimitMbps,
           });
         }
         const addClients = [...addById.values()];
@@ -1024,9 +993,6 @@ export async function deployOrSyncVless(
       id,
       ...(Number.isFinite(Number(c.deviceLimit)) && Number(c.deviceLimit) > 0
         ? { deviceLimit: Math.floor(Number(c.deviceLimit)) }
-        : {}),
-      ...(Number.isFinite(Number(c.speedLimitMbps)) && Number(c.speedLimitMbps) > 0
-        ? { speedLimitMbps: Math.floor(Number(c.speedLimitMbps)) }
         : {}),
     });
   }
@@ -1475,6 +1441,16 @@ export async function installXrayIfMissing(cfg: SshConfig, log?: SshLog): Promis
     const msg = e instanceof Error ? e.message : String(e);
     return { ok: false, detail: msg };
   }
+}
+
+/** Exec внутри уже открытой SSH-сессии. */
+export function sshExecOn(conn: Client, cmd: string): Promise<{ code: number | null; stdout: string; stderr: string }> {
+  return exec(conn, cmd);
+}
+
+/** SFTP read внутри уже открытой SSH-сессии. */
+export function sshSftpReadOn(conn: Client, remotePath: string): Promise<Buffer> {
+  return sftpReadFile(conn, remotePath);
 }
 
 /** SFTP: прочитать удалённый файл (одна SSH-сессия). */

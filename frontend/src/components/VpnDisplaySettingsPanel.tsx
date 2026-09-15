@@ -303,56 +303,53 @@ export default function VpnDisplaySettingsPanel({
 
   return (
     <div className="vpn-display-panel">
-      <p className="field-hint">{PANEL_HINTS.vpnDisplayIntro}</p>
-
-      <div className="vpn-display-mode" role="tablist" aria-label="Режим порядка">
-        <button
-          type="button"
-          role="tab"
-          className={`vpn-display-mode-btn${mode === "global" ? " active" : ""}`}
-          aria-selected={mode === "global"}
-          onClick={() => setMode("global")}
-        >
-          Общая
-        </button>
-        <button
-          type="button"
-          role="tab"
-          className={`vpn-display-mode-btn${mode === "user" ? " active" : ""}`}
-          aria-selected={mode === "user"}
-          onClick={() => setMode("user")}
-        >
-          Пользователь
-        </button>
+      <div className="vpn-display-mode-row">
+        <div className="vpn-display-mode" role="tablist" aria-label="Режим порядка">
+          <button
+            type="button"
+            role="tab"
+            className={`vpn-display-mode-btn${mode === "global" ? " active" : ""}`}
+            aria-selected={mode === "global"}
+            onClick={() => setMode("global")}
+          >
+            Общая
+          </button>
+          <button
+            type="button"
+            role="tab"
+            className={`vpn-display-mode-btn${mode === "user" ? " active" : ""}`}
+            aria-selected={mode === "user"}
+            onClick={() => setMode("user")}
+          >
+            Пользователь
+          </button>
+        </div>
+        <SettingHint text={PANEL_HINTS.vpnDisplayIntro} />
       </div>
 
       {loading ? <p className="muted">Загрузка…</p> : null}
       {loadErr ? <div className="flash err">{loadErr}</div> : null}
 
       {!loading && !loadErr && mode === "global" ? (
-        <>
-          <SettingHint text={PANEL_HINTS.vpnDisplayGlobal} />
-          <VpnServerOrderList
-            items={globalOrdered}
-            dragKey={dragKey}
-            overKey={overKey}
-            onDragStart={setDragKey}
-            onDragEnd={() => {
-              setDragKey(null);
-              setOverKey(null);
-            }}
-            onDragOver={setOverKey}
-            onDragLeave={(key) => {
-              if (overKey === key) setOverKey(null);
-            }}
-            onDrop={onDropGlobal}
-          />
-        </>
+        <VpnServerOrderList
+          items={globalOrdered}
+          dragKey={dragKey}
+          overKey={overKey}
+          onDragStart={setDragKey}
+          onDragEnd={() => {
+            setDragKey(null);
+            setOverKey(null);
+          }}
+          onDragOver={setOverKey}
+          onDragLeave={(key) => {
+            if (overKey === key) setOverKey(null);
+          }}
+          onDrop={onDropGlobal}
+        />
       ) : null}
 
       {!loading && !loadErr && mode === "user" ? (
         <div className="vpn-display-user-block">
-          <SettingHint text={PANEL_HINTS.vpnDisplayUser} />
           <label className="form-field">
             <span className="field-label">Поиск пользователя</span>
             <input

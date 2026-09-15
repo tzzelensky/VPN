@@ -235,7 +235,6 @@ export function refreshPlaceholderDeviceSlots(userId: number): UserRow | undefin
   const result = touchDeviceLimitForUser(userId, deviceId, {
     requestIp: hit.ip,
     userAgent: hit.ua,
-    autoBind: true,
   });
   return result.user;
 }

@@ -7,7 +7,13 @@ export const TZADMIN_DEFAULT_ERROR_LOG = `${TZADMIN_LOG_DIR}/error.log`;
 
 export const MAX_LOG_TAIL_LINES = 500;
 export const DEFAULT_LOG_TAIL_LINES = 300;
-export const MAX_LOG_FILE_BYTES = 2 * 1024 * 1024;
+
+/** При превышении — оставить хвост LOG_TRIM_KEEP_BYTES (on-fetch + hourly). */
+export const LOG_TRIM_TRIGGER_BYTES = 32 * 1024 * 1024;
+export const LOG_TRIM_KEEP_BYTES = 8 * 1024 * 1024;
+
+/** @deprecated alias — порог trim, не отказ читать */
+export const MAX_LOG_FILE_BYTES = LOG_TRIM_TRIGGER_BYTES;
 
 export type LogFileStatus =
   | "ok"
@@ -46,10 +52,12 @@ export function applyXrayLogConfig(
   opts: { loglevel: XrayLogLevel; ensureFilePaths?: boolean },
 ): ParsedXrayLogConfig {
   const prev = parseXrayLogConfig(config);
-  const block: Record<string, unknown> = {
-    ...(config.log && typeof config.log === "object" && !Array.isArray(config.log)
+  const prevBlock =
+    config.log && typeof config.log === "object" && !Array.isArray(config.log)
       ? (config.log as Record<string, unknown>)
-      : {}),
+      : {};
+  const block: Record<string, unknown> = {
+    ...prevBlock,
     loglevel: opts.loglevel,
     dnsLog: prev.dnsLog,
   };
@@ -70,32 +78,40 @@ const BARE_KEY_RE = /\b(privateKey|publicKey|shortId|shortIds)\s*[:=]\s*["']?[A-
 export function maskSensitiveLogText(text: string): string {
   let out = text;
   out = out.replace(UUID_RE, "********-****-****-****-************");
-  out = out.replace(KEY_FIELD_RE, '$1[masked]$3');
-  out = out.replace(BARE_KEY_RE, (m) => m.split(/[:=]/)[0] + ': [masked]');
+  out = out.replace(KEY_FIELD_RE, "$1[masked]$3");
+  out = out.replace(BARE_KEY_RE, (m) => m.split(/[:=]/)[0] + ": [masked]");
   return out;
 }
 
 export type LogHighlightKind =
   | "error"
+  | "warning"
   | "failed"
+  | "rejected"
   | "timeout"
   | "handshake"
   | "tls"
   | "reality"
   | "dns"
   | "refused"
-  | "eof";
+  | "eof"
+  | "accepted"
+  | "proxy";
 
 const HIGHLIGHT_RULES: { kind: LogHighlightKind; re: RegExp }[] = [
-  { kind: "error", re: /\berror\b/i },
+  { kind: "error", re: /\[Error\]|\berror\b/i },
+  { kind: "warning", re: /\[Warning\]|\bwarning\b/i },
   { kind: "failed", re: /\bfailed\b/i },
-  { kind: "timeout", re: /\btimeout\b/i },
+  { kind: "rejected", re: /\brejected\b/i },
+  { kind: "timeout", re: /\btimeout\b|i\/o timeout/i },
   { kind: "handshake", re: /\bhandshake\b/i },
   { kind: "tls", re: /\btls\b/i },
   { kind: "reality", re: /\breality\b/i },
-  { kind: "dns", re: /\bdns\b/i },
-  { kind: "refused", re: /\brefused\b/i },
+  { kind: "dns", re: /\bdns\b|no such host|nxdomain/i },
+  { kind: "refused", re: /\brefused\b|connection refused/i },
   { kind: "eof", re: /\beof\b/i },
+  { kind: "accepted", re: /\baccepted\b/i },
+  { kind: "proxy", re: /\bproxy\//i },
 ];
 
 export function highlightKindsForLine(line: string): LogHighlightKind[] {

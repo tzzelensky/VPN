@@ -664,8 +664,6 @@ export type UserDto = {
   devices_registered?: number;
   /** Зарегистрированные устройства (ссылка подписки с ?did=). */
   device_slots: UserDeviceSlotDto[];
-  /** Лимит скорости, Мбит/с; 0 = без ограничения. */
-  speed_limit_mbps: number;
   /** К подписке дописываются последние 4 узла + happ (белые списки). По умолчанию выкл. */
   whitelist_happ_enabled: boolean;
   /** Оплаченный продукт «белые списки» (не ручное назначение). */
@@ -748,7 +746,6 @@ export type CreateUserPayload = {
   subscription_entry_order?: string[];
   device_limit_enabled?: boolean;
   device_limit_count?: number;
-  speed_limit_mbps?: number;
   whitelist_happ_enabled?: boolean;
   extra_vless_links?: ExtraVlessLinkDto[];
 };
@@ -833,7 +830,6 @@ export type DeviceLimitSettingsDto = {
   enabled: boolean;
   limit_scope: "all" | "selected";
   default_slots: number;
-  auto_bind: boolean;
   on_limit_exceeded: "stub" | "empty" | "instruction";
   purchase_enabled: boolean;
   purchase_price_rub: number;
@@ -1460,6 +1456,7 @@ export type SendCommunicationPayload = {
   photo_mime?: string;
   photo_name?: string;
   buttons?: Array<"pay" | "ref" | "sub" | "buygb" | "webapp" | "whitelist">;
+  send_at?: string;
 };
 
 export type SendCommunicationResult = {
@@ -1468,6 +1465,9 @@ export type SendCommunicationResult = {
   attempted: number;
   failed: number;
   failures: Array<{ user_id: number; user_name: string; error: string }>;
+  scheduled?: boolean;
+  id?: string;
+  send_at?: string;
 };
 
 export async function sendCommunication(payload: SendCommunicationPayload): Promise<SendCommunicationResult> {
@@ -1478,6 +1478,54 @@ export async function sendCommunication(payload: SendCommunicationPayload): Prom
     body: JSON.stringify(payload),
   });
   return handle(res);
+}
+
+export type ScheduledMailingDto = {
+  id: string;
+  send_at: string;
+  created_at: string;
+  status: "pending" | "sent" | "cancelled" | "failed";
+  error?: string;
+  title: string;
+  mode: "global" | "single" | "selected" | "segment";
+  segment_id?: string;
+  text_preview: string;
+  has_photo: boolean;
+  mark_enabled: boolean;
+};
+
+export async function listScheduledMailings(): Promise<{ items: ScheduledMailingDto[] }> {
+  const res = await fetch("/api/communications/scheduled", { credentials: "include" });
+  return handle(res);
+}
+
+export async function cancelScheduledMailing(id: string): Promise<{ ok: boolean; id: string }> {
+  const res = await fetch(`/api/communications/scheduled/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+    credentials: "include",
+  });
+  return handle(res);
+}
+
+export async function improveCommunicationText(text: string): Promise<{ improved: string }> {
+  const res = await fetch("/api/communications/improve-text", {
+    method: "POST",
+    credentials: "include",
+    headers: jsonHeaders,
+    body: JSON.stringify({ text }),
+  });
+  if (!res.ok) {
+    const raw = await res.text();
+    let msg = raw || res.statusText;
+    try {
+      const j = JSON.parse(raw) as { error?: string };
+      if (j.error) msg = j.error;
+    } catch {
+      /* ignore */
+    }
+    throw new Error(msg);
+  }
+  return res.json() as Promise<{ improved: string }>;
 }
 
 export type CommunicationSegmentDto = {
@@ -2211,8 +2259,6 @@ export type MySubProfileDto = {
   name: string;
   avatar_url: string | null;
   stats_html: string;
-  /** Включён ли новый дизайн WebApp (из настроек панели). */
-  web_app_new_design?: boolean;
   subscriptions: Array<{
     id: number;
     name: string;
@@ -3250,8 +3296,17 @@ export type XrayLogsSnapshotDto = {
   hint: string | null;
 };
 
-export async function fetchServerXrayLogs(serverId: number, lines = 300): Promise<XrayLogsSnapshotDto> {
-  const res = await fetch(`/api/servers/${serverId}/xray-logs?lines=${lines}`, { credentials: "include" });
+export async function fetchServerXrayLogs(
+  serverId: number,
+  lines = 300,
+  opts?: { stream?: "error" | "access" | "both"; signal?: AbortSignal },
+): Promise<XrayLogsSnapshotDto> {
+  const stream = opts?.stream ?? "both";
+  const qs = new URLSearchParams({ lines: String(lines), stream });
+  const res = await fetch(`/api/servers/${serverId}/xray-logs?${qs}`, {
+    credentials: "include",
+    signal: opts?.signal,
+  });
   return handle(res);
 }
 
@@ -3322,6 +3377,25 @@ export type ConfigVaultCheckDto = {
   notification_sent: boolean;
 };
 
+export type ConfigVaultViaConfigDto = {
+  configured: boolean;
+  masked_raw: string;
+  check_only_via: boolean;
+  try_refresh_subscription: boolean;
+  check_servers: boolean;
+  /** Полный конфиг — только с GET /via-config. */
+  raw?: string;
+};
+
+export type ConfigVaultViaCheckRunDto = {
+  running: boolean;
+  total: number;
+  done: number;
+  success: number;
+  failed: number;
+  failed_names: string[];
+};
+
 export type ConfigVaultSettingsDto = {
   auto_check_enabled: boolean;
   interval_minutes: number;
@@ -3332,6 +3406,15 @@ export type ConfigVaultSettingsDto = {
   notify_on_recovery: boolean;
   notify_cooldown_minutes: number;
   last_auto_run_at: string | null;
+  via_config?: ConfigVaultViaConfigDto;
+};
+
+export type ConfigVaultSubscriptionRefreshDto = {
+  ok: boolean;
+  status_code: number | null;
+  error: string | null;
+  user_found: boolean;
+  url: string | null;
 };
 
 export type ConfigVaultOverviewDto = {
@@ -3347,6 +3430,7 @@ export type ConfigVaultOverviewDto = {
   telegram_configured: boolean;
   settings: ConfigVaultSettingsDto;
   keys: ConfigVaultKeyDto[];
+  via_check_run?: ConfigVaultViaCheckRunDto | null;
 };
 
 function parseApiError(text: string): string {
@@ -3478,17 +3562,34 @@ export async function checkAllConfigVaultKeys(): Promise<
 }
 
 export async function pollUntilVaultChecksDone(
-  fetchKeys: () => Promise<{ keys: Array<{ last_check_status: string }> }>,
+  fetchKeys: () => Promise<{ keys: Array<{ last_check_status: string; id?: number; name?: string; last_check_at?: string | null; active?: boolean }> }>,
   total: number,
-  opts?: { intervalMs?: number; maxWaitMs?: number },
+  opts?: {
+    intervalMs?: number;
+    maxWaitMs?: number;
+    onTick?: (data: {
+      keys: Array<{
+        last_check_status: string;
+        id?: number;
+        name?: string;
+        last_check_at?: string | null;
+        active?: boolean;
+      }>;
+    }) => void;
+  },
 ): Promise<void> {
   const intervalMs = opts?.intervalMs ?? 1500;
   const maxWaitMs = opts?.maxWaitMs ?? Math.max(20000, total * 12000);
   const deadline = Date.now() + maxWaitMs;
+  const tick = async () => {
+    const r = await fetchKeys();
+    opts?.onTick?.(r);
+    return !r.keys.some((k) => k.last_check_status === "checking");
+  };
+  if (await tick()) return;
   while (Date.now() < deadline) {
     await new Promise((r) => setTimeout(r, intervalMs));
-    const r = await fetchKeys();
-    if (!r.keys.some((k) => k.last_check_status === "checking")) return;
+    if (await tick()) return;
   }
 }
 
@@ -3530,7 +3631,14 @@ export async function importConfigVaultJson(body: {
 }
 
 export async function patchConfigVaultSettings(
-  patch: Partial<ConfigVaultSettingsDto>,
+  patch: Partial<Omit<ConfigVaultSettingsDto, "via_config" | "last_auto_run_at">> & {
+    via_config?: Partial<{
+      raw: string;
+      check_only_via: boolean;
+      try_refresh_subscription: boolean;
+      check_servers: boolean;
+    }>;
+  },
 ): Promise<ConfigVaultOverviewDto> {
   const res = await fetch("/api/config-vault/settings", {
     method: "PATCH",
@@ -3538,6 +3646,25 @@ export async function patchConfigVaultSettings(
     headers: jsonHeaders,
     body: JSON.stringify(patch),
   });
+  return handleVault(res);
+}
+
+export async function fetchConfigVaultViaConfig(): Promise<{ via_config: ConfigVaultViaConfigDto }> {
+  const res = await fetch("/api/config-vault/via-config", { credentials: "include" });
+  return handleVault(res);
+}
+
+export async function checkAllConfigVaultKeysViaConfig(): Promise<
+  ConfigVaultOverviewDto & {
+    checked: number;
+    started?: boolean;
+    already_running?: boolean;
+    total?: number;
+    servers_targets?: number;
+    subscription_refresh?: ConfigVaultSubscriptionRefreshDto | null;
+  }
+> {
+  const res = await fetch("/api/config-vault/check-all-via-config", { method: "POST", credentials: "include" });
   return handleVault(res);
 }
 

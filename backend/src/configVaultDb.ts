@@ -3,8 +3,10 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   DEFAULT_CONFIG_VAULT_SETTINGS,
+  DEFAULT_VIA_CONFIG,
   type ConfigVaultSettings,
   type ConfigVaultSubscriptionMode,
+  type ConfigVaultViaConfig,
   type VlessCheckStatus,
   type VlessKeyCheckRow,
   type VlessKeyRow,
@@ -69,12 +71,54 @@ function emptyVault(): VaultFile {
     next_check_id: 1,
     keys: [],
     checks: [],
-    settings: { ...DEFAULT_CONFIG_VAULT_SETTINGS },
+    settings: {
+      ...DEFAULT_CONFIG_VAULT_SETTINGS,
+      via_config: { ...DEFAULT_VIA_CONFIG },
+    },
+  };
+}
+
+export function normalizeViaConfig(raw: unknown): ConfigVaultViaConfig {
+  const base = { ...DEFAULT_VIA_CONFIG };
+  if (!raw || typeof raw !== "object") return base;
+  const o = raw as Record<string, unknown>;
+  return {
+    raw: String(o.raw ?? "").trim().slice(0, 200_000),
+    check_only_via: o.check_only_via === true || o.check_only_via === 1 || o.check_only_via === "1",
+    try_refresh_subscription:
+      o.try_refresh_subscription === true ||
+      o.try_refresh_subscription === 1 ||
+      o.try_refresh_subscription === "1",
+    check_servers: o.check_servers === true || o.check_servers === 1 || o.check_servers === "1",
+  };
+}
+
+function maskViaConfigRaw(raw: string): string {
+  const s = String(raw ?? "").trim();
+  if (!s) return "";
+  if (/^(vless|trojan|hysteria2?|hy2):\/\//i.test(s)) return maskProxyUri(s);
+  if (s.length <= 48) return "••••";
+  return `${s.slice(0, 24)}…${s.slice(-12)}`;
+}
+
+/** Публичное представление via_config без полного raw. */
+export function viaConfigForApi(via: ConfigVaultViaConfig, includeRaw = false): Record<string, unknown> {
+  const configured = Boolean(String(via.raw ?? "").trim());
+  return {
+    configured,
+    masked_raw: configured ? maskViaConfigRaw(via.raw) : "",
+    check_only_via: via.check_only_via === true,
+    try_refresh_subscription: via.try_refresh_subscription === true,
+    check_servers: via.check_servers === true,
+    ...(includeRaw ? { raw: via.raw } : {}),
   };
 }
 
 function normalizeSettings(raw: unknown): ConfigVaultSettings {
-  const base = { ...DEFAULT_CONFIG_VAULT_SETTINGS };
+  const base = {
+    ...DEFAULT_CONFIG_VAULT_SETTINGS,
+    via_config: { ...DEFAULT_VIA_CONFIG },
+  };
   if (!raw || typeof raw !== "object") return base;
   const o = raw as Record<string, unknown>;
   const interval = Math.floor(Number(o.interval_minutes) || base.interval_minutes);
@@ -92,6 +136,7 @@ function normalizeSettings(raw: unknown): ConfigVaultSettings {
     notify_on_recovery: !(o.notify_on_recovery === false || o.notify_on_recovery === 0),
     notify_cooldown_minutes: Math.min(240, Math.max(5, cooldown)),
     last_auto_run_at: o.last_auto_run_at != null ? String(o.last_auto_run_at) : null,
+    via_config: normalizeViaConfig(o.via_config ?? base.via_config),
   };
 }
 
@@ -240,10 +285,29 @@ export function getConfigVaultSettings(): ConfigVaultSettings {
   return readVault().settings;
 }
 
-export function saveConfigVaultSettings(patch: Partial<ConfigVaultSettings>): ConfigVaultSettings {
+export function saveConfigVaultSettings(
+  patch: Partial<Omit<ConfigVaultSettings, "via_config">> & {
+    via_config?: Partial<ConfigVaultViaConfig>;
+  },
+): ConfigVaultSettings {
   let out = getConfigVaultSettings();
   mutateVault((v) => {
-    v.settings = normalizeSettings({ ...v.settings, ...patch });
+    const prev = v.settings;
+    let nextVia = prev.via_config;
+    if (patch.via_config !== undefined) {
+      const merged: Record<string, unknown> = { ...prev.via_config };
+      if (patch.via_config.raw !== undefined) merged.raw = patch.via_config.raw;
+      if (patch.via_config.check_only_via !== undefined) merged.check_only_via = patch.via_config.check_only_via;
+      if (patch.via_config.try_refresh_subscription !== undefined) {
+        merged.try_refresh_subscription = patch.via_config.try_refresh_subscription;
+      }
+      if (patch.via_config.check_servers !== undefined) {
+        merged.check_servers = patch.via_config.check_servers;
+      }
+      nextVia = normalizeViaConfig(merged);
+    }
+    const { via_config: _ignored, ...rest } = patch as Partial<ConfigVaultSettings>;
+    v.settings = normalizeSettings({ ...prev, ...rest, via_config: nextVia });
     out = v.settings;
   });
   return out;

@@ -3,7 +3,7 @@ import { vi } from "vitest";
 vi.mock("../src/userSync.ts", () => ({
   pushClientListToAllDeployedServers: vi.fn(async () => undefined),
   removeUserUuidFromAllServers: vi.fn(async () => undefined),
-  refreshSpeedLimitsOnAllDeployedServers: vi.fn(async () => undefined),
+  clearSpeedLimitsOnAllDeployedServers: vi.fn(async () => undefined),
   resolveConfigPath: vi.fn(async () => "/tmp/fake-xray.json"),
   managedClientsForServer: vi.fn(() => []),
 }));

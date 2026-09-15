@@ -1,5 +1,6 @@
 import { getPanelGeminiApiKey, getPanelSettings } from "../panelSettings.js";
 import { appendAiLog } from "../aiLogStore.js";
+import { GEMINI_SSH_HOP_HOST, geminiFetchViaSshHop } from "./geminiSshHop.js";
 
 export type GeminiChatTurn = { role: "user" | "model"; text: string };
 
@@ -10,16 +11,21 @@ export type GeminiGenerateMeta = {
 };
 
 /** Отдельные free-tier RPD у 2.5*; flash-latest / 3.x часто бьют в общий лимит «latest Flash». */
+const RETIRED_GEMINI_MODELS: Record<string, string> = {
+  "gemini-2.5-flash-lite": "gemini-3.5-flash-lite",
+  "gemini-2.5-flash": "gemini-3.6-flash",
+  "gemini-2.0-flash-lite": "gemini-3.5-flash-lite",
+  "gemini-2.0-flash": "gemini-3.6-flash",
+};
+
 const FALLBACK_MODELS = [
-  "gemini-2.5-flash-lite",
-  "gemini-2.5-flash",
-  "gemini-2.0-flash-lite",
-  "gemini-2.0-flash",
+  "gemini-3.5-flash-lite",
+  "gemini-3.6-flash",
   "gemini-3.1-flash-lite",
   "gemini-flash-latest",
 ];
 
-const DEFAULT_GEMINI_MODEL = "gemini-2.5-flash-lite";
+const DEFAULT_GEMINI_MODEL = "gemini-3.5-flash-lite";
 /** Если Google не дал Retry-After — не долбим модель час. */
 const DEFAULT_QUOTA_COOLDOWN_MS = 60 * 60 * 1000;
 
@@ -41,7 +47,8 @@ function uniqueModels(ordered: Array<string | null | undefined>): string[] {
 }
 
 function settingsPreferredModel(): string {
-  return String(getPanelSettings().telegram.geminiModel ?? "").trim() || DEFAULT_GEMINI_MODEL;
+  const raw = String(getPanelSettings().telegram.geminiModel ?? "").trim() || DEFAULT_GEMINI_MODEL;
+  return RETIRED_GEMINI_MODELS[raw] ?? raw;
 }
 
 function isModelExhausted(model: string): boolean {
@@ -100,8 +107,16 @@ function isQuotaLikeError(status: number, error: string): boolean {
   return /quota|rate.?limit|resource.?exhausted|exceeded.?your.?current.?quota|free_tier/i.test(error);
 }
 
+function isLocationBlockedError(raw: string): boolean {
+  return /user location is not supported|location is not supported for the api|not (?:available|supported) in (?:your|this) (?:country|region|location)|failed_precondition.*location/i.test(
+    String(raw ?? ""),
+  );
+}
+
 /** Ошибки, при которых имеет смысл пробовать другую модель. */
 function shouldTryNextModel(status: number, error: string): boolean {
+  if (isLocationBlockedError(error)) return false;
+  if (status === 0) return false;
   if (status === 404 || status >= 500) return true;
   if (isQuotaLikeError(status, error)) return true;
   return /not found|model.+not.+supported|is not found/i.test(error);
@@ -144,18 +159,60 @@ export function isAiAssistantEnabled(): boolean {
   return isGeminiConfigured();
 }
 
-export function friendlyGeminiError(raw: string): string {
+export function friendlyGeminiError(raw: string, audience: "bot" | "panel" = "bot"): string {
   const m = String(raw ?? "").toLowerCase();
+  const forPanel = audience === "panel";
+  if (m.includes("gemini_ssh_hop_not_found")) {
+    return forPanel
+      ? `В панели нет сервера ${GEMINI_SSH_HOP_HOST}. Без него Gemini недоступен из региона панели.`
+      : "AI временно недоступен. Попробуйте позже.";
+  }
+  if (m.includes("gemini_ssh_hop") || m.includes("ssh_forward") || m.includes("timed out") || m.includes("all configured authentication")) {
+    return forPanel
+      ? `Не удалось выйти в Gemini через ${GEMINI_SSH_HOP_HOST}. Проверьте SSH этого сервера в панели.`
+      : "AI временно недоступен. Попробуйте позже.";
+  }
+  if (isLocationBlockedError(raw)) {
+    return forPanel
+      ? `Gemini всё ещё отклоняет регион даже через ${GEMINI_SSH_HOP_HOST}. Проверьте, что этот узел в стране, где Google разрешает API.`
+      : "AI временно недоступен. Попробуйте позже.";
+  }
   if (m.includes("quota") || m.includes("rate-limit") || m.includes("rate limit") || m.includes("429")) {
-    return "AI временно недоступен: исчерпана квота у всех запасных моделей Gemini. Попробуйте позже или включите billing в Google AI Studio.";
+    return forPanel
+      ? "Не удалось обратиться к Gemini: исчерпана квота. Попробуйте позже или включите billing в Google AI Studio."
+      : "AI временно недоступен: исчерпана квота у всех запасных моделей Gemini. Попробуйте позже или включите billing в Google AI Studio.";
+  }
+  if (m.includes("hang up") || m.includes("econnreset") || m.includes("econnrefused")) {
+    return forPanel
+      ? `Не удалось выйти в Gemini через ${GEMINI_SSH_HOP_HOST}. Проверьте SSH и python3 на этом сервере.`
+      : "AI временно недоступен. Попробуйте позже.";
   }
   if (m.includes("api key") || m.includes("permission") || m.includes("401") || m.includes("403")) {
-    return "AI недоступен: проверьте Gemini API key в настройках панели.";
+    return forPanel
+      ? "Gemini недоступен: проверьте API key в настройках панели."
+      : "AI недоступен: проверьте Gemini API key в настройках панели.";
   }
   if (m.includes("gemini_not_configured")) {
-    return "AI-помощник не настроен (нет ключа Gemini).";
+    return forPanel ? "Нет ключа Gemini в настройках панели." : "AI-помощник не настроен (нет ключа Gemini).";
   }
-  return "Не удалось получить ответ AI. Попробуйте ещё раз чуть позже или напишите в «Сообщить о проблеме».";
+  return forPanel
+    ? "Не удалось обратиться к Gemini. Попробуйте ещё раз чуть позже."
+    : "Не удалось получить ответ AI. Попробуйте ещё раз чуть позже или напишите в «Сообщить о проблеме».";
+}
+
+function geminiProxyUrl(): string {
+  return String(process.env.GEMINI_HTTPS_PROXY ?? "").trim();
+}
+
+async function geminiFetch(url: string, init: RequestInit, timeoutMs?: number): Promise<Response> {
+  const proxy = geminiProxyUrl();
+  if (proxy) {
+    const { ProxyAgent } = await import("undici");
+    const dispatcher = new ProxyAgent(proxy);
+    const signal = timeoutMs ? AbortSignal.timeout(timeoutMs) : init.signal;
+    return fetch(url, { ...init, signal, dispatcher } as RequestInit);
+  }
+  return geminiFetchViaSshHop(url, init, timeoutMs);
 }
 
 async function callGeminiModel(
@@ -163,6 +220,7 @@ async function callGeminiModel(
   apiKey: string,
   history: GeminiChatTurn[],
   userText: string,
+  systemInstruction = SYSTEM_INSTRUCTION,
 ): Promise<{ text: string } | { error: string; status: number; retryAfterSec?: number }> {
   const contents = [
     ...history.map((t) => ({
@@ -172,21 +230,27 @@ async function callGeminiModel(
     { role: "user" as const, parts: [{ text: userText }] },
   ];
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`;
-  const res = await fetch(url, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-goog-api-key": apiKey,
-    },
-    body: JSON.stringify({
-      systemInstruction: { parts: [{ text: SYSTEM_INSTRUCTION }] },
-      contents,
-      generationConfig: {
-        temperature: 0.6,
-        maxOutputTokens: 1024,
+  let res: Response;
+  try {
+    res = await geminiFetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-goog-api-key": apiKey,
       },
-    }),
-  });
+      body: JSON.stringify({
+        systemInstruction: { parts: [{ text: systemInstruction }] },
+        contents,
+        generationConfig: {
+          temperature: 0.6,
+          maxOutputTokens: 1024,
+        },
+      }),
+    });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    return { error: msg || "gemini_fetch_failed", status: 0 };
+  }
   const raw = (await res.json().catch(() => null)) as Record<string, unknown> | null;
   if (!res.ok) {
     const errObj = raw && typeof raw === "object" ? (raw.error as { message?: string } | undefined) : undefined;
@@ -214,6 +278,15 @@ export async function generateGeminiReply(
   userText: string,
   meta?: GeminiGenerateMeta,
 ): Promise<string> {
+  return generateGeminiText(SYSTEM_INSTRUCTION, userText, history, meta);
+}
+
+export async function generateGeminiText(
+  systemInstruction: string,
+  userText: string,
+  history: GeminiChatTurn[] = [],
+  meta?: GeminiGenerateMeta,
+): Promise<string> {
   const apiKey = getPanelGeminiApiKey();
   if (!apiKey) throw new Error("gemini_not_configured");
 
@@ -227,7 +300,7 @@ export async function generateGeminiReply(
   for (const model of models) {
     usedModel = model;
     tried.push(model);
-    const result = await callGeminiModel(model, apiKey, history, userText);
+    const result = await callGeminiModel(model, apiKey, history, userText, systemInstruction);
     if ("text" in result) {
       clearModelExhausted(model);
       stickyWorkingModel = model;

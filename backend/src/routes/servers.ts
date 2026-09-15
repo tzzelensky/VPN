@@ -648,7 +648,14 @@ router.get("/:id(\\d+)/xray-logs", async (req, res) => {
   }
   try {
     const lines = Math.min(500, Math.max(50, Number(req.query.lines) || 300));
-    const snapshot = await fetchXrayLogsSnapshot(id, { lines });
+    const streamRaw = String(req.query.stream ?? "both").trim().toLowerCase();
+    const includeAccess = streamRaw === "both" || streamRaw === "access";
+    const includeError = streamRaw === "both" || streamRaw === "error";
+    if (!includeAccess && !includeError) {
+      res.status(400).json({ error: "bad_stream" });
+      return;
+    }
+    const snapshot = await fetchXrayLogsSnapshot(id, { lines, includeAccess, includeError });
     res.json(snapshot);
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);

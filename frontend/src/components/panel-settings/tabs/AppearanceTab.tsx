@@ -8,13 +8,9 @@ import type { PatchDraft } from "../types";
 export default function AppearanceTab({
   draft,
   patchDraft,
-  webAppSavedFlash,
-  onToggleWebApp,
 }: {
   draft: PanelSettings;
   patchDraft: PatchDraft;
-  webAppSavedFlash: boolean;
-  onToggleWebApp: () => void;
 }) {
   return (
     <div className="panel-settings-tab-content panel-settings-tab-content--animate">
@@ -70,36 +66,30 @@ export default function AppearanceTab({
         </div>
         <div className="form-field">
           <FieldLabel label="Часовой пояс" hint={PANEL_HINTS.timezone} />
-          <input
-            value={draft.ui.timezone}
-            onChange={(e) => patchDraft((d) => ({ ...d, ui: { ...d.ui, timezone: e.target.value } }))}
-            placeholder="Europe/Moscow"
-          />
+          <select
+            value={
+              ["Asia/Yekaterinburg", "Europe/Moscow", "Asia/Yerevan"].includes(draft.ui.timezone)
+                ? draft.ui.timezone
+                : "Asia/Yekaterinburg"
+            }
+            onChange={(e) =>
+              patchDraft((d) => ({ ...d, ui: { ...d.ui, timezone: e.target.value } }))
+            }
+          >
+            <option value="Asia/Yekaterinburg">Екб</option>
+            <option value="Europe/Moscow">МСК</option>
+            <option value="Asia/Yerevan">Ереван</option>
+          </select>
         </div>
       </SettingsCard>
 
-      <SettingsCard
-        title="Интерфейс"
-        sub={webAppSavedFlash ? "WebApp: сохранено" : undefined}
-      >
+      <SettingsCard title="Интерфейс">
         <div className="settings-toggle-list">
-          <SettingsToggleRow
-            label="Компактный режим"
-            hint={PANEL_HINTS.compact}
-            on={draft.ui.compactMode}
-            onToggle={() => patchDraft((d) => ({ ...d, ui: { ...d.ui, compactMode: !d.ui.compactMode } }))}
-          />
           <SettingsToggleRow
             label="Показывать подсказки"
             hint={PANEL_HINTS.showHints}
             on={draft.ui.showHints}
             onToggle={() => patchDraft((d) => ({ ...d, ui: { ...d.ui, showHints: !d.ui.showHints } }))}
-          />
-          <SettingsToggleRow
-            label="Новый дизайн WebApp"
-            hint={PANEL_HINTS.webAppNewDesign}
-            on={draft.ui.webAppNewDesign ?? false}
-            onToggle={onToggleWebApp}
           />
           <SettingsToggleRow
             label="Отображение Превью WebApp"

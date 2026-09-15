@@ -3,6 +3,7 @@ import DashboardLayout from "../components/DashboardLayout";
 import PanelTabs from "../components/PanelTabs";
 import DualListPicker from "../components/DualListPicker";
 import PageLoadingState from "../components/PageLoadingState";
+import PageSectionHero from "../components/PageSectionHero";
 import Spinner from "../components/Spinner";
 import { useModalEscape } from "../hooks/useModalEscape";
 import {
@@ -314,14 +315,27 @@ export default function ReferralProgramPage({ onLogout }: { onLogout: () => void
 
   return (
     <DashboardLayout onLogout={onLogout}>
-      <section className="panel users-hero-panel">
-        <div className="users-hero-top">
-          <div>
-            <h1>Реферальная программа</h1>
-            <p className="sub users-hero-sub">Настройка кнопки в боте, скидки приглашенному и награды пригласившему.</p>
-            {dirty ? <p className="referral-unsaved-hint">Есть несохранённые изменения</p> : null}
-          </div>
-          <div className="users-hero-actions">
+      <PageSectionHero
+        title="Реферальная программа"
+        helpCards={[
+          {
+            kicker: "Инвайты",
+            title: "Приглашения",
+            text: "Кнопка «Пригласи друга» в боте и учёт приглашений.",
+          },
+          {
+            kicker: "Скидки",
+            title: "Для приглашённых",
+            text: "Скидки новым клиентам по реферальной ссылке.",
+          },
+          {
+            kicker: "Награды",
+            title: "Для пригласивших",
+            text: "ГБ, дни и другие награды за успешные приглашения.",
+          },
+        ]}
+        actions={
+          <>
             <button type="button" className="ghost" disabled={loading || saving} onClick={() => void refresh()}>
               Обновить
             </button>
@@ -339,10 +353,12 @@ export default function ReferralProgramPage({ onLogout }: { onLogout: () => void
                 "Сохранить"
               )}
             </button>
-          </div>
-        </div>
+          </>
+        }
+      >
+        {dirty ? <p className="referral-unsaved-hint">Есть несохранённые изменения</p> : null}
         {toast ? <div className={`flash ${toast.type === "ok" ? "ok" : "err"}`}>{toast.text}</div> : null}
-      </section>
+      </PageSectionHero>
 
       {loading || !cfg ? (
         <section className="panel">

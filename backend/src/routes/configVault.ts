@@ -5,6 +5,7 @@ import {
   createConfigVaultKey,
   deleteConfigVaultKey,
   getConfigVaultKey,
+  getConfigVaultSettings,
   importConfigVaultKeys,
   listConfigVaultChecks,
   listConfigVaultKeys,
@@ -14,8 +15,14 @@ import {
   setConfigVaultSubscriptionTargets,
   updateConfigVaultKey,
   vaultKeyForApi,
+  viaConfigForApi,
 } from "../configVaultDb.js";
-import { getConfigVaultOverview, runConfigVaultCheckForKey, startConfigVaultCheckAllBackground } from "../configVaultService.js";
+import {
+  getConfigVaultOverview,
+  runConfigVaultCheckForKey,
+  startConfigVaultCheckAllBackground,
+  startConfigVaultCheckAllViaConfigBackground,
+} from "../configVaultService.js";
 import { parseProxyUri, validateConfigVaultKeyInput, parseConfigVaultJsonImport } from "../configVaultUri.js";
 import { shareLinkToHappProfile } from "../happSubscriptionJson.js";
 import { getPanelSettings } from "../panelSettings.js";
@@ -47,6 +54,25 @@ router.get("/settings", (_req, res) => {
 router.patch("/settings", (req, res) => {
   try {
     const b = (req.body ?? {}) as Record<string, unknown>;
+    const viaIn = b.via_config;
+    let viaPatch:
+      | {
+          raw?: string;
+          check_only_via?: boolean;
+          try_refresh_subscription?: boolean;
+          check_servers?: boolean;
+        }
+      | undefined;
+    if (viaIn && typeof viaIn === "object") {
+      const v = viaIn as Record<string, unknown>;
+      viaPatch = {};
+      if (v.raw !== undefined) viaPatch.raw = String(v.raw);
+      if (v.check_only_via !== undefined) viaPatch.check_only_via = Boolean(v.check_only_via);
+      if (v.try_refresh_subscription !== undefined) {
+        viaPatch.try_refresh_subscription = Boolean(v.try_refresh_subscription);
+      }
+      if (v.check_servers !== undefined) viaPatch.check_servers = Boolean(v.check_servers);
+    }
     const settings = saveConfigVaultSettings({
       auto_check_enabled: b.auto_check_enabled as boolean | undefined,
       interval_minutes: Number.isFinite(Number(b.interval_minutes)) ? Number(b.interval_minutes) : undefined,
@@ -58,9 +84,45 @@ router.patch("/settings", (req, res) => {
       notify_cooldown_minutes: Number.isFinite(Number(b.notify_cooldown_minutes))
         ? Number(b.notify_cooldown_minutes)
         : undefined,
+      via_config: viaPatch,
     });
     const overview = getConfigVaultOverview();
-    res.json({ ...overview, settings });
+    res.json({
+      ...overview,
+      settings: {
+        ...(() => {
+          const { via_config, ...rest } = settings;
+          return {
+            ...rest,
+            via_config: viaConfigForApi(via_config, false),
+          };
+        })(),
+      },
+    });
+  } catch (e) {
+    res.status(400).json({ error: e instanceof Error ? e.message : String(e) });
+  }
+});
+
+router.get("/via-config", (_req, res) => {
+  const via = getConfigVaultSettings().via_config;
+  res.json({ via_config: viaConfigForApi(via, true) });
+});
+
+router.post("/check-all-via-config", async (_req, res) => {
+  try {
+    const { total, already_running, subscription_refresh, servers_targets } =
+      await startConfigVaultCheckAllViaConfigBackground();
+    res.json({
+      started: true,
+      already_running,
+      total,
+      checked: 0,
+      servers_targets,
+      subscription_refresh,
+      ...getConfigVaultOverview(),
+      keys: mapKeys(listConfigVaultKeys()),
+    });
   } catch (e) {
     res.status(400).json({ error: e instanceof Error ? e.message : String(e) });
   }

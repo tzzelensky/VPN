@@ -51,6 +51,18 @@ export type VlessKeyCheckRow = {
   notification_sent: boolean;
 };
 
+/** Сторонний конфиг: проверка ключей хранилища через локальный Xray-туннель. */
+export type ConfigVaultViaConfig = {
+  /** vless/trojan/hysteria2 URI или JSON Happ/Xray. */
+  raw: string;
+  /** Если true — авто и ручные проверки идут только через туннель. */
+  check_only_via: boolean;
+  /** Перед check-all через туннель: GET подписки пользователя tzadmin с Happ UA. */
+  try_refresh_subscription: boolean;
+  /** Вместе с ключами пинговать VLESS/HY2/Trojan добавленных серверов панели. */
+  check_servers: boolean;
+};
+
 export type ConfigVaultSettings = {
   auto_check_enabled: boolean;
   interval_minutes: number;
@@ -61,6 +73,14 @@ export type ConfigVaultSettings = {
   notify_on_recovery: boolean;
   notify_cooldown_minutes: number;
   last_auto_run_at: string | null;
+  via_config: ConfigVaultViaConfig;
+};
+
+export const DEFAULT_VIA_CONFIG: ConfigVaultViaConfig = {
+  raw: "",
+  check_only_via: false,
+  try_refresh_subscription: false,
+  check_servers: false,
 };
 
 export const DEFAULT_CONFIG_VAULT_SETTINGS: ConfigVaultSettings = {
@@ -73,4 +93,5 @@ export const DEFAULT_CONFIG_VAULT_SETTINGS: ConfigVaultSettings = {
   notify_on_recovery: true,
   notify_cooldown_minutes: 45,
   last_auto_run_at: null,
+  via_config: { ...DEFAULT_VIA_CONFIG },
 };

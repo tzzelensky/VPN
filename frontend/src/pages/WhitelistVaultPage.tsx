@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import DashboardLayout from "../components/DashboardLayout";
 import PanelTabs from "../components/PanelTabs";
 import PageLoadingState from "../components/PageLoadingState";
+import PageSectionHero from "../components/PageSectionHero";
 import Spinner from "../components/Spinner";
 import VaultKeyJsonPanel from "../components/VaultKeyJsonPanel";
 import { useModalEscape } from "../hooks/useModalEscape";
@@ -856,55 +857,70 @@ export default function WhitelistVaultPage({ onLogout }: { onLogout: () => void 
   return (
     <DashboardLayout onLogout={onLogout}>
       <div className="vault-page">
-        <h1 className="page-title">Белые списки</h1>
-        <p className="vault-lead muted">
-          VLESS-ключи для белых списков. Новые активные ключи сразу попадают в подписку пользователям, добавленным через
-          «Добавить БС пользователю», а также тем, кто купил БС в боте.
-        </p>
-
-        <div className="vault-global-toggle">
-          <label className="check-row vault-enabled-row">
-            <span className="vault-enabled-label">Белые списки включены</span>
-            <button
-              type="button"
-              className={`toggle ${data?.settings.enabled ? "on" : ""}`}
-              disabled={busy}
-              aria-pressed={data?.settings.enabled ?? false}
-              onClick={() =>
-                void runBusy(async () => {
-                  const next = !data?.settings.enabled;
-                  const r = await patchWhitelistVaultSettings({ enabled: next });
-                  setData((d) => (d ? { ...d, settings: r.settings, disabled_warning: r.disabled_warning } : d));
-                  showToast("ok", next ? "Белые списки включены" : "Белые списки выключены");
-                })
-              }
-            />
-          </label>
-        </div>
-
-        {data?.disabled_warning && (
-          <div className="vault-warn" role="status">
-            {data.disabled_warning}
+        <PageSectionHero
+          title="Белые списки"
+          helpCards={[
+            {
+              kicker: "Группы",
+              title: "Ключи и группы",
+              text: "VLESS-ключи белых списков, группировка и активность.",
+            },
+            {
+              kicker: "Выдача",
+              title: "Доступ пользователям",
+              text: "Добавление БС в подписку выбранным клиентам.",
+            },
+            {
+              kicker: "Покупка",
+              title: "Продажа в боте",
+              text: "Настройка покупки белых списков и история заказов.",
+            },
+          ]}
+        >
+          <div className="vault-global-toggle">
+            <label className="check-row vault-enabled-row">
+              <span className="vault-enabled-label">Белые списки включены</span>
+              <button
+                type="button"
+                className={`toggle ${data?.settings.enabled ? "on" : ""}`}
+                disabled={busy}
+                aria-pressed={data?.settings.enabled ?? false}
+                onClick={() =>
+                  void runBusy(async () => {
+                    const next = !data?.settings.enabled;
+                    const r = await patchWhitelistVaultSettings({ enabled: next });
+                    setData((d) => (d ? { ...d, settings: r.settings, disabled_warning: r.disabled_warning } : d));
+                    showToast("ok", next ? "Белые списки включены" : "Белые списки выключены");
+                  })
+                }
+              />
+            </label>
           </div>
-        )}
 
-        {!data?.telegram_configured && (
-          <div className="vault-warn" role="status">
-            Telegram-уведомления не настроены (укажите токен бота и ID админов в настройках панели).
-          </div>
-        )}
+          {data?.disabled_warning && (
+            <div className="vault-warn" role="status">
+              {data.disabled_warning}
+            </div>
+          )}
 
-        {toast && (
-          <div className={`vault-toast vault-toast--${toast.type}`} role="status">
-            {toast.text}
-          </div>
-        )}
+          {!data?.telegram_configured && (
+            <div className="vault-warn" role="status">
+              Telegram-уведомления не настроены (укажите токен бота и ID админов в настройках панели).
+            </div>
+          )}
 
-        {data?.purchase_warning && (
-          <div className="vault-warn" role="status">
-            {data.purchase_warning}
-          </div>
-        )}
+          {toast && (
+            <div className={`vault-toast vault-toast--${toast.type}`} role="status">
+              {toast.text}
+            </div>
+          )}
+
+          {data?.purchase_warning && (
+            <div className="vault-warn" role="status">
+              {data.purchase_warning}
+            </div>
+          )}
+        </PageSectionHero>
 
         <PanelTabs
           tabs={[

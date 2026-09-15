@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import DashboardLayout from "../components/DashboardLayout";
 import PageLoadingState from "../components/PageLoadingState";
+import PageSectionHero from "../components/PageSectionHero";
 import Spinner from "../components/Spinner";
 import { useModalEscape } from "../hooks/useModalEscape";
 import {
@@ -305,13 +306,27 @@ export default function SupportAppealsPage({ onLogout }: { onLogout: () => void 
 
   return (
     <DashboardLayout onLogout={onLogout}>
-      <section className="panel users-hero-panel">
-        <div className="users-hero-top">
-          <div>
-            <h1>Обращения</h1>
-            <p className="sub users-hero-sub">Поддержка в боте и WebApp. Просмотр вложений и ответ пользователю.</p>
-          </div>
-          <div className="users-hero-actions">
+      <PageSectionHero
+        title="Обращения"
+        helpCards={[
+          {
+            kicker: "Тикеты",
+            title: "Обращения в поддержку",
+            text: "Заявки из бота и WebApp: статусы, очередь и история.",
+          },
+          {
+            kicker: "Вложения",
+            title: "Фото и файлы",
+            text: "Просмотр вложений пользователя прямо в панели.",
+          },
+          {
+            kicker: "Ответ",
+            title: "Ответ пользователю",
+            text: "Ответ в Telegram с текстом и при необходимости фото.",
+          },
+        ]}
+        actions={
+          <>
             <button type="button" className="ghost" disabled={loading || saving} onClick={() => void refresh()}>
               Обновить
             </button>
@@ -324,8 +339,9 @@ export default function SupportAppealsPage({ onLogout }: { onLogout: () => void 
                 "Сохранить"
               )}
             </button>
-          </div>
-        </div>
+          </>
+        }
+      >
         {msg ? <div className={`flash ${msg.type === "ok" ? "ok" : "err"}`}>{msg.text}</div> : null}
         {cfg ? (
           <div className="shop-toggle-row" style={{ marginTop: "1rem" }}>
@@ -338,7 +354,7 @@ export default function SupportAppealsPage({ onLogout }: { onLogout: () => void 
             />
           </div>
         ) : null}
-      </section>
+      </PageSectionHero>
 
       <section className="panel appeals-panel" style={{ marginTop: "1rem" }}>
         <h2 style={{ marginTop: 0 }}>Список обращений</h2>

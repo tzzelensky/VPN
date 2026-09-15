@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode, type SVGProps } from "react";
 import { createPortal } from "react-dom";
 import {
   fetchUserConfigVaultLinks,
@@ -46,14 +46,19 @@ function expiryAfterPlanDays(baseMs: number, days: number): number {
   return snapExpiryTimeToNoonLocal(base + days * DAY_MS);
 }
 
-export type UserModalMode = "create" | "edit";
-
-function sanitizePositiveIntInput(raw: string): string {
-  const digits = raw.replace(/[^\d]/g, "");
-  if (!digits) return "";
-  const n = Math.max(1, Math.floor(Number(digits) || 1));
-  return String(n);
+function formatExpiryShort(ms: number): string {
+  return new Date(ms).toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric" });
 }
+
+function expiryTone(expiryMs: number): { tone: "ok" | "warn" | "muted"; text: string } {
+  if (!(expiryMs > 0)) return { tone: "muted", text: "Без срока" };
+  const now = Date.now();
+  if (expiryMs < now) return { tone: "warn", text: "Истекла" };
+  const text = `до ${formatExpiryShort(expiryMs)}`;
+  return { tone: expiryMs - now <= 3 * DAY_MS ? "warn" : "ok", text };
+}
+
+export type UserModalMode = "create" | "edit";
 
 type Props = {
   open: boolean;
@@ -91,6 +96,98 @@ function serverIdsFromUser(user: UserDto, deployed: ServerDto[]): number[] {
   return all.slice(0, lim);
 }
 
+function IconCopy(p: SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden {...p}>
+      <rect x="9" y="9" width="13" height="13" rx="2" />
+      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+    </svg>
+  );
+}
+
+function IconChevron(p: SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden {...p}>
+      <path d="M6 9l6 6 6-6" />
+    </svg>
+  );
+}
+
+function FloatField({
+  label,
+  filled = false,
+  span = false,
+  hint,
+  extra,
+  textarea = false,
+  picker = false,
+  action = false,
+  children,
+}: {
+  label: string;
+  filled?: boolean;
+  span?: boolean;
+  hint?: ReactNode;
+  extra?: ReactNode;
+  textarea?: boolean;
+  picker?: boolean;
+  action?: boolean;
+  children: ReactNode;
+}) {
+  const cls = [
+    "user-modal-field",
+    filled ? "is-filled" : "",
+    span ? "user-modal-field--span" : "",
+    textarea ? "user-modal-field--textarea" : "",
+    picker ? "user-modal-field--picker" : "",
+    action ? "user-modal-field--action" : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+  return (
+    <div className={cls}>
+      <div className="user-modal-field__box">
+        {children}
+        <span className="user-modal-field__label">{label}</span>
+      </div>
+      {hint ? <p className="user-modal-field__hint">{hint}</p> : null}
+      {extra}
+    </div>
+  );
+}
+
+function CopyField({
+  label,
+  value,
+  title,
+  copyKey,
+  copiedKey,
+  onCopy,
+}: {
+  label: string;
+  value: string;
+  title: string;
+  copyKey: string;
+  copiedKey: string | null;
+  onCopy: (key: string, text: string) => void;
+}) {
+  const done = copiedKey === copyKey;
+  return (
+    <FloatField label={label} filled={Boolean(value)} action>
+      <input className="user-modal-field__control mono" value={value} readOnly title={title} aria-label={label} />
+      <button
+        type="button"
+        className={`ghost user-modal-copy-btn${done ? " is-copied" : ""}`}
+        onClick={() => onCopy(copyKey, value)}
+        title={done ? "Скопировано" : `Копировать ${label}`}
+        aria-label={`Копировать ${label}`}
+      >
+        {done ? "✓" : <IconCopy />}
+      </button>
+    </FloatField>
+  );
+}
+
 export default function UserModal({
   open,
   mode,
@@ -113,7 +210,6 @@ export default function UserModal({
   const [expiryMs, setExpiryMs] = useState(0);
   const [selectedServerIds, setSelectedServerIds] = useState<number[]>([]);
   const [serverPickerOpen, setServerPickerOpen] = useState(false);
-  const [speedLimitMbps, setSpeedLimitMbps] = useState("");
   const [shopPlans, setShopPlans] = useState<SubscriptionShopPlanDto[]>([]);
   const [selectedPlanId, setSelectedPlanId] = useState(0);
   const [saving, setSaving] = useState(false);
@@ -123,11 +219,16 @@ export default function UserModal({
   const [configVaultLinks, setConfigVaultLinks] = useState<ConfigVaultLinkDto[]>([]);
   const [addVlessOpen, setAddVlessOpen] = useState(false);
   const [editingVlessLink, setEditingVlessLink] = useState<ExtraVlessLinkDto | null>(null);
+  const [copiedKey, setCopiedKey] = useState<string | null>(null);
+  const [extraVlessOpen, setExtraVlessOpen] = useState(false);
   const planTouchedRef = useRef(false);
   const formInitKeyRef = useRef("");
 
   useEffect(() => {
-    if (!open) setExpiryNotifyFlash(null);
+    if (!open) {
+      setExpiryNotifyFlash(null);
+      setExtraVlessOpen(false);
+    }
   }, [open]);
 
   useEffect(() => {
@@ -168,7 +269,6 @@ export default function UserModal({
       setTotalGb("0");
       setExpiryMs(0);
       setSelectedServerIds(deployedIdsOrdered(deployedServers));
-      setSpeedLimitMbps("");
       setSelectedPlanId(0);
       setExtraVlessLinks([]);
       setConfigVaultLinks([]);
@@ -189,9 +289,6 @@ export default function UserModal({
     setTotalGb(String(user.total_gb ?? 0));
     setExpiryMs(Number(user.expiry_time) > 0 ? Number(user.expiry_time) : 0);
     setSelectedServerIds(serverIdsFromUser(user, deployedServers));
-    setSpeedLimitMbps(
-      Number(user.speed_limit_mbps) > 0 ? String(Math.floor(Number(user.speed_limit_mbps))) : "",
-    );
     setExtraVlessLinks(user.extra_vless_links?.length ? [...user.extra_vless_links] : []);
     setConfigVaultLinks(user.config_vault_links?.length ? [...user.config_vault_links] : []);
   }, [open, mode, userId, user, deployedServers]);
@@ -248,12 +345,8 @@ export default function UserModal({
   const visible = open && !(mode === "edit" && !user);
   const formId = "user-form-main";
   const isCreate = mode === "create";
-
-  function parseSpeedLimitMbps(raw: string): number {
-    const n = Math.floor(Number(String(raw).replace(",", ".")) || 0);
-    if (!Number.isFinite(n) || n <= 0) return 0;
-    return Math.min(9999, n);
-  }
+  const displayName = (remark.trim() || email.trim() || (isCreate ? "Новый клиент" : "Клиент")).trim();
+  const expiry = expiryTone(expiryMs);
 
   function buildPayload(): CreateUserPayload {
     const base: CreateUserPayload = {
@@ -267,7 +360,6 @@ export default function UserModal({
       tg_id: tgId.trim(),
       comment: comment.trim(),
       subscription_server_ids: selectedServerIds,
-      speed_limit_mbps: parseSpeedLimitMbps(speedLimitMbps),
       extra_vless_links: extraVlessLinks,
     };
     if (isCreate) return base;
@@ -349,11 +441,13 @@ export default function UserModal({
   }
 
   function openAddVlessModal() {
+    setExtraVlessOpen(true);
     setEditingVlessLink(null);
     setAddVlessOpen(true);
   }
 
   function openEditVlessModal(link: ExtraVlessLinkDto) {
+    setExtraVlessOpen(true);
     setEditingVlessLink(link);
     setAddVlessOpen(true);
   }
@@ -367,9 +461,20 @@ export default function UserModal({
     setExtraVlessLinks((prev) => prev.filter((x) => x.id !== id));
   }
 
+  async function copyText(key: string, text: string) {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedKey(key);
+      window.setTimeout(() => setCopiedKey((cur) => (cur === key ? null : cur)), 1600);
+    } catch {
+      /* ignore */
+    }
+  }
+
   const deployedTotal = deployedServers.length;
   const selectedCount = selectedServerIds.length;
   const allSelected = deployedTotal > 0 && selectedCount >= deployedTotal;
+  const extraKeyCount = extraVlessLinks.length + configVaultLinks.length;
 
   if (!visible) {
     return (
@@ -391,20 +496,27 @@ export default function UserModal({
 
   return createPortal(
     <>
-    <div
-      className="modal-backdrop modal-backdrop--admin"
-      role="presentation"
-    >
+    <div className="modal-backdrop modal-backdrop--admin user-modal-backdrop" role="presentation">
       <div
-        className="modal user-modal-panel"
+        className={`modal user-modal-panel${saving ? " user-modal-panel--busy" : ""}`}
         role="dialog"
         aria-labelledby="user-modal-title"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="modal-head user-modal-head">
-          <div>
-            <h2 id="user-modal-title">{isCreate ? "Новый клиент" : "Клиент"}</h2>
-            <p className="user-modal-sub">Лимиты, срок и список узлов в подписке</p>
+          <div className="user-modal-hero">
+            <p className="user-modal-kicker">{isCreate ? "Создание" : "Карточка клиента"}</p>
+            <h2 id="user-modal-title">{displayName}</h2>
+            <p className="user-modal-sub">Лимиты, срок и узлы в подписке</p>
+            <div className="user-modal-pills">
+              <span className={`user-modal-pill user-modal-pill--${enable ? "ok" : "muted"}`}>
+                {enable ? "Включён" : "Выключен"}
+              </span>
+              <span className={`user-modal-pill user-modal-pill--${expiry.tone}`}>{expiry.text}</span>
+              {excludeFromRevenue ? (
+                <span className="user-modal-pill user-modal-pill--muted">Не в выручке</span>
+              ) : null}
+            </div>
           </div>
           <button
             type="button"
@@ -420,7 +532,8 @@ export default function UserModal({
         </div>
 
         <form id={formId} className="modal-body user-modal-body" onSubmit={(e) => void onFormSubmit(e)}>
-          <section className="user-modal-card">
+          <section className="user-modal-card" style={{ "--i": 0 } as CSSProperties}>
+            <h3 className="user-modal-section-title">Статус</h3>
             <div className="user-modal-toggle-row">
               <div>
                 <div className="user-modal-label-lg">Включить</div>
@@ -433,7 +546,7 @@ export default function UserModal({
                 aria-pressed={enable}
               />
             </div>
-            <div className="user-modal-toggle-row" style={{ marginTop: "0.85rem" }}>
+            <div className="user-modal-toggle-row user-modal-toggle-row--spaced">
               <div>
                 <div className="user-modal-label-lg">Не учитывать в выручке</div>
                 <p className="user-modal-hint">Покупки и продления этого клиента не попадут в отчёт «Выручка».</p>
@@ -445,109 +558,127 @@ export default function UserModal({
                 aria-pressed={excludeFromRevenue}
               />
             </div>
-            <p className="user-modal-hint" style={{ margin: 0 }}>
+            <p className="user-modal-hint user-modal-hint--tight">
               Параметры VLESS / REALITY (порт, pbk, SNI, flow) настраиваются в карточке сервера → «Настройки подписки».
             </p>
           </section>
 
-          <section className="user-modal-card">
+          <section className="user-modal-card" style={{ "--i": 1 } as CSSProperties}>
             <h3 className="user-modal-section-title">Профиль</h3>
-            <div className="user-form-grid">
-              <div className="form-field">
-                <label>Email / метка</label>
-                <input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="email или логин" autoComplete="off" />
-              </div>
-              <div className="form-field">
-                <label>Имя в подписке (remark)</label>
-                <input value={remark} onChange={(e) => setRemark(e.target.value)} placeholder="🇳🇱 VPN" />
-              </div>
-              <div className="form-field">
-                <label>Telegram Chat ID получателя</label>
+            <div className="user-modal-fields">
+              <FloatField label="Email / метка" filled={Boolean(email.trim())}>
                 <input
+                  className="user-modal-field__control"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  autoComplete="off"
+                  aria-label="Email / метка"
+                />
+              </FloatField>
+              <FloatField label="Имя в подписке" filled={Boolean(remark.trim())}>
+                <input
+                  className="user-modal-field__control"
+                  value={remark}
+                  onChange={(e) => setRemark(e.target.value)}
+                  autoComplete="off"
+                  aria-label="Имя в подписке"
+                />
+              </FloatField>
+              <FloatField
+                label="Telegram Chat ID"
+                filled={Boolean(tgId.trim())}
+                span
+                hint="Числовой id из @userinfobot"
+                extra={
+                  !isCreate &&
+                  user &&
+                  (userExpiryNotifyEligible({ tg_id: tgId, expiry_time: expiryMs }) ||
+                    userExpiredNotifyEligible({ tg_id: tgId, expiry_time: expiryMs })) ? (
+                    <div className="expiry-notify-block">
+                      <button
+                        type="button"
+                        className="ghost"
+                        disabled={expiryNotifyBusy || saving}
+                        onClick={() => {
+                          void (async () => {
+                            setExpiryNotifyFlash(null);
+                            setExpiryNotifyBusy(true);
+                            const expired = userExpiredNotifyEligible({ tg_id: tgId, expiry_time: expiryMs });
+                            try {
+                              if (expired) {
+                                await notifyUserExpired(user.id, { tg_id: tgId, expiry_time: expiryMs });
+                              } else {
+                                await notifyUserExpiring(user.id, { tg_id: tgId, expiry_time: expiryMs });
+                              }
+                              setExpiryNotifyFlash({ type: "ok", text: "Сообщение отправлено в Telegram." });
+                            } catch (e) {
+                              setExpiryNotifyFlash({
+                                type: "err",
+                                text: expired ? formatNotifyExpiredError(String(e)) : formatNotifyExpiryError(String(e)),
+                              });
+                            } finally {
+                              setExpiryNotifyBusy(false);
+                            }
+                          })();
+                        }}
+                      >
+                        {expiryNotifyBusy ? (
+                          <>
+                            <Spinner /> Отправка…
+                          </>
+                        ) : userExpiredNotifyEligible({ tg_id: tgId, expiry_time: expiryMs }) ? (
+                          "Подписка истекла — уведомить в Telegram"
+                        ) : (
+                          "Напоминание в Telegram (истекает ≤ 3 суток)"
+                        )}
+                      </button>
+                      {expiryNotifyFlash ? (
+                        <p className={expiryNotifyFlash.type === "ok" ? "user-modal-field__hint" : "user-modal-field__hint err"}>
+                          {expiryNotifyFlash.text}
+                        </p>
+                      ) : null}
+                    </div>
+                  ) : null
+                }
+              >
+                <input
+                  className="user-modal-field__control"
                   value={tgId}
                   onChange={(e) => setTgId(e.target.value.replace(/\D/g, ""))}
                   inputMode="numeric"
-                  placeholder="числовой id из @userinfobot"
+                  aria-label="Telegram Chat ID"
                 />
-                <p className="field-hint">Укажите id пользователя, которому выдали эту подписку — бот покажет ему статистику и ссылку.</p>
-                {!isCreate &&
-                user &&
-                (userExpiryNotifyEligible({ tg_id: tgId, expiry_time: expiryMs }) ||
-                  userExpiredNotifyEligible({ tg_id: tgId, expiry_time: expiryMs })) ? (
-                  <div className="expiry-notify-block" style={{ marginTop: "0.55rem" }}>
-                    <button
-                      type="button"
-                      className="ghost"
-                      disabled={expiryNotifyBusy || saving}
-                      onClick={() => {
-                        void (async () => {
-                          setExpiryNotifyFlash(null);
-                          setExpiryNotifyBusy(true);
-                          const expired = userExpiredNotifyEligible({ tg_id: tgId, expiry_time: expiryMs });
-                          try {
-                            if (expired) {
-                              await notifyUserExpired(user.id, { tg_id: tgId, expiry_time: expiryMs });
-                            } else {
-                              await notifyUserExpiring(user.id, { tg_id: tgId, expiry_time: expiryMs });
-                            }
-                            setExpiryNotifyFlash({ type: "ok", text: "Сообщение отправлено в Telegram." });
-                          } catch (e) {
-                            setExpiryNotifyFlash({
-                              type: "err",
-                              text: expired ? formatNotifyExpiredError(String(e)) : formatNotifyExpiryError(String(e)),
-                            });
-                          } finally {
-                            setExpiryNotifyBusy(false);
-                          }
-                        })();
-                      }}
-                    >
-                      {expiryNotifyBusy ? (
-                        <>
-                          <Spinner /> Отправка…
-                        </>
-                      ) : userExpiredNotifyEligible({ tg_id: tgId, expiry_time: expiryMs }) ? (
-                        "Подписка истекла — уведомить в Telegram"
-                      ) : (
-                        "Напоминание в Telegram (истекает ≤ 3 суток)"
-                      )}
-                    </button>
-                    {expiryNotifyFlash ? (
-                      <p
-                        className={expiryNotifyFlash.type === "ok" ? "field-hint" : "field-hint err"}
-                        style={{ marginTop: "0.35rem", marginBottom: 0 }}
-                      >
-                        {expiryNotifyFlash.text}
-                      </p>
-                    ) : null}
-                  </div>
-                ) : null}
-              </div>
-              <div className="form-field form-field-span-2">
-                <label>Информация о клиенте (только в панели)</label>
+              </FloatField>
+              <FloatField label="Комментарий" filled={Boolean(comment.trim())} span textarea>
                 <textarea
-                  className="user-modal-textarea"
+                  className="user-modal-field__control"
                   rows={2}
                   value={comment}
                   onChange={(e) => setComment(e.target.value)}
-                  placeholder="Например: Для мамы, тариф по договоренности, важные заметки..."
+                  aria-label="Комментарий"
                 />
-              </div>
+              </FloatField>
             </div>
           </section>
 
-          <section className="user-modal-card user-modal-card-highlight">
-            <h3 className="user-modal-section-title">Лимиты и подписка</h3>
-            <div className="user-form-grid">
-              <div className="form-field form-field-span-2">
-                <label>Тариф</label>
-                <p className="field-hint" style={{ marginTop: 0, marginBottom: "0.45rem" }}>
-                  Сейчас: <b>{currentPlanLabel}</b>
-                </p>
+          <section className="user-modal-card user-modal-card-highlight" style={{ "--i": 2 } as CSSProperties}>
+            <div className="user-modal-section-head">
+              <h3 className="user-modal-section-title">Лимиты и подписка</h3>
+              <span className="user-modal-section-kicker">{currentPlanLabel}</span>
+            </div>
+            <div className="user-modal-fields">
+              <FloatField
+                label="Тариф"
+                filled
+                span
+                hint="Выбор обновляет ГБ и срок. Тарифы — в разделе «Подписки»."
+              >
                 <select
+                  className="user-modal-field__control"
                   value={String(selectedPlanId)}
                   onChange={(e) => applyPlan(Number(e.target.value) || 0)}
                   disabled={saving || shopPlans.length === 0}
+                  aria-label="Тариф"
                 >
                   <option value="0">Индивидуальный (ручные лимиты)</option>
                   {shopPlans.map((p) => (
@@ -556,14 +687,10 @@ export default function UserModal({
                     </option>
                   ))}
                 </select>
-                <p className="field-hint">
-                  Список и параметры тарифов — из раздела «Подписки». При выборе тарифа обновляются лимит ГБ и срок
-                  подписки.
-                </p>
-              </div>
-              <div className="form-field">
-                <label>Общий лимит трафика (GB)</label>
+              </FloatField>
+              <FloatField label="Лимит трафика, ГБ" filled={Boolean(String(totalGb).trim())} hint="0 = без лимита">
                 <input
+                  className="user-modal-field__control"
                   value={totalGb}
                   onChange={(e) => {
                     const v = e.target.value;
@@ -573,23 +700,18 @@ export default function UserModal({
                     setSelectedPlanId(detectPlanId(gb, shopPlans));
                   }}
                   inputMode="decimal"
-                  placeholder="0 = без лимита"
+                  aria-label="Лимит трафика, ГБ"
                 />
-                <p className="field-hint">
-                  Трафик и «Онлайн» подтягиваются с узлов при обновлении списка клиентов (Xray statsquery). Здесь можно
-                  скорректировать вручную при необходимости.
-                </p>
-              </div>
-              <div className="form-field">
-                <label>Дата окончания</label>
+              </FloatField>
+              <FloatField
+                label="Дата окончания"
+                filled={expiryMs > 0}
+                picker
+                hint="Пусто — без срока. Иначе окончание в 12:00."
+              >
                 <ExpiryDateTimePicker valueMs={expiryMs} onChangeMs={setExpiryMs} disabled={saving} />
-                <p className="field-hint">
-                  Пусто / «Без срока» — без ограничения по времени. Если дата задана, окончание — в <b>12:00</b> этого дня
-                  (по времени браузера).
-                </p>
-              </div>
-              <div className="form-field form-field-span-2">
-                <label>Серверы в подписке</label>
+              </FloatField>
+              <div className="user-modal-servers user-modal-field--span">
                 <div className="user-server-pick-row">
                   <button
                     type="button"
@@ -607,115 +729,118 @@ export default function UserModal({
                         : `Выбрано: ${selectedCount} из ${deployedTotal}`}
                   </span>
                 </div>
-                <p className="field-hint">
-                  Как в «Коммуникациях»: переносите узлы вправо. По умолчанию в подписке все развёрнутые серверы.
-                </p>
-              </div>
-              <div className="form-field form-field-span-2">
-                <label>Ограничение скорости, Мбит/с</label>
-                <input
-                  value={speedLimitMbps}
-                  onChange={(e) => setSpeedLimitMbps(sanitizePositiveIntInput(e.target.value))}
-                  onBlur={() => setSpeedLimitMbps((v) => (v ? sanitizePositiveIntInput(v) : ""))}
-                  inputMode="numeric"
-                  pattern="[0-9]*"
-                  placeholder="0 = без лимита"
-                  disabled={saving}
-                  style={{ maxWidth: "180px" }}
-                />
-                <p className="field-hint">
-                  По умолчанию выключено. Пусто или 0 — без ограничения. Лимит применяется на узлах Xray только к этому
-                  пользователю.
-                </p>
+                <p className="user-modal-field__hint">По умолчанию все развёрнутые узлы.</p>
               </div>
             </div>
           </section>
 
           {!isCreate && user ? (
-            <section className="user-modal-card">
+            <section className="user-modal-card" style={{ "--i": 3 } as CSSProperties}>
               <h3 className="user-modal-section-title">Идентификаторы</h3>
-              <div className="user-form-grid">
-                <div className="form-field">
-                  <label>UUID</label>
-                  <input className="mono" value={uuid} readOnly title="Задаётся при создании" />
-                </div>
-                <div className="form-field">
-                  <label>Subscription ID</label>
-                  <input className="mono" value={subToken} readOnly title="Токен URL подписки" />
-                </div>
+              <div className="user-modal-fields">
+                <CopyField
+                  label="UUID"
+                  value={uuid}
+                  title="Задаётся при создании"
+                  copyKey="uuid"
+                  copiedKey={copiedKey}
+                  onCopy={(key, text) => void copyText(key, text)}
+                />
+                <CopyField
+                  label="Subscription ID"
+                  value={subToken}
+                  title="Токен URL подписки"
+                  copyKey="sub"
+                  copiedKey={copiedKey}
+                  onCopy={(key, text) => void copyText(key, text)}
+                />
               </div>
             </section>
           ) : (
-            <section className="user-modal-card user-modal-card-muted">
-              <p className="user-modal-hint" style={{ margin: 0 }}>
-                После создания здесь появятся UUID и subscription id — их можно скопировать в списке клиентов.
+            <section className="user-modal-card user-modal-card-muted" style={{ "--i": 3 } as CSSProperties}>
+              <p className="user-modal-hint user-modal-hint--tight">
+                После создания здесь появятся UUID и subscription id — их можно скопировать в карточке клиента.
               </p>
             </section>
           )}
 
-          <section className="user-modal-card">
-            <div className="user-modal-section-head">
-              <h3 className="user-modal-section-title">Дополнительные VLESS ключи</h3>
-              <button type="button" className="ghost btn-sm" disabled={saving} onClick={openAddVlessModal}>
-                Добавить vless ключ
-              </button>
+          <section className={`user-modal-card user-modal-vless${extraVlessOpen ? " is-open" : ""}`} style={{ "--i": 4 } as CSSProperties}>
+            <button
+              type="button"
+              className="user-modal-vless__toggle"
+              aria-expanded={extraVlessOpen}
+              onClick={() => setExtraVlessOpen((v) => !v)}
+            >
+              <span className="user-modal-vless__toggle-copy">
+                <span className="user-modal-section-title">Дополнительные VLESS ключи</span>
+                <span className="user-modal-vless__count">
+                  {extraKeyCount > 0 ? `${extraKeyCount}` : "нет"}
+                </span>
+              </span>
+              <IconChevron className="user-modal-vless__chevron" />
+            </button>
+            <div className="user-modal-vless__fold">
+              <div className="user-modal-vless__inner">
+                <div className="user-modal-vless__toolbar">
+                  <p className="user-modal-hint user-modal-hint--tight">
+                    Ссылки из панели и конфиг-хранилища попадают в подписку. На Xray не деплоятся.
+                  </p>
+                  <button type="button" className="ghost btn-sm" disabled={saving} onClick={openAddVlessModal}>
+                    Добавить ключ
+                  </button>
+                </div>
+                {extraKeyCount === 0 ? (
+                  <p className="muted user-modal-empty-keys">Нет дополнительных ключей.</p>
+                ) : (
+                  <ul className="user-extra-vless-list">
+                    {configVaultLinks.map((link) => {
+                      const uriPreview = link.masked_uri || link.uri;
+                      return (
+                        <li key={`vault-${link.vault_key_id}`} className="user-extra-vless-item user-extra-vless-item--vault">
+                          <div className="user-extra-vless-meta">
+                            <strong>
+                              {link.name}
+                              <span className="user-extra-vless-badge">Конфиг-хранилище</span>
+                            </strong>
+                            <span className="mono user-extra-vless-uri" title={link.uri}>
+                              {uriPreview.length > 72 ? `${uriPreview.slice(0, 72)}…` : uriPreview}
+                            </span>
+                          </div>
+                        </li>
+                      );
+                    })}
+                    {extraVlessLinks.map((link) => (
+                      <li key={link.id} className="user-extra-vless-item">
+                        <div className="user-extra-vless-meta">
+                          <strong>{link.label}</strong>
+                          <span className="mono user-extra-vless-uri" title={link.uri}>
+                            {link.uri.length > 72 ? `${link.uri.slice(0, 72)}…` : link.uri}
+                          </span>
+                        </div>
+                        <div className="user-extra-vless-actions">
+                          <button
+                            type="button"
+                            className="ghost btn-sm"
+                            disabled={saving}
+                            onClick={() => openEditVlessModal(link)}
+                          >
+                            Изменить
+                          </button>
+                          <button
+                            type="button"
+                            className="ghost btn-sm err-text"
+                            disabled={saving}
+                            onClick={() => removeExtraVless(link.id)}
+                          >
+                            Удалить
+                          </button>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
             </div>
-            <p className="user-modal-hint" style={{ marginTop: 0 }}>
-              Вручную добавленные ссылки и ключи из конфиг-хранилища попадают в подписку клиента вместе с узлами
-              панели. На сервера Xray не деплоятся.
-            </p>
-            {extraVlessLinks.length === 0 && configVaultLinks.length === 0 ? (
-              <p className="muted" style={{ margin: 0, fontSize: "0.88rem" }}>
-                Нет дополнительных ключей.
-              </p>
-            ) : (
-              <ul className="user-extra-vless-list">
-                {configVaultLinks.map((link) => {
-                  const uriPreview = link.masked_uri || link.uri;
-                  return (
-                    <li key={`vault-${link.vault_key_id}`} className="user-extra-vless-item user-extra-vless-item--vault">
-                      <div className="user-extra-vless-meta">
-                        <strong>
-                          {link.name}
-                          <span className="user-extra-vless-badge">Конфиг-хранилище</span>
-                        </strong>
-                        <span className="mono user-extra-vless-uri" title={link.uri}>
-                          {uriPreview.length > 72 ? `${uriPreview.slice(0, 72)}…` : uriPreview}
-                        </span>
-                      </div>
-                    </li>
-                  );
-                })}
-                {extraVlessLinks.map((link) => (
-                  <li key={link.id} className="user-extra-vless-item">
-                    <div className="user-extra-vless-meta">
-                      <strong>{link.label}</strong>
-                      <span className="mono user-extra-vless-uri" title={link.uri}>
-                        {link.uri.length > 72 ? `${link.uri.slice(0, 72)}…` : link.uri}
-                      </span>
-                    </div>
-                    <div className="user-extra-vless-actions">
-                      <button
-                        type="button"
-                        className="ghost btn-sm"
-                        disabled={saving}
-                        onClick={() => openEditVlessModal(link)}
-                      >
-                        Изменить
-                      </button>
-                      <button
-                        type="button"
-                        className="ghost btn-sm err-text"
-                        disabled={saving}
-                        onClick={() => removeExtraVless(link.id)}
-                      >
-                        Удалить
-                      </button>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            )}
           </section>
         </form>
 

@@ -1,9 +1,7 @@
 import { Router } from "express";
-import { randomBytes } from "node:crypto";
 import surveysRouter from "./surveys.js";
-import { buildSegmentRows, toChatId, uniqTargets, type TargetUserLite } from "../communicationTargets.js";
-import { logCommunicationMessage, stripHtmlPreview } from "../communicationLog.js";
-import { readCommunicationPhoto, saveCommunicationPhoto, deleteCommunicationPhoto } from "../communicationMediaFiles.js";
+import { buildSegmentRows, toChatId } from "../communicationTargets.js";
+import { readCommunicationPhoto, deleteCommunicationPhoto } from "../communicationMediaFiles.js";
 import {
   createCommunicationSegment,
   deleteCommunicationSegment,
@@ -11,15 +9,14 @@ import {
   ensureWhitelistConnectedSegment,
   getCommunicationMessageLogById,
   deleteCommunicationMessageLog,
-  getUser,
   isSystemCommunicationSegment,
   isTestSubscriptionSystemSegment,
   isWhitelistConnectedSystemSegment,
   listCommunicationMessageLog,
   listCommunicationSegments,
   listTestSubscriptionSegmentUserIds,
-  listWhitelistConnectedSegmentUserIds,
   listUsers,
+  listWhitelistConnectedSegmentUserIds,
   refreshTestSubscriptionSegment,
   refreshWhitelistConnectedSegment,
   updateCommunicationSegment,
@@ -30,28 +27,45 @@ import { sweepExpiredManualWhitelistGrants } from "../whitelistVaultDb.js";
 import { requireAuth } from "../middleware/requireAuth.js";
 import { getAutoCommunicationsConfig, setAutoCommunicationsConfig } from "../autoCommunicationsStore.js";
 import { normalizeAutoCommunicationsConfig } from "../autoCommunicationsTypes.js";
-import { sendTelegramHtml, sendTelegramPhotoBinary, telegramHasDialog } from "../telegram/api.js";
-import { getTelegramBotToken, getTelegramWebAppUrl } from "../telegram/env.js";
+import { getTelegramBotToken } from "../telegram/env.js";
+import { telegramHasDialog } from "../telegram/api.js";
 import { runAutoExpiryNotificationsOnce } from "../telegram/expiryNotify.js";
 import triggerMailingsRouter from "./triggerMailings.js";
+import {
+  CommunicationSendError,
+  executeCommunicationSend,
+  normalizeScheduledPayload,
+  type CommunicationSendPayload,
+} from "../communicationSend.js";
+import {
+  addScheduledMailing,
+  cancelScheduledMailing,
+  listScheduledMailings,
+} from "../scheduledMailingsStore.js";
+import { friendlyGeminiError, generateGeminiText, isGeminiConfigured } from "../telegram/geminiAi.js";
+
+const MAIL_IMPROVE_INSTRUCTION =
+  "Ты редактор рекламных сообщений VPN-сервиса для Telegram. " +
+  "Улучши черновик пользователя: сделай текст более привлекательным и продающим, сохрани смысл и все факты. " +
+  "Пиши по-русски обычным текстом. Не используй HTML и Markdown: никаких <b> </b> <i> ** __ ` и прочих тегов. " +
+  "Не выдумывай цены, тарифы, сроки, промокоды и кнопки. Не пиши фейковые кнопки в квадратных скобках вроде [Подписка]. " +
+  "Не раздувай текст в простыню — держи примерно тот же объём или чуть короче, если черновик длинный. " +
+  "Верни только готовый текст сообщения, без пояснений и кавычек вокруг.";
+
+function stripMailImproveMarkup(text: string): string {
+  return String(text ?? "")
+    .replace(/<\/?(?:b|strong|i|em|u|s|code|pre)(?:\s[^>]*)?>/gi, "")
+    .replace(/\*\*(.+?)\*\*/g, "$1")
+    .replace(/__(.+?)__/g, "$1")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
 
 const router = Router();
 router.use(requireAuth);
 
-type SendBody = {
-  mode?: unknown;
-  text?: unknown;
-  title?: unknown;
-  user_id?: unknown;
-  user_ids?: unknown;
-  segment_id?: unknown;
-  mark_enabled?: unknown;
-  mark_text?: unknown;
-  photo_base64?: unknown;
-  photo_mime?: unknown;
-  photo_name?: unknown;
-  buttons?: unknown;
-};
+type SendBody = CommunicationSendPayload & { send_at?: unknown };
 
 type SegmentBody = {
   name?: unknown;
@@ -67,20 +81,6 @@ type SegmentBody = {
   preset_enabled?: unknown;
   preset_text?: unknown;
 };
-
-function parseDataUrl(input: string): { mime: string; bytes: Uint8Array } | null {
-  const m = /^data:([^;,]+);base64,(.+)$/i.exec(input.trim());
-  if (!m) return null;
-  const mime = m[1] || "image/jpeg";
-  const b64 = m[2] || "";
-  try {
-    const buf = Buffer.from(b64, "base64");
-    if (!buf.length) return null;
-    return { mime, bytes: new Uint8Array(buf) };
-  } catch {
-    return null;
-  }
-}
 
 router.get("/targets", async (_req, res) => {
   const base = listUsers().map((u) => ({
@@ -149,29 +149,6 @@ function parseSegmentBody(body: SegmentBody): Omit<CommunicationSegmentRow, "id"
       body.preset_enabled === true || body.preset_enabled === 1 || body.preset_enabled === "1",
     preset_text: String(body.preset_text ?? "").trim().slice(0, 4000),
   };
-}
-
-type CommInlineBtn =
-  | { text: string; callback_data: string; style?: "primary" | "success" | "danger" }
-  | { text: string; web_app: { url: string }; style?: "primary" | "success" | "danger" };
-
-function parseButtons(raw: unknown): CommInlineBtn[] {
-  const arr = Array.isArray(raw) ? raw : [];
-  const ids = [...new Set(arr.map((x) => String(x ?? "").trim()))];
-  const out: CommInlineBtn[] = [];
-  for (const id of ids) {
-    if (id === "pay") out.push({ text: "Оплата подписки", callback_data: "pay" });
-    else if (id === "ref") out.push({ text: "Пригласи друга", callback_data: "ref_menu" });
-    else if (id === "sub") out.push({ text: "Подписка", callback_data: "sub" });
-    else if (id === "buygb") out.push({ text: "Докупить ГБ", callback_data: "buygb" });
-    else if (id === "whitelist") {
-      out.push({ text: "Белые списки", callback_data: "wlmenu", style: "success" });
-    } else if (id === "webapp") {
-      const url = getTelegramWebAppUrl();
-      if (url) out.push({ text: "Открыть приложение", web_app: { url } });
-    }
-  }
-  return out;
 }
 
 router.get("/segments", (_req, res) => {
@@ -341,45 +318,6 @@ router.post("/segments/:id/refresh-test-subscriptions", (req, res) => {
   res.json(segment);
 });
 
-function daysLeft(u: { expiry_time: number }): number | null {
-  if (!u.expiry_time || u.expiry_time <= 0) return null;
-  const now = new Date();
-  now.setHours(0, 0, 0, 0);
-  const end = new Date(u.expiry_time);
-  end.setHours(0, 0, 0, 0);
-  const diff = Math.round((end.getTime() - now.getTime()) / 86400000);
-  return Math.max(0, diff);
-}
-
-function remainingGb(u: { total_gb: number; traffic_up: number; traffic_down: number }): number | null {
-  if (u.total_gb <= 0) return null;
-  const used = (u.traffic_up + u.traffic_down) / (1024 * 1024 * 1024);
-  return Math.max(0, Number((u.total_gb - used).toFixed(2)));
-}
-
-function formatDaysBeforeEnd(value: number | null): string {
-  if (value == null) return "без срока";
-  if (value <= 0) return "сегодня";
-  const mod10 = value % 10;
-  const mod100 = value % 100;
-  if (mod10 === 1 && mod100 !== 11) return `${value} день`;
-  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return `${value} дня`;
-  return `${value} дней`;
-}
-
-function formatGbBeforeEnd(value: number | null): string {
-  if (value == null) return "без лимита";
-  return `${value.toLocaleString("ru-RU", { maximumFractionDigits: 2 })} ГБ`;
-}
-
-function renderCommunicationText(template: string, userId: number): string {
-  const u = getUser(userId);
-  if (!u) return template;
-  return template
-    .replaceAll("{days_before_end}", formatDaysBeforeEnd(daysLeft(u)))
-    .replaceAll("{gb_before_end}", formatGbBeforeEnd(remainingGb(u)));
-}
-
 router.get("/segments/:id/users", async (req, res) => {
   const segmentId = String(req.params.id ?? "").trim();
   if (!segmentId) {
@@ -401,6 +339,44 @@ router.get("/segments/:id/users", async (req, res) => {
   }
 });
 
+
+router.get("/scheduled", (_req, res) => {
+  res.json({ items: listScheduledMailings("pending") });
+});
+
+router.delete("/scheduled/:id", (req, res) => {
+  const id = String(req.params.id ?? "").trim();
+  if (!id) {
+    res.status(400).json({ error: "id_required" });
+    return;
+  }
+  const job = cancelScheduledMailing(id);
+  if (!job) {
+    res.status(404).json({ error: "not_found" });
+    return;
+  }
+  res.json({ ok: true, id: job.id });
+});
+
+router.post("/improve-text", async (req, res) => {
+  if (!isGeminiConfigured()) {
+    res.status(503).json({ error: friendlyGeminiError("gemini_not_configured", "panel") });
+    return;
+  }
+  const text = String((req.body as { text?: unknown } | undefined)?.text ?? "").trim();
+  if (!text) {
+    res.status(400).json({ error: "message_required" });
+    return;
+  }
+  try {
+    const improved = stripMailImproveMarkup(await generateGeminiText(MAIL_IMPROVE_INSTRUCTION, text));
+    res.json({ improved });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    res.status(502).json({ error: friendlyGeminiError(msg, "panel") });
+  }
+});
+
 router.post("/send", async (req, res) => {
   if (!getTelegramBotToken()) {
     res.status(503).json({ error: "telegram_not_configured" });
@@ -408,189 +384,48 @@ router.post("/send", async (req, res) => {
   }
 
   const body = (req.body ?? {}) as SendBody;
-  const mode = String(body.mode ?? "").trim();
-  const text = String(body.text ?? "").trim();
-  if (!text) {
-    res.status(400).json({ error: "message_required" });
-    return;
-  }
-
-  let photo: { mime: string; bytes: Uint8Array; filename: string } | null = null;
-  if (body.photo_base64 != null && String(body.photo_base64).trim()) {
-    const parsed = parseDataUrl(String(body.photo_base64));
-    if (!parsed) {
-      res.status(400).json({ error: "invalid_photo" });
+  const sendAtRaw = String(body.send_at ?? "").trim();
+  if (sendAtRaw) {
+    const sendAtMs = Date.parse(sendAtRaw);
+    if (!Number.isFinite(sendAtMs)) {
+      res.status(400).json({ error: "invalid_send_at" });
       return;
     }
-    photo = {
-      mime: String((body.photo_mime ?? parsed.mime) || "image/jpeg"),
-      bytes: parsed.bytes,
-      filename: String(body.photo_name ?? "photo.jpg").trim() || "photo.jpg",
-    };
-  }
-
-  let targets: Array<{ chatId: number; userId: number; userName: string }> = [];
-  if (mode === "global") {
-    const all = listUsers().map((u) => ({ id: u.id, name: u.name, tg_id: u.tg_id, enable: u.enable === 1 }));
-    targets = uniqTargets(all);
-  } else if (mode === "single") {
-    const id = Number(body.user_id);
-    if (!Number.isFinite(id) || id <= 0) {
-      res.status(400).json({ error: "user_required" });
-      return;
-    }
-    const user = getUser(id);
-    if (!user) {
-      res.status(404).json({ error: "not_found" });
-      return;
-    }
-    const row = { id: user.id, name: user.name, tg_id: user.tg_id, enable: user.enable === 1 };
-    targets = uniqTargets([row]);
-  } else if (mode === "selected") {
-    const idsRaw = Array.isArray(body.user_ids) ? body.user_ids : [];
-    const ids = [...new Set(idsRaw.map((x) => Math.floor(Number(x))).filter((n) => Number.isFinite(n) && n > 0))];
-    if (ids.length === 0) {
-      res.status(400).json({ error: "users_required" });
-      return;
-    }
-    const rows: TargetUserLite[] = [];
-    for (const id of ids) {
-      const u = getUser(id);
-      if (!u) continue;
-      rows.push({ id: u.id, name: u.name, tg_id: u.tg_id, enable: u.enable === 1 });
-    }
-    targets = uniqTargets(rows);
-  } else if (mode === "segment") {
-    const segmentId = String(body.segment_id ?? "").trim();
-    if (!segmentId) {
-      res.status(400).json({ error: "segment_required" });
-      return;
-    }
-    try {
-      const rows = await buildSegmentRows(segmentId);
-      targets = uniqTargets(rows);
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      if (msg === "segment_not_found") {
-        res.status(404).json({ error: msg });
-        return;
-      }
-      res.status(500).json({ error: msg });
-      return;
-    }
-  } else {
-    res.status(400).json({ error: "invalid_mode" });
-    return;
-  }
-
-  if (targets.length === 0) {
-    res.status(400).json({ error: "no_targets" });
-    return;
-  }
-
-  const failures: Array<{ user_id: number; user_name: string; error: string }> = [];
-  let sent = 0;
-  const markEnabled = body.mark_enabled === true || body.mark_enabled === 1 || body.mark_enabled === "1";
-  const markText = String(body.mark_text ?? "").trim();
-  const header = markEnabled ? `<b>${markText || "Сообщение от администратора"}</b>\n\n` : "";
-  const buttons = parseButtons(body.buttons);
-  const replyMarkup = buttons.length > 0 ? { inline_keyboard: buttons.map((b) => [b]) } : undefined;
-  for (const t of targets) {
-    const caption = `${header}${renderCommunicationText(text, t.userId)}`;
-    try {
-      if (photo) {
-        await sendTelegramPhotoBinary(t.chatId, photo.bytes, {
-          caption,
-          filename: photo.filename,
-          mimeType: photo.mime,
-          parse_mode: "HTML",
-          ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
+    if (sendAtMs > Date.now() + 15_000) {
+      try {
+        const payload = normalizeScheduledPayload(body);
+        const job = addScheduledMailing(new Date(sendAtMs).toISOString(), payload);
+        res.json({
+          ok: true,
+          scheduled: true,
+          id: job.id,
+          send_at: job.send_at,
+          sent: 0,
+          attempted: 0,
+          failed: 0,
+          failures: [],
         });
-      } else {
-        await sendTelegramHtml(t.chatId, caption, replyMarkup);
+      } catch (e) {
+        if (e instanceof CommunicationSendError) {
+          res.status(e.status).json({ error: e.code });
+          return;
+        }
+        res.status(500).json({ error: e instanceof Error ? e.message : String(e) });
       }
-      sent++;
-    } catch (e) {
-      failures.push({
-        user_id: t.userId,
-        user_name: t.userName,
-        error: e instanceof Error ? e.message : String(e),
-      });
+      return;
     }
   }
-
-  const segment =
-    mode === "segment" ? listCommunicationSegments().find((s) => s.id === String(body.segment_id ?? "").trim()) : undefined;
-
-  const logId = randomBytes(8).toString("hex");
-  let photoMeta: { photo_path: string; photo_mime: string; photo_name: string } | null = null;
-  if (photo) {
-    try {
-      photoMeta = saveCommunicationPhoto(logId, photo.bytes, photo.mime, photo.filename);
-    } catch (e) {
-      console.error("[communications] save photo:", e instanceof Error ? e.message : e);
-    }
-  }
-
-  const buttonsStored = Array.isArray(body.buttons)
-    ? [
-        ...new Set(
-          body.buttons
-            .map((x) => String(x ?? "").trim())
-            .filter(
-              (x) =>
-                x === "pay" ||
-                x === "ref" ||
-                x === "sub" ||
-                x === "buygb" ||
-                x === "webapp" ||
-                x === "whitelist",
-            ),
-        ),
-      ]
-    : [];
-
-  const selectedUserIds =
-    mode === "selected" || mode === "single" ? targets.map((t) => t.userId) : [];
 
   try {
-    logCommunicationMessage({
-      id: logId,
-      automatic: false,
-      source_label: MODE_SOURCE_LABELS[mode] ?? "Рассылка из панели",
-      mode: mode as "global" | "single" | "selected" | "segment",
-      ...(segment ? { segment_id: segment.id, segment_name: segment.name } : {}),
-      text: stripHtmlPreview(`${header}${text}`),
-      body_text: text,
-      ...(String(body.title ?? "").trim() ? { title: String(body.title).trim() } : {}),
-      mark_enabled: markEnabled,
-      ...(markText ? { mark_text: markText } : {}),
-      ...(buttonsStored.length ? { buttons: buttonsStored } : {}),
-      ...(selectedUserIds.length ? { user_ids: selectedUserIds } : {}),
-      has_photo: Boolean(photo),
-      ...(photoMeta
-        ? {
-            photo_path: photoMeta.photo_path,
-            photo_mime: photoMeta.photo_mime,
-            photo_name: photoMeta.photo_name,
-          }
-        : {}),
-      recipients: targets.map((t) => ({ user_id: t.userId, user_name: t.userName })),
-      sent,
-      attempted: targets.length,
-      failed: failures.length,
-    });
+    const result = await executeCommunicationSend(body);
+    res.json(result);
   } catch (e) {
-    console.error("[communications] log:", e);
+    if (e instanceof CommunicationSendError) {
+      res.status(e.status).json({ error: e.code });
+      return;
+    }
+    res.status(500).json({ error: e instanceof Error ? e.message : String(e) });
   }
-
-  res.json({
-    ok: failures.length === 0,
-    sent,
-    attempted: targets.length,
-    failed: failures.length,
-    failures,
-  });
 });
 
 router.use("/surveys", surveysRouter);

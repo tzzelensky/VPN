@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import DashboardLayout from "../components/DashboardLayout";
 import PageLoadingState from "../components/PageLoadingState";
+import PageSectionHero from "../components/PageSectionHero";
 import PurchaseDiscountsTab from "../components/PurchaseDiscountsTab";
 import ExpiryDateTimePicker from "../components/ExpiryDateTimePicker";
 import {
@@ -326,31 +327,49 @@ export default function PromoCodesPage({ onLogout }: { onLogout: () => void }) {
 
   return (
     <DashboardLayout onLogout={onLogout}>
-      <section className="panel users-hero-panel">
-        <h1>Промоакции</h1>
-        <p className="sub users-hero-sub">Промокоды, очередь скидок из рулетки и ежедневного подарка.</p>
-        <div className="survey-segmented promo-page-tabs" role="tablist" aria-label="Раздел промоакций">
-          <button
-            type="button"
-            role="tab"
-            className={`survey-segmented-btn${tab === "promos" ? " active" : ""}`}
-            aria-selected={tab === "promos"}
-            onClick={() => setTab("promos")}
-          >
-            Промокоды
-          </button>
-          <button
-            type="button"
-            role="tab"
-            className={`survey-segmented-btn${tab === "discounts" ? " active" : ""}`}
-            aria-selected={tab === "discounts"}
-            onClick={() => setTab("discounts")}
-          >
-            Скидки
-          </button>
-        </div>
+      <PageSectionHero
+        title="Промоакции"
+        helpCards={[
+          {
+            kicker: "Промокоды",
+            title: "Коды и акции",
+            text: "Создание промокодов со скидками и подарками ГБ/дней.",
+          },
+          {
+            kicker: "Скидки",
+            title: "Очередь скидок",
+            text: "Скидки из рулетки и ежедневного подарка для покупок.",
+          },
+          {
+            kicker: "Лимиты",
+            title: "Ограничения",
+            text: "Срок действия, число активаций и привязка к тарифам.",
+          },
+        ]}
+      >
         {msg && tab === "promos" ? <div className={`flash ${msg.type === "ok" ? "ok" : "err"}`}>{msg.text}</div> : null}
-      </section>
+      </PageSectionHero>
+
+      <div className="survey-segmented promo-page-tabs" role="tablist" aria-label="Раздел промоакций">
+        <button
+          type="button"
+          role="tab"
+          className={`survey-segmented-btn${tab === "promos" ? " active" : ""}`}
+          aria-selected={tab === "promos"}
+          onClick={() => setTab("promos")}
+        >
+          Промокоды
+        </button>
+        <button
+          type="button"
+          role="tab"
+          className={`survey-segmented-btn${tab === "discounts" ? " active" : ""}`}
+          aria-selected={tab === "discounts"}
+          onClick={() => setTab("discounts")}
+        >
+          Скидки
+        </button>
+      </div>
 
       {tab === "discounts" ? (
         <section className="panel">

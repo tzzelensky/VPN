@@ -2,10 +2,35 @@ import { ReactNode, useCallback, useEffect, useRef, useState, type SVGProps } fr
 import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import { createUser, listServers, logout, renewUserSubscription, type CreateUserPayload, type ServerDto, type UserDto } from "../api";
 import { isAdminMobileShell, isAdminMobileScrollArea } from "../adminMobile";
+import {
+  IconAppeals,
+  IconConfigVault,
+  IconDevice,
+  IconGame,
+  IconGift,
+  IconHome,
+  IconComms,
+  IconLogs,
+  IconPromo,
+  IconProxy,
+  IconReferral,
+  IconServers,
+  IconShop,
+  IconUsers,
+  IconWhiteFlag,
+} from "../adminNavIcons";
 import { computeDashboardStats, isExpirySoon, isTrafficSoon, remainingTrafficGb, type DashboardStats } from "../dashboardStats";
+import { ADMIN_HOME_PATH } from "../homeSearchIndex";
 import { clearUsersListCache, readUsersListCache } from "../usersListCache";
 import { notifyUsersChanged } from "../usersEvents";
 import { prefetchUsersInBackground, USERS_CACHE_UPDATED_EVENT } from "../usersPrefetch";
+import {
+  ensureOnlineStatsSynced,
+  getOnlineStatsStatus,
+  clearOnlineStatsSession,
+  ONLINE_STATS_EVENT,
+  type OnlineStatsEventDetail,
+} from "../onlineStatsSync";
 import { useAnimatedNumber } from "../hooks/useAnimatedNumber";
 import AdminSidebarThemeDock from "./AdminSidebarThemeDock";
 import AdminSettingsButton from "./AdminSettingsButton";
@@ -18,142 +43,22 @@ import { normalizeSectionOrder } from "../panelNavUtils";
 import { usePanelSettings } from "../panelSettingsContext";
 import type { PanelSectionKey } from "../panelSettingsTypes";
 
-type NavItem = { to: string; label: string; Icon: (p: SVGProps<SVGSVGElement>) => ReactNode; sectionKey: PanelSectionKey };
+type NavItem = {
+  to: string;
+  label: string;
+  Icon: (p: SVGProps<SVGSVGElement>) => ReactNode;
+  sectionKey?: PanelSectionKey;
+  end?: boolean;
+};
 
-function IconServers(p: SVGProps<SVGSVGElement>) {
-  return (
-    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden {...p}>
-      <rect x="2" y="3" width="20" height="6" rx="1" />
-      <rect x="2" y="15" width="20" height="6" rx="1" />
-      <circle cx="7" cy="6" r="1" fill="currentColor" stroke="none" />
-      <circle cx="7" cy="18" r="1" fill="currentColor" stroke="none" />
-    </svg>
-  );
-}
+type SectionNavItem = NavItem & { sectionKey: PanelSectionKey };
 
-function IconUsers(p: SVGProps<SVGSVGElement>) {
-  return (
-    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden {...p}>
-      <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
-      <circle cx="9" cy="7" r="4" />
-      <path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" />
-    </svg>
-  );
-}
-
-function IconShop(p: SVGProps<SVGSVGElement>) {
-  return (
-    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden {...p}>
-      <path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4Z" />
-      <path d="M3 6h18M16 10a4 4 0 0 1-8 0" />
-    </svg>
-  );
-}
-
-function IconComms(p: SVGProps<SVGSVGElement>) {
-  return (
-    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden {...p}>
-      <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-    </svg>
-  );
-}
-
-function IconAppeals(p: SVGProps<SVGSVGElement>) {
-  return (
-    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden {...p}>
-      <circle cx="12" cy="8" r="4" />
-      <path d="M6 21v-2a6 6 0 0 1 12 0v2" />
-    </svg>
-  );
-}
-
-function IconReferral(p: SVGProps<SVGSVGElement>) {
-  return (
-    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden {...p}>
-      <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
-      <circle cx="9" cy="7" r="4" />
-      <path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" />
-    </svg>
-  );
-}
-
-function IconConfigVault(p: SVGProps<SVGSVGElement>) {
-  return (
-    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden {...p}>
-      <path d="M21 8v13H3V8" />
-      <path d="M1 8h22v-3a2 2 0 0 0-2-2H3a2 2 0 0 0-2 2v3z" />
-      <path d="M10 12h4" />
-    </svg>
-  );
-}
-
-function IconWhiteFlag(p: SVGProps<SVGSVGElement>) {
-  return (
-    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden {...p}>
-      <path d="M5 21V4" strokeLinecap="round" />
-      <path
-        d="M5 4h13l-2.2 2.8L18 10H5V4z"
-        fill="currentColor"
-        fillOpacity="0.22"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
-
-function IconPromo(p: SVGProps<SVGSVGElement>) {
-  return (
-    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden {...p}>
-      <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z" />
-      <circle cx="7" cy="7" r="1.5" fill="currentColor" stroke="none" />
-    </svg>
-  );
-}
-
-function IconLogs(p: SVGProps<SVGSVGElement>) {
-  return (
-    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden {...p}>
-      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-      <path d="M14 2v6h6M16 13H8M16 17H8M10 9H8" />
-    </svg>
-  );
-}
-
-function IconProxy(p: SVGProps<SVGSVGElement>) {
-  return (
-    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden {...p}>
-      <circle cx="12" cy="12" r="10" />
-      <path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
-    </svg>
-  );
-}
-
-function IconGame(p: SVGProps<SVGSVGElement>) {
-  return (
-    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden {...p}>
-      <rect x="2" y="6" width="20" height="12" rx="2" />
-      <path d="M6 12h4M8 10v4M15 11h.01M18 13h.01" />
-    </svg>
-  );
-}
-
-function IconDevice(p: SVGProps<SVGSVGElement>) {
-  return (
-    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden {...p}>
-      <rect x="7" y="2" width="10" height="20" rx="2" />
-      <path d="M11 18h2" />
-    </svg>
-  );
-}
-
-function IconGift(p: SVGProps<SVGSVGElement>) {
-  return (
-    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden {...p}>
-      <rect x="3" y="8" width="18" height="13" rx="2" />
-      <path d="M12 8v13M3 12h18M12 8c-2.5 0-4-1.5-4-3.5S9.5 1 12 1s4 1.5 4 3.5S14.5 8 12 8z" />
-    </svg>
-  );
-}
+const HOME_NAV_ITEM: NavItem = {
+  to: ADMIN_HOME_PATH,
+  label: "Главная",
+  Icon: IconHome,
+  end: true,
+};
 
 function IconLogout(p: SVGProps<SVGSVGElement>) {
   return (
@@ -232,7 +137,7 @@ function ExpiryNotifyStatusIcon({ status, hint }: { status: "sent" | "waiting" |
   );
 }
 
-const NAV_ITEMS: NavItem[] = [
+const NAV_ITEMS: SectionNavItem[] = [
   { to: "/servers", label: "Сервера", Icon: IconServers, sectionKey: "servers" },
   { to: "/users", label: "Пользователи", Icon: IconUsers, sectionKey: "users" },
   { to: "/logs", label: "Логи", Icon: IconLogs, sectionKey: "logs" },
@@ -260,10 +165,11 @@ function SidebarNav({
 }) {
   return (
     <nav className="admin-sidebar-nav">
-      {items.map(({ to, label, Icon }) => (
+      {items.map(({ to, label, Icon, end }) => (
         <NavLink
           key={to}
           to={to}
+          end={end}
           className={({ isActive }) => (isActive ? "admin-sidebar-link active" : "admin-sidebar-link")}
           onClick={onNavigate}
           title={collapsed ? undefined : label}
@@ -316,6 +222,7 @@ export default function DashboardLayout({
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [statsUsers, setStatsUsers] = useState<UserDto[]>(() => readUsersListCache()?.users ?? []);
   const [statsLoading, setStatsLoading] = useState(true);
+  const [onlineLoading, setOnlineLoading] = useState(() => getOnlineStatsStatus() !== "ready");
   const [statsPanelOpen, setStatsPanelOpen] = useState<null | "online" | "warn">(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [deployedServers, setDeployedServers] = useState<ServerDto[]>([]);
@@ -383,8 +290,7 @@ export default function DashboardLayout({
 
   useEffect(() => {
     void refreshStats();
-    const id = window.setInterval(() => void refreshStats(), 60_000);
-    return () => window.clearInterval(id);
+    void ensureOnlineStatsSynced();
   }, [refreshStats]);
 
   useEffect(() => {
@@ -397,6 +303,27 @@ export default function DashboardLayout({
     };
     window.addEventListener(USERS_CACHE_UPDATED_EVENT, onCache);
     return () => window.removeEventListener(USERS_CACHE_UPDATED_EVENT, onCache);
+  }, []);
+
+  useEffect(() => {
+    const onOnline = (e: Event) => {
+      const detail = (e as CustomEvent<OnlineStatsEventDetail>).detail;
+      if (!detail) return;
+      if (detail.status === "loading") {
+        setOnlineLoading(true);
+        return;
+      }
+      if (detail.status === "ready") {
+        if (detail.users) {
+          setStatsUsers(detail.users);
+          setStats(computeDashboardStats(detail.users));
+          setStatsLoading(false);
+        }
+        setOnlineLoading(false);
+      }
+    };
+    window.addEventListener(ONLINE_STATS_EVENT, onOnline);
+    return () => window.removeEventListener(ONLINE_STATS_EVENT, onOnline);
   }, []);
 
   useEffect(() => {
@@ -532,6 +459,7 @@ export default function DashboardLayout({
     setDrawerOpen(false);
     await logout();
     clearUsersListCache();
+    clearOnlineStatsSession();
     onLogout();
     nav("/login", {
       replace: true,
@@ -669,10 +597,13 @@ export default function DashboardLayout({
     drawerDragX !== null ? `translateX(${drawerDragX - drawerWidth}px)` : undefined;
 
   const navOrder = normalizeSectionOrder(panel.settings?.sectionOrder);
-  const navByKey = new Map(NAV_ITEMS.map((item) => [item.sectionKey, item]));
-  const visibleNav = navOrder
-    .map((key) => navByKey.get(key))
-    .filter((item): item is NavItem => item != null && panel.settings?.sections[item.sectionKey] !== false);
+  const navByKey = new Map<PanelSectionKey, SectionNavItem>(NAV_ITEMS.map((item) => [item.sectionKey, item]));
+  const visibleNav: NavItem[] = [
+    HOME_NAV_ITEM,
+    ...navOrder
+      .map((key) => navByKey.get(key))
+      .filter((item): item is SectionNavItem => item != null && panel.settings?.sections[item.sectionKey] !== false),
+  ];
   const panelTitle = panel.settings?.panel.title ?? "Панель управления";
   const panelSubtitle = panel.settings?.panel.subtitle ?? "";
   const brandShort = panel.settings?.panel.brandName ?? panelTitle.split(" ")[0] ?? "VPN";
@@ -682,6 +613,9 @@ export default function DashboardLayout({
   useEffect(() => {
     setAvatarBroken(false);
   }, [avatarSrc]);
+  useEffect(() => {
+    document.title = `${sectionLabel} — ${panelTitle}`;
+  }, [sectionLabel, panelTitle]);
   const sectionHiddenMsg = (location.state as { sectionHidden?: boolean } | null)?.sectionHidden;
 
   return (
@@ -775,7 +709,7 @@ export default function DashboardLayout({
                   <span className="admin-metric__pulse" aria-hidden />
                   Онлайн
                 </span>
-                <MetricValue value={stats?.onlineCount} loading={statsLoading} />
+                <MetricValue value={onlineLoading ? undefined : stats?.onlineCount} loading={onlineLoading} />
               </button>
               <button
                 type="button"
@@ -885,22 +819,17 @@ export default function DashboardLayout({
             </button>
           </div>
 
-          <button type="button" className="admin-logout-btn ghost" onClick={() => void doLogout()}>
-            <IconLogout />
-            <span>Выйти</span>
+          <button
+            type="button"
+            className="admin-logout-btn"
+            aria-label="Выйти"
+            title="Выйти"
+            onClick={() => void doLogout()}
+          >
+            <IconLogout className="admin-logout-btn__ico" />
           </button>
         </header>
 
-        {panel.settings?.maintenance.enabled ? (
-          <div className="admin-maintenance-banner" role="status">
-            Панель находится в режиме обслуживания
-          </div>
-        ) : null}
-        {panel.settings?.telegram.testMode ? (
-          <div className="admin-testmode-banner" role="status">
-            Включён тестовый режим Telegram — массовые отправки только администратору
-          </div>
-        ) : null}
         {sectionHiddenMsg ? (
           <div className="flash err admin-section-hidden-banner">Раздел скрыт в настройках панели</div>
         ) : null}

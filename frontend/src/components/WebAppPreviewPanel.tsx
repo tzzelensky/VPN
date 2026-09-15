@@ -65,7 +65,6 @@ export default function WebAppPreviewPanel() {
   const [error, setError] = useState<string | null>(null);
   const [theme, setTheme] = useState<MySubTheme>("light");
   const [frameKey, setFrameKey] = useState(0);
-  const [legacyShell, setLegacyShell] = useState(false);
   const [phonePortalRoot, setPhonePortalRoot] = useState<HTMLElement | null>(null);
 
   const tgOptions = useMemo(() => uniqueByTg(users), [users]);
@@ -114,13 +113,12 @@ export default function WebAppPreviewPanel() {
         }
       }
       if (!p) throw (lastErr instanceof Error ? lastErr : new Error("Failed to fetch"));
-      setLegacyShell(p.web_app_new_design === false);
-      setProfile({ ...p, web_app_new_design: true });
+      setProfile(p);
       setFrameKey((k) => k + 1);
     } catch (e) {
       setProfile(null);
       const msg = e instanceof Error ? e.message : String(e);
-      setError(msg === "Failed to fetch" ? "�� ������� ��������� ������ (��������� API/����)." : msg);
+      setError(msg === "Failed to fetch" ? "?? ??????? ????????? ?????? (????????? API/????)." : msg);
     } finally {
       setProfileLoading(false);
     }
@@ -154,27 +152,27 @@ export default function WebAppPreviewPanel() {
       <aside className="webapp-preview__sidebar">
         <div className="webapp-preview__title-block">
           <div className="webapp-preview__title-row">
-            <h2 className="webapp-preview__title">Превью WebApp</h2>
-            <span className="webapp-preview__badge" title="Мутации отключены">
-              Только просмотр
+            <h2 className="webapp-preview__title">?????? WebApp</h2>
+            <span className="webapp-preview__badge" title="??????? ?????????">
+              ?????? ????????
             </span>
           </div>
-          <p className="webapp-preview__subtitle">Как клиент видит Mini App на своих текущих данных</p>
+          <p className="webapp-preview__subtitle">??? ?????? ????? Mini App ?? ????? ??????? ??????</p>
         </div>
 
         <div className="webapp-preview__controls">
           <label className="webapp-preview__field">
-            <span>Поиск</span>
+            <span>?????</span>
             <input
               type="search"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Имя, tg id, id подписки…"
+              placeholder="???, tg id, id ?????????"
               autoComplete="off"
             />
           </label>
           <label className="webapp-preview__field webapp-preview__field--select">
-            <span>Пользователь</span>
+            <span>????????????</span>
             <select
               value={selectedTgId ? String(selectedTgId) : ""}
               disabled={usersLoading}
@@ -183,7 +181,7 @@ export default function WebAppPreviewPanel() {
                 selectTg(v ? Number(v) : null);
               }}
             >
-              <option value="">{usersLoading ? "Загрузка…" : "Выберите пользователя"}</option>
+              <option value="">{usersLoading ? "?????????" : "???????? ????????????"}</option>
               {filteredOptions.map((o) => (
                 <option key={o.tgId} value={o.tgId}>
                   {o.label}
@@ -193,21 +191,21 @@ export default function WebAppPreviewPanel() {
           </label>
 
           <div className="webapp-preview__field">
-            <span>Тема</span>
-            <div className="webapp-preview__theme" role="group" aria-label="Тема превью">
+            <span>????</span>
+            <div className="webapp-preview__theme" role="group" aria-label="???? ??????">
               <button
                 type="button"
                 className={theme === "light" ? "is-active" : ""}
                 onClick={() => setTheme("light")}
               >
-                Светлая
+                ???????
               </button>
               <button
                 type="button"
                 className={theme === "dark" ? "is-active" : ""}
                 onClick={() => setTheme("dark")}
               >
-                Тёмная
+                ??????
               </button>
             </div>
           </div>
@@ -220,10 +218,10 @@ export default function WebAppPreviewPanel() {
           >
             {profileLoading ? (
               <>
-                <Spinner /> Обновление…
+                <Spinner /> ???????????
               </>
             ) : (
-              "Обновить"
+              "????????"
             )}
           </button>
         </div>
@@ -233,12 +231,6 @@ export default function WebAppPreviewPanel() {
             {subscriptionLabel(selectedMeta.sample)}
             <br />
             Telegram ID <b>{selectedMeta.tgId}</b>
-            {legacyShell ? (
-              <>
-                <br />
-                <span className="webapp-preview__legacy">у клиента старая оболочка</span>
-              </>
-            ) : null}
           </p>
         ) : null}
         {error ? <div className="flash err webapp-preview__error">{error}</div> : null}
@@ -248,9 +240,9 @@ export default function WebAppPreviewPanel() {
         {!selectedTgId ? (
           <div className="webapp-preview__empty">
             <div className="webapp-preview__empty-card">
-              <p className="webapp-preview__empty-title">Выберите пользователя</p>
+              <p className="webapp-preview__empty-title">???????? ????????????</p>
               <p className="webapp-preview__empty-text">
-                Найдите клиента слева — справа откроется его WebApp в режиме просмотра.
+                ??????? ??????? ????? ? ?????? ????????? ??? WebApp ? ?????? ?????????.
               </p>
             </div>
           </div>
@@ -260,7 +252,7 @@ export default function WebAppPreviewPanel() {
               {profileLoading && !profile ? (
                 <div className="webapp-preview__phone-loading">
                   <Spinner />
-                  <span>Загрузка профиля…</span>
+                  <span>???????? ????????</span>
                 </div>
               ) : profile && phonePortalRoot ? (
                 <MySubPortalProvider root={phonePortalRoot}>
@@ -280,11 +272,11 @@ export default function WebAppPreviewPanel() {
               ) : profile ? (
                 <div className="webapp-preview__phone-loading">
                   <Spinner />
-                  <span>Загрузка…</span>
+                  <span>?????????</span>
                 </div>
               ) : (
                 <div className="webapp-preview__phone-loading">
-                  <span>Не удалось загрузить профиль</span>
+                  <span>?? ??????? ????????? ???????</span>
                 </div>
               )}
             </div>

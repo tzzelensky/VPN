@@ -96,8 +96,6 @@ export type CreateUserInput = {
   device_extra_slots?: number;
   /** Зарегистрированные устройства (UUID в ?did= ссылки подписки). */
   device_slots?: UserDeviceSlot[];
-  /** Лимит скорости, Мбит/с; 0 = без ограничения. */
-  speed_limit_mbps?: number;
   /** 1 = к подписке дописать последние 4 узла + строка Happ (белые списки). По умолчанию выкл. */
   whitelist_happ_enabled?: number;
   whitelist_active_until?: number;
@@ -169,8 +167,6 @@ export type UserRow = {
   device_extra_slots: number;
   /** Зарегистрированные устройства для лимита подписки. */
   device_slots: UserDeviceSlot[];
-  /** Лимит скорости, Мбит/с; 0 = без ограничения. */
-  speed_limit_mbps: number;
   /** 1 = к подписке дописываются последние 4 сервера + happ-строка белых списков. */
   whitelist_happ_enabled: number;
   /** Срок действия купленных белых списков (ms); 0 = до конца подписки или бессрочно. */
@@ -1503,14 +1499,6 @@ export function coerceExpiryTimeMs(raw: unknown): number {
   return snapExpiryTimeToNoonLocal(ms);
 }
 
-/** Лимит скорости в Мбит/с; 0 или пусто — без ограничения. */
-export function coerceSpeedLimitMbps(raw: unknown): number {
-  if (raw === "" || raw == null) return 0;
-  const n = Math.floor(Number(raw) || 0);
-  if (!Number.isFinite(n) || n <= 0) return 0;
-  return Math.min(9999, n);
-}
-
 /** Лимит в ГБ; если в поле попали байты (импорт), переводим в ГБ. */
 function coerceTotalGbField(raw: unknown): number {
   let gb = Number(raw);
@@ -1665,7 +1653,6 @@ function normalizeUser(u: UserRow, deployedIdsForNormalize?: number[]): UserRow 
     device_limit_count: Math.max(1, Math.floor(Number((u as { device_limit_count?: unknown }).device_limit_count) || 1)),
     device_extra_slots: Math.max(0, Math.floor(Number((u as { device_extra_slots?: unknown }).device_extra_slots) || 0)),
     device_slots: normalizeDeviceSlots((u as { device_slots?: unknown }).device_slots),
-    speed_limit_mbps: coerceSpeedLimitMbps((u as { speed_limit_mbps?: unknown }).speed_limit_mbps),
     whitelist_happ_enabled: Number((u as { whitelist_happ_enabled?: unknown }).whitelist_happ_enabled) === 1 ? 1 : 0,
     whitelist_active_until: Math.max(0, Math.floor(Number((u as { whitelist_active_until?: unknown }).whitelist_active_until) || 0)),
     whitelist_purchase_id: String((u as { whitelist_purchase_id?: unknown }).whitelist_purchase_id ?? "").trim(),
@@ -2442,7 +2429,6 @@ export function createUser(input: CreateUserInput = {}): UserRow {
             ? normalizeDeviceSlots(input.device_slots)
             : [newDeviceSlot("Устройство 1")]
           : [],
-      speed_limit_mbps: coerceSpeedLimitMbps(input.speed_limit_mbps),
       whitelist_happ_enabled: input.whitelist_happ_enabled === 1 ? 1 : 0,
       whitelist_active_until: Math.max(0, Math.floor(Number(input.whitelist_active_until) || 0)),
       whitelist_purchase_id: String(input.whitelist_purchase_id ?? "").trim(),
@@ -2555,8 +2541,6 @@ export function updateUserRow(id: number, patch: Partial<CreateUserInput>): User
         if (!nextEnabled) slots = [];
         return slots;
       })(),
-      speed_limit_mbps:
-        patch.speed_limit_mbps !== undefined ? coerceSpeedLimitMbps(patch.speed_limit_mbps) : cur.speed_limit_mbps,
       whitelist_happ_enabled:
         patch.whitelist_happ_enabled !== undefined
           ? patch.whitelist_happ_enabled === 1
@@ -2720,7 +2704,6 @@ export function touchDeviceLimitForUser(
     deviceName?: string;
     matchedBy?: string;
     globalEnabled?: boolean;
-    autoBind?: boolean;
   },
 ): { allowed: boolean; user?: UserRow; reason?: string } {
   let result: { allowed: boolean; user?: UserRow; reason?: string } = { allowed: true };
@@ -2737,7 +2720,6 @@ export function touchDeviceLimitForUser(
       requestIp: opts?.requestIp,
       userAgent: opts?.userAgent,
       deviceName: opts?.deviceName,
-      autoBind: opts?.autoBind ?? globalSettings.auto_bind,
       defaultSlots: globalSettings.default_slots,
     });
     if (evalResult.eventType) {

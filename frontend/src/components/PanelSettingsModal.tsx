@@ -64,25 +64,28 @@ export default function PanelSettingsModal({
   const [dragSectionKey, setDragSectionKey] = useState<PanelSectionKey | null>(null);
   const [overSectionKey, setOverSectionKey] = useState<PanelSectionKey | null>(null);
   const [sectionsSavedFlash, setSectionsSavedFlash] = useState(false);
-  const [webAppSavedFlash, setWebAppSavedFlash] = useState(false);
   const avatarInputRef = useRef<HTMLInputElement>(null);
   const wasOpenRef = useRef(false);
   const lastSyncedAtRef = useRef(0);
-  const flashTimers = useRef<{ sections?: number; webapp?: number }>({});
+  const flashTimers = useRef<{ sections?: number }>({});
 
-  function flashSaved(kind: "sections" | "webapp") {
-    const setFlash = kind === "sections" ? setSectionsSavedFlash : setWebAppSavedFlash;
-    setFlash(true);
-    window.clearTimeout(flashTimers.current[kind]);
-    flashTimers.current[kind] = window.setTimeout(() => setFlash(false), 1800);
+  function flashSaved() {
+    setSectionsSavedFlash(true);
+    window.clearTimeout(flashTimers.current.sections);
+    flashTimers.current.sections = window.setTimeout(() => setSectionsSavedFlash(false), 1800);
   }
 
   useEffect(() => {
     return () => {
       window.clearTimeout(flashTimers.current.sections);
-      window.clearTimeout(flashTimers.current.webapp);
     };
   }, []);
+
+  useEffect(() => {
+    if (!open) return;
+    setMsg(null);
+    setBotTest(null);
+  }, [tab, open]);
 
   useEffect(() => {
     if (!open) {
@@ -131,7 +134,8 @@ export default function PanelSettingsModal({
     cloned.telegram = {
       ...cloned.telegram,
       aiAssistantEnabled: cloned.telegram.aiAssistantEnabled !== false,
-      geminiModel: cloned.telegram.geminiModel || "gemini-2.5-flash-lite",
+      geminiModel: cloned.telegram.geminiModel || "gemini-3.5-flash-lite",
+      geminiHttpsProxy: cloned.telegram.geminiHttpsProxy ?? "",
     };
     setDraft(cloned);
     setDirty(false);
@@ -192,7 +196,7 @@ export default function PanelSettingsModal({
     });
     if (!nextOrder) return;
     void applyPatch({ settings: { sectionOrder: nextOrder } })
-      .then(() => flashSaved("sections"))
+      .then(() => flashSaved())
       .catch((e) => {
         setMsg({ type: "err", text: `Не удалось сохранить порядок: ${String(e)}` });
       });
@@ -336,22 +340,6 @@ export default function PanelSettingsModal({
     } finally {
       setGeminiRevealBusy(false);
     }
-  }
-
-  function onToggleWebApp() {
-    if (!draft) return;
-    const next = !(draft.ui.webAppNewDesign ?? false);
-    const ui = { ...draft.ui, webAppNewDesign: next };
-    patchDraftQuiet((d) => ({ ...d, ui }));
-    void applyPatch({ settings: { ui } })
-      .then(() => {
-        flashSaved("webapp");
-        setMsg({
-          type: "ok",
-          text: next ? "Новый дизайн WebApp включён." : "Старый дизайн WebApp включён.",
-        });
-      })
-      .catch((e) => setMsg({ type: "err", text: String(e) }));
   }
 
   if (!open || !draft) return null;
@@ -500,8 +488,6 @@ export default function PanelSettingsModal({
                 <AppearanceTab
                   draft={draft}
                   patchDraft={patchDraft}
-                  webAppSavedFlash={webAppSavedFlash}
-                  onToggleWebApp={onToggleWebApp}
                 />
               ) : null}
 

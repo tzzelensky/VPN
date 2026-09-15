@@ -1,5 +1,7 @@
 import { defineConfig } from "vitest/config";
 
+const containers = process.env.TEST_CONTAINERS === "1";
+
 export default defineConfig({
   resolve: {
     // TypeScript NodeNext imports use `.js` → map to `.ts` sources under Vitest/Vite
@@ -9,12 +11,12 @@ export default defineConfig({
   },
   test: {
     environment: "node",
-    include: ["test/**/*.test.ts"],
+    include: containers ? ["test/containers/**/*.test.ts"] : ["test/api/**/*.test.ts"],
     // Hand-rolled unit scripts under src/*.test.ts run via `npm run test:unit` (tsx), not Vitest.
-    setupFiles: ["./test/setup-env.ts", "./test/setup-mocks.ts"],
+    setupFiles: containers ? [] : ["./test/setup-env.ts", "./test/setup-mocks.ts"],
     fileParallelism: false,
     pool: "forks",
-    testTimeout: 30_000,
-    hookTimeout: 30_000,
+    testTimeout: containers ? 120_000 : 30_000,
+    hookTimeout: containers ? 120_000 : 30_000,
   },
 });

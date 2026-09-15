@@ -14,6 +14,7 @@ import {
 import DashboardLayout from "../components/DashboardLayout";
 import PanelTabs from "../components/PanelTabs";
 import PageLoadingState from "../components/PageLoadingState";
+import PageSectionHero from "../components/PageSectionHero";
 import PaymentSessionsPanel from "../components/PaymentSessionsPanel";
 import RevenueReportPanel from "../components/RevenueReportPanel";
 import ComboSubscriptionsPanel from "../components/ComboSubscriptionsPanel";
@@ -153,36 +154,46 @@ export default function SubscriptionShopPage({ onLogout }: { onLogout: () => voi
 
   return (
     <DashboardLayout onLogout={onLogout}>
-      <section className="panel users-hero-panel">
-        <div className="users-hero-top">
-          <div>
-            <h1>Настройка подписок</h1>
-            <p className="sub users-hero-sub">
-              Тарифы и ссылка на оплату в Telegram-боте. «Отключение продажи» — новым без привязки нельзя купить, только
-              продлить уже привязанный аккаунт.
-            </p>
-          </div>
-          <div className="users-hero-actions">
-            {mainTab === "settings" ? (
-              <>
-                <button type="button" className="ghost" disabled={loading} onClick={() => void refresh()}>
-                  Обновить
-                </button>
-                <button type="button" className="primary" disabled={saving || !shop} onClick={() => void onSave()}>
-                  {saving ? (
-                    <>
-                      <Spinner /> Сохранение…
-                    </>
-                  ) : (
-                    "Сохранить"
-                  )}
-                </button>
-              </>
-            ) : null}
-          </div>
-        </div>
+      <PageSectionHero
+        title="Настройка подписок"
+        helpCards={[
+          {
+            kicker: "Тарифы",
+            title: "Планы и цены",
+            text: "Настройка тарифов и ссылки на оплату в Telegram-боте.",
+          },
+          {
+            kicker: "Оплата",
+            title: "Сессии и выручка",
+            text: "Просмотр сессий оплаты и отчётов по выручке.",
+          },
+          {
+            kicker: "Комбо",
+            title: "Комбо-подписки",
+            text: "Связки тарифов и спецпредложений для клиентов.",
+          },
+        ]}
+        actions={
+          mainTab === "settings" ? (
+            <>
+              <button type="button" className="ghost" disabled={loading} onClick={() => void refresh()}>
+                Обновить
+              </button>
+              <button type="button" className="primary" disabled={saving || !shop} onClick={() => void onSave()}>
+                {saving ? (
+                  <>
+                    <Spinner /> Сохранение…
+                  </>
+                ) : (
+                  "Сохранить"
+                )}
+              </button>
+            </>
+          ) : undefined
+        }
+      >
         {msg ? <div className={`flash ${msg.type === "ok" ? "ok" : "err"}`}>{msg.text}</div> : null}
-      </section>
+      </PageSectionHero>
 
       <PanelTabs
         tabs={[

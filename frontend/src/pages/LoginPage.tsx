@@ -2,6 +2,7 @@ import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { login, loginVerifyCode } from "../api";
 import AmbientThemeDock from "../components/AmbientThemeDock";
+import { ADMIN_HOME_PATH } from "../homeSearchIndex";
 
 export default function LoginPage({ onSuccess }: { onSuccess: () => void }) {
   const nav = useNavigate();
@@ -15,6 +16,10 @@ export default function LoginPage({ onSuccess }: { onSuccess: () => void }) {
   const [loading, setLoading] = useState(false);
   const lastCodeAttempt = useRef("");
 
+  useEffect(() => {
+    document.title = "Вход";
+  }, []);
+
   const verifyCode = useCallback(
     async (codeValue: string) => {
       setErr(null);
@@ -22,7 +27,7 @@ export default function LoginPage({ onSuccess }: { onSuccess: () => void }) {
       try {
         await loginVerifyCode(codeValue);
         onSuccess();
-        nav("/servers", { replace: true });
+        nav(ADMIN_HOME_PATH, { replace: true });
       } catch (e) {
         const txt = String(e);
         if (txt.includes("2fa_code_expired")) {
@@ -77,7 +82,7 @@ export default function LoginPage({ onSuccess }: { onSuccess: () => void }) {
       const res = await login(username, password);
       if (res.ok) {
         onSuccess();
-        nav("/servers", { replace: true });
+        nav(ADMIN_HOME_PATH, { replace: true });
         return;
       }
       if (res.requires_code) {
@@ -104,12 +109,9 @@ export default function LoginPage({ onSuccess }: { onSuccess: () => void }) {
     <div className="login-page">
       <AmbientThemeDock />
       <div className="login-page__content">
-        <div className="login-card">
+        <div className="login-card login-card--enter">
           <div className="login-card__glow" aria-hidden />
           <div className="login-card__head">
-            <div className="login-card__logo" aria-hidden>
-              <span className="login-card__logo-mark">◆</span>
-            </div>
             <h1 className="login-card__title">Вход</h1>
             <p className="login-card__sub">
               {awaitingCode ? "Введите код из Telegram" : "Авторизация"}

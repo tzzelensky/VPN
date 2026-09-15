@@ -1,7 +1,9 @@
+import type { Client } from "ssh2";
 import { getServer, type ServerRow } from "./db.js";
 import {
   DEFAULT_LOG_TAIL_LINES,
-  MAX_LOG_FILE_BYTES,
+  LOG_TRIM_KEEP_BYTES,
+  LOG_TRIM_TRIGGER_BYTES,
   MAX_LOG_TAIL_LINES,
   TZADMIN_DEFAULT_ACCESS_LOG,
   TZADMIN_DEFAULT_ERROR_LOG,
@@ -22,7 +24,9 @@ import {
   isTzadminManagedConfigPath,
   mutateXrayConfigAndRestart,
   sshExecCommand,
-  sshReadRemoteFile,
+  sshExecOn,
+  sshSftpReadOn,
+  withSsh,
   type SshConfig,
 } from "./ssh.js";
 import { resolveConfigPath } from "./userSync.js";
@@ -56,6 +60,156 @@ export type XrayLogsSnapshot = {
   hint: string | null;
 };
 
+const SNAPSHOT_CACHE_TTL_MS = 3000;
+const snapshotCache = new Map<string, { at: number; snapshot: XrayLogsSnapshot }>();
+
+function cacheKey(serverId: number, lines: number, includeAccess: boolean, includeError: boolean): string {
+  return `${serverId}:${lines}:${includeAccess ? "a" : ""}${includeError ? "e" : ""}`;
+}
+
+function emptyStream(path: string | null, status: LogFileStatus, message?: string): LogStreamPayload {
+  return { path, status, lines: [], highlights: [], message };
+}
+
+function toPayload(path: string | null, status: LogFileStatus, lines: string[], message?: string): LogStreamPayload {
+  const masked = lines.map((l) => maskSensitiveLogText(l));
+  return {
+    path,
+    status,
+    lines: masked,
+    highlights: masked.map((l) => highlightKindsForLine(l)),
+    message,
+  };
+}
+
+function parseStreamBlock(out: string, tag: "ACCESS" | "ERROR"): LogStreamPayload {
+  const statusM = out.match(new RegExp(`___STREAM_${tag}_STATUS___(.+)`));
+  const pathM = out.match(new RegExp(`___STREAM_${tag}_PATH___(.*)`));
+  const msgM = out.match(new RegExp(`___STREAM_${tag}_MSG___(.*)`));
+  const status = (statusM?.[1]?.trim() || "unreadable") as LogFileStatus;
+  const pathRaw = pathM?.[1]?.trim();
+  const path = pathRaw || null;
+  const message = msgM?.[1]?.trim() || undefined;
+
+  const begin = `___STREAM_${tag}_BEGIN___`;
+  const end = `___STREAM_${tag}_END___`;
+  const bi = out.indexOf(begin);
+  const ei = out.indexOf(end);
+  let lines: string[] = [];
+  if (bi >= 0 && ei > bi) {
+    const body = out.slice(bi + begin.length, ei).replace(/^\r?\n/, "").replace(/\r?\n$/, "");
+    if (body) {
+      lines = body.split(/\r?\n/).filter((l, i, arr) => i < arr.length - 1 || l.length > 0);
+    }
+  }
+
+  if (status === "ok" && lines.length === 0) {
+    return toPayload(path, "empty", [], message ?? "Файл пуст.");
+  }
+  return toPayload(path, status, status === "ok" ? lines : [], message);
+}
+
+function buildBatchScript(opts: {
+  accessPath: string | null;
+  errorPath: string | null;
+  includeAccess: boolean;
+  includeError: boolean;
+  lineCap: number;
+  managedService: boolean;
+}): string {
+  const lines = Math.max(1, Math.min(MAX_LOG_TAIL_LINES, opts.lineCap));
+  return `
+set +e
+TRIM_TRIGGER=${LOG_TRIM_TRIGGER_BYTES}
+TRIM_KEEP=${LOG_TRIM_KEEP_BYTES}
+LINES=${lines}
+ACCESS_PATH=${shellQuote(opts.includeAccess ? opts.accessPath || "" : "")}
+ERROR_PATH=${shellQuote(opts.includeError ? opts.errorPath || "" : "")}
+WANT_ACCESS=${opts.includeAccess ? "1" : "0"}
+WANT_ERROR=${opts.includeError ? "1" : "0"}
+MANAGED=${opts.managedService ? "1" : "0"}
+
+RUNNING=0
+if [ "$MANAGED" = "1" ]; then
+  st=$(systemctl is-active tzadmin-xray 2>/dev/null || true)
+  if [ "$st" = "active" ]; then RUNNING=1; fi
+fi
+if [ "$RUNNING" = "0" ]; then
+  if pgrep -x xray >/dev/null 2>&1 || pgrep -f 'xray-linux-amd|/usr/local/bin/xray' >/dev/null 2>&1; then
+    RUNNING=1
+  fi
+fi
+echo "___RUNNING___$RUNNING"
+
+trim_keep_tail() {
+  local f="$1"
+  local tag="$2"
+  if [ -z "$f" ]; then
+    echo "___STREAM_\${tag}_STATUS___no_path"
+    echo "___STREAM_\${tag}_MSG___Путь к файлу не указан в конфиге."
+    echo "___STREAM_\${tag}_BEGIN___"
+    echo "___STREAM_\${tag}_END___"
+    return
+  fi
+  if [ ! -f "$f" ]; then
+    echo "___STREAM_\${tag}_STATUS___not_found"
+    echo "___STREAM_\${tag}_MSG___Файл лога пока не создан."
+    echo "___STREAM_\${tag}_BEGIN___"
+    echo "___STREAM_\${tag}_END___"
+    return
+  fi
+  local bytes
+  bytes=$(wc -c < "$f" 2>/dev/null | tr -d ' \\t\\n' || echo 0)
+  if [ -n "$bytes" ] && [ "$bytes" -gt "$TRIM_TRIGGER" ] 2>/dev/null; then
+    local tmp="\${f}.trim.$$"
+    if tail -c "$TRIM_KEEP" "$f" > "$tmp" 2>/dev/null && mv "$tmp" "$f" 2>/dev/null; then
+      :
+    else
+      rm -f "$tmp" 2>/dev/null
+    fi
+  fi
+  echo "___STREAM_\${tag}_PATH___$f"
+  local errf
+  errf=$(mktemp 2>/dev/null || echo /tmp/xray-tail-err.$$)
+  local out
+  out=$(tail -n "$LINES" "$f" 2>"$errf")
+  local code=$?
+  local err
+  err=$(cat "$errf" 2>/dev/null)
+  rm -f "$errf" 2>/dev/null
+  if [ $code -ne 0 ] && [ -z "$out" ]; then
+    low=$(printf '%s' "$err" | tr '[:upper:]' '[:lower:]')
+    case "$low" in
+      *permission*denied*) echo "___STREAM_\${tag}_STATUS___permission_denied" ;;
+      *) echo "___STREAM_\${tag}_STATUS___unreadable" ;;
+    esac
+    echo "___STREAM_\${tag}_MSG___Не удалось прочитать файл лога."
+    echo "___STREAM_\${tag}_BEGIN___"
+    echo "___STREAM_\${tag}_END___"
+    return
+  fi
+  if [ -z "$out" ]; then
+    echo "___STREAM_\${tag}_STATUS___empty"
+    echo "___STREAM_\${tag}_MSG___Файл пуст."
+    echo "___STREAM_\${tag}_BEGIN___"
+    echo "___STREAM_\${tag}_END___"
+    return
+  fi
+  echo "___STREAM_\${tag}_STATUS___ok"
+  echo "___STREAM_\${tag}_BEGIN___"
+  printf '%s\\n' "$out"
+  echo "___STREAM_\${tag}_END___"
+}
+
+if [ "$WANT_ACCESS" = "1" ]; then
+  trim_keep_tail "$ACCESS_PATH" "ACCESS"
+fi
+if [ "$WANT_ERROR" = "1" ]; then
+  trim_keep_tail "$ERROR_PATH" "ERROR"
+fi
+`.trim();
+}
+
 async function resolveConfigPathForLogs(row: ServerRow): Promise<string> {
   if (row.vless_deployed) {
     return resolveConfigPath(row);
@@ -64,113 +218,26 @@ async function resolveConfigPathForLogs(row: ServerRow): Promise<string> {
   return detected ?? row.xray_config_path ?? TZADMIN_XRAY_CONFIG_PATH;
 }
 
-async function readConfig(row: ServerRow, configPath: string): Promise<Record<string, unknown>> {
-  const raw = await sshReadRemoteFile(sshCfg(row), configPath);
+async function readConfigOn(conn: Client, configPath: string): Promise<Record<string, unknown>> {
+  const raw = await sshSftpReadOn(conn, configPath);
   return JSON.parse(raw.toString("utf8")) as Record<string, unknown>;
-}
-
-async function isXrayRunning(row: ServerRow, configPath: string): Promise<boolean> {
-  const cfg = sshCfg(row);
-  if (isTzadminManagedConfigPath(configPath)) {
-    const r = await sshExecCommand(cfg, "systemctl is-active tzadmin-xray 2>/dev/null || true");
-    if (r.stdout.trim() === "active") return true;
-  }
-  const proc = await sshExecCommand(
-    cfg,
-    "pgrep -x xray >/dev/null 2>&1 && echo yes || pgrep -f 'xray-linux-amd|/usr/local/bin/xray' >/dev/null 2>&1 && echo yes || echo no",
-  );
-  return proc.stdout.trim().includes("yes");
-}
-
-async function tailRemoteFile(
-  row: ServerRow,
-  filePath: string | null,
-  lineCap: number,
-): Promise<LogStreamPayload> {
-  const empty: LogStreamPayload = {
-    path: filePath,
-    status: "no_path",
-    lines: [],
-    highlights: [],
-    message: "Путь к файлу не указан в конфиге.",
-  };
-  if (!filePath) return empty;
-
-  const cap = Math.max(1, Math.min(MAX_LOG_TAIL_LINES, Math.floor(lineCap) || DEFAULT_LOG_TAIL_LINES));
-  const cfg = sshCfg(row);
-  const q = shellQuote(filePath);
-
-  const exists = await sshExecCommand(cfg, `test -f ${q} && echo yes || echo no`);
-  if (!exists.stdout.includes("yes")) {
-    return {
-      path: filePath,
-      status: "not_found",
-      lines: [],
-      highlights: [],
-      message:
-        "Файл лога пока не создан. Включите loglevel warning/info/debug и попробуйте подключиться к VPN.",
-    };
-  }
-
-  const size = await sshExecCommand(cfg, `wc -c < ${q} 2>/dev/null || echo 0`);
-  const bytes = Number.parseInt(size.stdout.trim(), 10);
-  if (Number.isFinite(bytes) && bytes > MAX_LOG_FILE_BYTES) {
-    return {
-      path: filePath,
-      status: "too_large",
-      lines: [],
-      highlights: [],
-      message: `Файл слишком большой (${bytes} байт). Очистите логи или уменьшите loglevel.`,
-    };
-  }
-
-  const tail = await sshExecCommand(cfg, `tail -n ${cap} ${q} 2>&1`);
-  const combined = `${tail.stdout}${tail.stderr ? (tail.stdout ? "\n" : "") + tail.stderr : ""}`.trimEnd();
-  if (tail.code !== 0 && !combined) {
-    const low = (tail.stderr || "").toLowerCase();
-    const status: LogFileStatus = low.includes("permission denied") ? "permission_denied" : "unreadable";
-    return {
-      path: filePath,
-      status,
-      lines: [],
-      highlights: [],
-      message: tail.stderr.trim() || "Не удалось прочитать файл лога.",
-    };
-  }
-
-  if (!combined) {
-    return {
-      path: filePath,
-      status: "empty",
-      lines: [],
-      highlights: [],
-      message: "Файл пуст.",
-    };
-  }
-
-  const lines = combined.split(/\r?\n/).filter((l, i, arr) => i < arr.length - 1 || l.length > 0);
-  const masked = lines.map((l) => maskSensitiveLogText(l));
-  return {
-    path: filePath,
-    status: "ok",
-    lines: masked,
-    highlights: masked.map((l) => highlightKindsForLine(l)),
-  };
 }
 
 function shouldEnsureLogFilePaths(configPath: string): boolean {
   return isTzadminManagedConfigPath(configPath) || configPath.includes("tzadmin-xray");
 }
 
-/** Дописать access/error в конфиг и перезапустить Xray, если путей ещё нет. */
 async function ensureXrayLogFilePaths(row: ServerRow, configPath: string): Promise<ParsedXrayLogConfig> {
-  const config = await readConfig(row, configPath);
-  const cur = parseXrayLogConfig(config);
+  const cfg = sshCfg(row);
+  const cur = await withSsh(cfg, async (conn) => {
+    const config = await readConfigOn(conn, configPath);
+    return parseXrayLogConfig(config);
+  });
+
   if (cur.accessPath && cur.errorPath) return cur;
   if (cur.loglevel === "none") return cur;
   if (!shouldEnsureLogFilePaths(configPath)) return cur;
 
-  const cfg = sshCfg(row);
   await sshExecCommand(
     cfg,
     `install -d -m 0755 ${shellQuote(TZADMIN_LOG_DIR)} 2>/dev/null || true; touch ${shellQuote(TZADMIN_DEFAULT_ACCESS_LOG)} ${shellQuote(TZADMIN_DEFAULT_ERROR_LOG)} 2>/dev/null; chmod 0644 ${shellQuote(TZADMIN_DEFAULT_ACCESS_LOG)} ${shellQuote(TZADMIN_DEFAULT_ERROR_LOG)} 2>/dev/null || true`,
@@ -183,82 +250,39 @@ async function ensureXrayLogFilePaths(row: ServerRow, configPath: string): Promi
     });
   });
 
-  return parseXrayLogConfig(await readConfig(row, configPath));
+  return withSsh(cfg, async (conn) => parseXrayLogConfig(await readConfigOn(conn, configPath)));
 }
 
-async function tailFromJournal(
-  row: ServerRow,
+async function journalFallbackOn(
+  conn: Client,
   kind: "access" | "error",
   lineCap: number,
 ): Promise<LogStreamPayload> {
   const cap = Math.max(1, Math.min(MAX_LOG_TAIL_LINES, Math.floor(lineCap) || DEFAULT_LOG_TAIL_LINES));
-  const cfg = sshCfg(row);
-  const r = await sshExecCommand(
-    cfg,
+  const r = await sshExecOn(
+    conn,
     "journalctl -u tzadmin-xray -n 1000 --no-pager 2>/dev/null || journalctl -u xray -n 1000 --no-pager 2>/dev/null || true",
   );
   const all = `${r.stdout}\n${r.stderr}`.split(/\r?\n/).filter((l) => l.length > 0);
   const filtered =
     kind === "error"
       ? all.filter((l) =>
-          /\[(Error|Warning)\]|\berror\b|\bfailed\b|\brefused\b|\btimeout\b|handshake/i.test(l),
+          /\[(Error|Warning)\]|\berror\b|\bfailed\b|\brejected\b|\brefused\b|\btimeout\b|handshake/i.test(l),
         )
       : all.filter((l) =>
           /\baccepted\b|received request|proxy\/|inbound:|connection opened|tcp:/i.test(l),
         );
   const slice = filtered.slice(-cap);
-  const masked = slice.map((l) => maskSensitiveLogText(l));
-  if (masked.length === 0) {
-    return {
-      path: "journalctl",
-      status: "empty",
-      lines: [],
-      highlights: [],
-      message:
-        kind === "error"
-          ? "Нет строк в journalctl. Нажмите «Обновить» после настройки путей или подключитесь к VPN."
-          : "Нет access-строк в journalctl. Подключите клиента или включите loglevel info/debug.",
-    };
+  if (slice.length === 0) {
+    return emptyStream(
+      "journalctl",
+      "empty",
+      kind === "error"
+        ? "Нет строк в journalctl. Нажмите «Обновить» после настройки путей или подключитесь к VPN."
+        : "Нет access-строк в journalctl. Подключите клиента или включите loglevel info/debug.",
+    );
   }
-  return {
-    path: "journalctl (tzadmin-xray / xray)",
-    status: "ok",
-    lines: masked,
-    highlights: masked.map((l) => highlightKindsForLine(l)),
-  };
-}
-
-async function tailLogStream(
-  row: ServerRow,
-  filePath: string | null,
-  kind: "access" | "error",
-  lineCap: number,
-  xrayRunning: boolean,
-): Promise<LogStreamPayload> {
-  if (!filePath) {
-    if (xrayRunning) return tailFromJournal(row, kind, lineCap);
-    return {
-      path: null,
-      status: "no_path",
-      lines: [],
-      highlights: [],
-      message: "Путь к файлу не указан в конфиге. Для tzadmin-xray пути будут добавлены автоматически.",
-    };
-  }
-  const file = await tailRemoteFile(row, filePath, lineCap);
-  if (
-    xrayRunning &&
-    (file.status === "not_found" || file.status === "empty" || file.status === "permission_denied")
-  ) {
-    const journal = await tailFromJournal(row, kind, lineCap);
-    if (journal.status === "ok" && journal.lines.length > 0) {
-      return {
-        ...journal,
-        message: file.message ? `${file.message} Показан journalctl.` : "Показан journalctl (файл лога пуст или недоступен).",
-      };
-    }
-  }
-  return file;
+  return toPayload("journalctl (tzadmin-xray / xray)", "ok", slice);
 }
 
 function buildHint(log: ParsedXrayLogConfig, xrayRunning: boolean): string | null {
@@ -273,7 +297,7 @@ function buildHint(log: ParsedXrayLogConfig, xrayRunning: boolean): string | nul
 
 export async function fetchXrayLogsSnapshot(
   serverId: number,
-  opts?: { lines?: number; includeAccess?: boolean; includeError?: boolean },
+  opts?: { lines?: number; includeAccess?: boolean; includeError?: boolean; skipCache?: boolean },
 ): Promise<XrayLogsSnapshot> {
   const row = getServer(serverId);
   if (!row) throw new Error("server_not_found");
@@ -281,6 +305,14 @@ export async function fetchXrayLogsSnapshot(
   const lineCap = opts?.lines ?? DEFAULT_LOG_TAIL_LINES;
   const includeAccess = opts?.includeAccess !== false;
   const includeError = opts?.includeError !== false;
+  const key = cacheKey(serverId, lineCap, includeAccess, includeError);
+
+  if (!opts?.skipCache) {
+    const hit = snapshotCache.get(key);
+    if (hit && Date.now() - hit.at < SNAPSHOT_CACHE_TTL_MS) {
+      return hit.snapshot;
+    }
+  }
 
   let configPath: string;
   try {
@@ -289,57 +321,114 @@ export async function fetchXrayLogsSnapshot(
     throw new Error(e instanceof Error ? e.message : String(e));
   }
 
-  let config: Record<string, unknown>;
-  try {
-    config = await readConfig(row, configPath);
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    throw new Error(`Не удалось прочитать конфиг Xray: ${msg}`);
+  const cfg = sshCfg(row);
+  const managed = isTzadminManagedConfigPath(configPath);
+
+  const snapshot = await withSsh(cfg, async (conn) => {
+    let logCfg: ParsedXrayLogConfig;
+    try {
+      logCfg = parseXrayLogConfig(await readConfigOn(conn, configPath));
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      throw new Error(`Не удалось прочитать конфиг Xray: ${msg}`);
+    }
+
+    if (
+      (!logCfg.accessPath || !logCfg.errorPath) &&
+      logCfg.loglevel !== "none" &&
+      shouldEnsureLogFilePaths(configPath)
+    ) {
+      throw Object.assign(new Error("needs_ensure_paths"), { code: "needs_ensure_paths" as const });
+    }
+
+    const script = buildBatchScript({
+      accessPath: logCfg.accessPath,
+      errorPath: logCfg.errorPath,
+      includeAccess,
+      includeError,
+      lineCap,
+      managedService: managed,
+    });
+    const r = await sshExecOn(conn, script);
+    const out = `${r.stdout}\n${r.stderr}`;
+    const running = /___RUNNING___1/.test(out);
+
+    let access = includeAccess
+      ? parseStreamBlock(out, "ACCESS")
+      : emptyStream(logCfg.accessPath, "no_path", "Не запрошен.");
+    let error = includeError
+      ? parseStreamBlock(out, "ERROR")
+      : emptyStream(logCfg.errorPath, "no_path", "Не запрошен.");
+
+    if (
+      includeAccess &&
+      running &&
+      (access.status === "not_found" || access.status === "empty" || access.status === "permission_denied")
+    ) {
+      const journal = await journalFallbackOn(conn, "access", lineCap);
+      if (journal.status === "ok" && journal.lines.length > 0) {
+        access = {
+          ...journal,
+          message: access.message
+            ? `${access.message} Показан journalctl.`
+            : "Показан journalctl (файл лога пуст или недоступен).",
+        };
+      }
+    }
+    if (
+      includeError &&
+      running &&
+      (error.status === "not_found" || error.status === "empty" || error.status === "permission_denied")
+    ) {
+      const journal = await journalFallbackOn(conn, "error", lineCap);
+      if (journal.status === "ok" && journal.lines.length > 0) {
+        error = {
+          ...journal,
+          message: error.message
+            ? `${error.message} Показан journalctl.`
+            : "Показан journalctl (файл лога пуст или недоступен).",
+        };
+      }
+    }
+
+    const hint =
+      buildHint(logCfg, running) ??
+      (logCfg.accessPath && logCfg.errorPath
+        ? null
+        : "Пути к файлам логов добавлены в конфиг. Если панели пустые — подключите VPN-клиента или выберите loglevel info/debug.");
+
+    return {
+      server_id: row.id,
+      server_name: row.name,
+      host: row.host,
+      config_path: configPath,
+      log: logCfg,
+      xray_running: running,
+      access,
+      error,
+      hint,
+    };
+  }).catch(async (e: unknown) => {
+    const err = e as Error & { code?: string };
+    if (err.code === "needs_ensure_paths") {
+      await ensureXrayLogFilePaths(row, configPath);
+      return fetchXrayLogsSnapshot(serverId, { ...opts, skipCache: true });
+    }
+    throw e;
+  });
+
+  snapshotCache.set(key, { at: Date.now(), snapshot });
+  return snapshot;
+}
+
+export function invalidateXrayLogsSnapshotCache(serverId?: number): void {
+  if (serverId == null) {
+    snapshotCache.clear();
+    return;
   }
-
-  let logCfg = parseXrayLogConfig(config);
-  if ((!logCfg.accessPath || !logCfg.errorPath) && logCfg.loglevel !== "none") {
-    logCfg = await ensureXrayLogFilePaths(row, configPath);
+  for (const k of snapshotCache.keys()) {
+    if (k.startsWith(`${serverId}:`)) snapshotCache.delete(k);
   }
-  const xrayRunning = await isXrayRunning(row, configPath);
-
-  const access = includeAccess
-    ? await tailLogStream(row, logCfg.accessPath, "access", lineCap, xrayRunning)
-    : {
-        path: logCfg.accessPath,
-        status: "no_path" as LogFileStatus,
-        lines: [],
-        highlights: [],
-        message: "Не запрошен.",
-      };
-
-  const error = includeError
-    ? await tailRemoteFile(row, logCfg.errorPath, lineCap)
-    : {
-        path: logCfg.errorPath,
-        status: "no_path" as LogFileStatus,
-        lines: [],
-        highlights: [],
-        message: "Не запрошен.",
-      };
-
-  const hint =
-    buildHint(logCfg, xrayRunning) ??
-    (logCfg.accessPath && logCfg.errorPath
-      ? null
-      : "Пути к файлам логов добавлены в конфиг. Если панели пустые — подключите VPN-клиента или выберите loglevel info/debug.");
-
-  return {
-    server_id: row.id,
-    server_name: row.name,
-    host: row.host,
-    config_path: configPath,
-    log: logCfg,
-    xray_running: xrayRunning,
-    access,
-    error,
-    hint,
-  };
 }
 
 export async function setXrayLogLevel(serverId: number, loglevel: XrayLogLevel): Promise<XrayLogsSnapshot> {
@@ -351,18 +440,15 @@ export async function setXrayLogLevel(serverId: number, loglevel: XrayLogLevel):
 
   await sshExecCommand(sshCfg(row), `install -d -m 0755 ${shellQuote(TZADMIN_LOG_DIR)} 2>/dev/null || true`);
 
-  await mutateXrayConfigAndRestart(
-    sshCfg(row),
-    configPath,
-    (config) => {
-      applyXrayLogConfig(config, {
-        loglevel,
-        ensureFilePaths: loglevel !== "none",
-      });
-    },
-  );
+  await mutateXrayConfigAndRestart(sshCfg(row), configPath, (config) => {
+    applyXrayLogConfig(config, {
+      loglevel,
+      ensureFilePaths: loglevel !== "none",
+    });
+  });
 
-  return fetchXrayLogsSnapshot(serverId);
+  invalidateXrayLogsSnapshotCache(serverId);
+  return fetchXrayLogsSnapshot(serverId, { skipCache: true });
 }
 
 export async function clearXrayLogFiles(
@@ -373,28 +459,78 @@ export async function clearXrayLogFiles(
   if (!row) throw new Error("server_not_found");
 
   const configPath = await resolveConfigPathForLogs(row);
-  const config = await readConfig(row, configPath);
-  const logCfg = parseXrayLogConfig(config);
   const cfg = sshCfg(row);
   const cleared: string[] = [];
   const errors: string[] = [];
 
-  const paths: { key: "access" | "error"; path: string | null }[] = [
-    { key: "access", path: logCfg.accessPath },
-    { key: "error", path: logCfg.errorPath },
-  ];
+  await withSsh(cfg, async (conn) => {
+    const config = await readConfigOn(conn, configPath);
+    const logCfg = parseXrayLogConfig(config);
+    const paths: { key: "access" | "error"; path: string | null }[] = [
+      { key: "access", path: logCfg.accessPath },
+      { key: "error", path: logCfg.errorPath },
+    ];
 
-  for (const t of paths) {
-    if (!targets.includes(t.key)) continue;
-    if (!t.path) {
-      errors.push(`${t.key}: путь не задан в конфиге`);
-      continue;
+    for (const t of paths) {
+      if (!targets.includes(t.key)) continue;
+      if (!t.path) {
+        errors.push(`${t.key}: путь не задан в конфиге`);
+        continue;
+      }
+      const q = shellQuote(t.path);
+      const r = await sshExecOn(conn, `: > ${q} 2>&1 || truncate -s 0 ${q} 2>&1`);
+      if (r.code === 0) cleared.push(t.path);
+      else errors.push(`${t.path}: ${(r.stderr || r.stdout).trim() || "ошибка очистки"}`);
     }
-    const q = shellQuote(t.path);
-    const r = await sshExecCommand(cfg, `: > ${q} 2>&1 || truncate -s 0 ${q} 2>&1`);
-    if (r.code === 0) cleared.push(t.path);
-    else errors.push(`${t.path}: ${(r.stderr || r.stdout).trim() || "ошибка очистки"}`);
-  }
+  });
 
+  invalidateXrayLogsSnapshotCache(serverId);
   return { cleared, errors };
+}
+
+/** Size-based trim: keep last LOG_TRIM_KEEP_BYTES if file > LOG_TRIM_TRIGGER_BYTES. */
+export async function trimXrayLogFilesIfLarge(
+  serverId: number,
+): Promise<{ trimmed: string[]; skipped: string[]; errors: string[] }> {
+  const row = getServer(serverId);
+  if (!row) throw new Error("server_not_found");
+
+  const configPath = await resolveConfigPathForLogs(row);
+  const cfg = sshCfg(row);
+  const trimmed: string[] = [];
+  const skipped: string[] = [];
+  const errors: string[] = [];
+
+  await withSsh(cfg, async (conn) => {
+    const config = await readConfigOn(conn, configPath);
+    const logCfg = parseXrayLogConfig(config);
+    const paths = [logCfg.accessPath, logCfg.errorPath].filter(Boolean) as string[];
+    for (const p of paths) {
+      const q = shellQuote(p);
+      const script = `
+f=${q}
+if [ ! -f "$f" ]; then echo SKIP; exit 0; fi
+bytes=$(wc -c < "$f" 2>/dev/null | tr -d ' \\t\\n' || echo 0)
+if [ -z "$bytes" ] || [ "$bytes" -le ${LOG_TRIM_TRIGGER_BYTES} ]; then echo SKIP:$bytes; exit 0; fi
+tmp="\${f}.trim.$$"
+if tail -c ${LOG_TRIM_KEEP_BYTES} "$f" > "$tmp" 2>/dev/null && mv "$tmp" "$f" 2>/dev/null; then
+  echo TRIM:$bytes
+else
+  rm -f "$tmp" 2>/dev/null
+  echo ERR
+  exit 1
+fi
+`.trim();
+      const r = await sshExecOn(conn, script);
+      const out = (r.stdout || "").trim();
+      if (out.startsWith("TRIM:")) trimmed.push(p);
+      else if (out.startsWith("SKIP")) skipped.push(p);
+      else if (r.code !== 0 || out.startsWith("ERR")) {
+        errors.push(`${p}: ${(r.stderr || out || "trim failed").trim()}`);
+      } else skipped.push(p);
+    }
+  });
+
+  if (trimmed.length) invalidateXrayLogsSnapshotCache(serverId);
+  return { trimmed, skipped, errors };
 }

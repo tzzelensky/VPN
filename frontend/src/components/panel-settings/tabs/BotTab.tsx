@@ -219,7 +219,7 @@ export default function BotTab({
           <div className="form-field">
             <FieldLabel label="Модель Gemini" hint={PANEL_HINTS.geminiModel} />
             <select
-              value={draft.telegram.geminiModel || "gemini-2.5-flash-lite"}
+              value={draft.telegram.geminiModel || "gemini-3.5-flash-lite"}
               onChange={(e) =>
                 patchDraft((d) => ({
                   ...d,
@@ -227,12 +227,12 @@ export default function BotTab({
                 }))
               }
             >
-              <option value="gemini-2.5-flash-lite">gemini-2.5-flash-lite</option>
-              <option value="gemini-2.5-flash">gemini-2.5-flash</option>
-              <option value="gemini-2.0-flash-lite">gemini-2.0-flash-lite</option>
-              <option value="gemini-2.0-flash">gemini-2.0-flash</option>
+              <option value="gemini-3.5-flash-lite">gemini-3.5-flash-lite</option>
+              <option value="gemini-3.6-flash">gemini-3.6-flash</option>
               <option value="gemini-3.1-flash-lite">gemini-3.1-flash-lite</option>
               <option value="gemini-flash-latest">gemini-flash-latest</option>
+              <option value="gemini-2.5-flash-lite">gemini-2.5-flash-lite (устарела)</option>
+              <option value="gemini-2.5-flash">gemini-2.5-flash (устарела)</option>
             </select>
           </div>
           <div className="form-field">
@@ -251,6 +251,23 @@ export default function BotTab({
           </div>
         </div>
 
+        <div className="form-field">
+          <FieldLabel label="Прокси для Gemini" hint={PANEL_HINTS.geminiHttpsProxy} />
+          <input
+            type="text"
+            autoComplete="off"
+            spellCheck={false}
+            value={draft.telegram.geminiHttpsProxy ?? ""}
+            placeholder="http://user:pass@host:3128"
+            onChange={(e) =>
+              patchDraft((d) => ({
+                ...d,
+                telegram: { ...d.telegram, geminiHttpsProxy: e.target.value },
+              }))
+            }
+          />
+        </div>
+
         <div className="panel-settings-actions">
           <button type="button" className="ghost" disabled={busy} onClick={onTestBot}>
             Проверить бота
@@ -267,7 +284,7 @@ export default function BotTab({
         ) : null}
       </SettingsCard>
 
-      <SettingsCard title="Уведомления" sub="2FA и оповещения админам">
+      <SettingsCard title="Уведомления" sub="2FA и меню админа">
         <div className="settings-toggle-list">
           <SettingsToggleRow
             label="Двухфакторная аутентификация"
@@ -283,91 +300,70 @@ export default function BotTab({
               }))
             }
           />
-          {(
-            [
-              ["adminClientsButtonEnabled", "Показывать кнопку «Клиенты» у админов"],
-              ["notifyNewUsers", "Уведомлять о новых пользователях"],
-              ["notifyBroadcastErrors", "Уведомлять об ошибках рассылок"],
-              ["notifySurveyResponses", "Уведомлять о новых ответах на опросы"],
-              ["notifyServerErrors", "Уведомлять об ошибках серверов"],
-              ["testMode", "Тестовый режим Telegram"],
-            ] as const
-          ).map(([key, label]) => {
-            const hintMap: Record<string, string> = {
-              adminClientsButtonEnabled: PANEL_HINTS.adminClientsButtonEnabled,
-              notifyNewUsers: PANEL_HINTS.notifyNewUsers,
-              notifyBroadcastErrors: PANEL_HINTS.notifyBroadcastErrors,
-              notifySurveyResponses: PANEL_HINTS.notifySurveyResponses,
-              notifyServerErrors: PANEL_HINTS.notifyServerErrors,
-              testMode: PANEL_HINTS.testMode,
-            };
-            return (
-              <SettingsToggleRow
-                key={key}
-                label={label}
-                hint={hintMap[key] ?? ""}
-                on={Boolean(draft.telegram[key])}
-                onToggle={() =>
-                  patchDraft((d) => ({
-                    ...d,
-                    telegram: { ...d.telegram, [key]: !d.telegram[key] },
-                  }))
-                }
-              />
-            );
-          })}
+          <SettingsToggleRow
+            label="Показывать кнопку «Клиенты» у админов"
+            hint={PANEL_HINTS.adminClientsButtonEnabled}
+            on={Boolean(draft.telegram.adminClientsButtonEnabled)}
+            onToggle={() =>
+              patchDraft((d) => ({
+                ...d,
+                telegram: {
+                  ...d.telegram,
+                  adminClientsButtonEnabled: !d.telegram.adminClientsButtonEnabled,
+                },
+              }))
+            }
+          />
         </div>
       </SettingsCard>
 
       <SettingsCard
         title="Цвета кнопок"
-        sub="HEX для inline-кнопок бота"
+        sub="Стили Telegram Bot API"
         collapsible
         open={colorsOpen}
         onToggle={() => setColorsOpen((v) => !v)}
       >
         <p className="field-hint">{PANEL_HINTS.telegramButtonColors}</p>
-        <div className="panel-tg-button-colors panel-tg-button-colors--grid">
-          {BUTTON_COLOR_KEYS.map(([key, label]) => (
-            <label key={key} className="panel-tg-color-row">
-              <span className="panel-tg-color-label">{label}</span>
-              <input
-                type="color"
-                value={
-                  /^#[0-9a-fA-F]{6}$/.test(draft.telegram.buttonColors?.[key] ?? "")
-                    ? (draft.telegram.buttonColors[key] as string)
-                    : "#3390ec"
-                }
-                onChange={(e) => {
-                  const hex = e.target.value.toLowerCase();
-                  patchDraft((d) => ({
-                    ...d,
-                    telegram: {
-                      ...d.telegram,
-                      buttonColors: { ...d.telegram.buttonColors, [key]: hex },
-                    },
-                  }));
-                }}
-              />
-              <input
-                className="panel-tg-color-hex"
-                value={draft.telegram.buttonColors?.[key] ?? ""}
-                onChange={(e) => {
-                  let v = e.target.value.trim();
-                  if (v && !v.startsWith("#")) v = `#${v}`;
-                  patchDraft((d) => ({
-                    ...d,
-                    telegram: {
-                      ...d.telegram,
-                      buttonColors: { ...d.telegram.buttonColors, [key]: v },
-                    },
-                  }));
-                }}
-                placeholder="#3390ec"
-                spellCheck={false}
-              />
-            </label>
-          ))}
+        <div className="panel-tg-button-colors panel-tg-button-colors--styles">
+          {BUTTON_COLOR_KEYS.map(([key, label]) => {
+            const style = (draft.telegram.buttonColors?.[key] as "primary" | "success" | "danger") || "primary";
+            return (
+              <div key={key} className="panel-tg-style-row">
+                <span className={`panel-tg-style-preview panel-tg-style-preview--${style}`}>{label}</span>
+                <div className="panel-tg-style-chips" role="group" aria-label={`Стиль: ${label}`}>
+                  {(
+                    [
+                      ["primary", "Синий"],
+                      ["success", "Зелёный"],
+                      ["danger", "Красный"],
+                    ] as const
+                  ).map(([value, chipLabel]) => (
+                    <button
+                      key={value}
+                      type="button"
+                      className={`panel-tg-style-chip panel-tg-style-chip--${value}${
+                        style === value ? " is-active" : ""
+                      }`}
+                      aria-pressed={style === value}
+                      title={chipLabel}
+                      onClick={() =>
+                        patchDraft((d) => ({
+                          ...d,
+                          telegram: {
+                            ...d.telegram,
+                            buttonColors: { ...d.telegram.buttonColors, [key]: value },
+                          },
+                        }))
+                      }
+                    >
+                      {chipLabel}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
         </div>
       </SettingsCard>
     </div>

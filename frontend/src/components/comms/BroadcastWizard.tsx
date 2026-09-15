@@ -27,7 +27,18 @@ import {
 } from "./commsTypes";
 
 const LS_KEY_MARK_ENABLED = "comms_mark_enabled";
-const LS_KEY_MARK_TEXT = "comms_mark_text";
+
+function toDatetimeLocalValue(ms: number): string {
+  const d = new Date(ms);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+function datetimeLocalToIso(value: string): string | null {
+  const t = Date.parse(value);
+  if (!Number.isFinite(t)) return null;
+  return new Date(t).toISOString();
+}
 
 type SubTab = "send" | "segments" | "sent";
 
@@ -71,10 +82,10 @@ export default function BroadcastWizard({
     if (typeof window === "undefined") return true;
     return window.localStorage.getItem(LS_KEY_MARK_ENABLED) !== "0";
   });
-  const [markText, setMarkText] = useState<string>(() => {
-    if (typeof window === "undefined") return "Сообщение от администратора";
-    return window.localStorage.getItem(LS_KEY_MARK_TEXT) || "Сообщение от администратора";
-  });
+  const [markText, setMarkText] = useState("");
+  const [scheduleMode, setScheduleMode] = useState(false);
+  const [sendAtLocal, setSendAtLocal] = useState(() => toDatetimeLocalValue(Date.now() + 60 * 60_000));
+  const [composeNonce, setComposeNonce] = useState(0);
 
   const [busy, setBusy] = useState(false);
   const [segmentBusy, setSegmentBusy] = useState(false);
@@ -108,15 +119,12 @@ export default function BroadcastWizard({
     Boolean(text.trim()) &&
     mode != null &&
     (mode !== "selected" || selectedUsers.length > 0) &&
-    (mode !== "segment" || Boolean(segmentId));
+    (mode !== "segment" || Boolean(segmentId)) &&
+    (!scheduleMode || Boolean(sendAtLocal));
 
   useEffect(() => {
     window.localStorage.setItem(LS_KEY_MARK_ENABLED, markEnabled ? "1" : "0");
   }, [markEnabled]);
-
-  useEffect(() => {
-    window.localStorage.setItem(LS_KEY_MARK_TEXT, markText);
-  }, [markText]);
 
   useEffect(() => {
     if (audience !== "segment" || !segmentId) {
@@ -173,9 +181,11 @@ export default function BroadcastWizard({
     setText("");
     setPhoto(null);
     setMessageButtons([]);
+    setMarkText("");
     setConfirmOpen(false);
     setLastResult(null);
     setPickerOpen(false);
+    setComposeNonce((n) => n + 1);
   }
 
   function applyCopyDraft(draft: SentCopyDraft) {
@@ -187,10 +197,22 @@ export default function BroadcastWizard({
     setPhoto(draft.photo);
     setMessageButtons(draft.messageButtons);
     if (draft.markEnabled !== undefined) setMarkEnabled(draft.markEnabled);
-    if (draft.markText !== undefined && draft.markText.trim()) setMarkText(draft.markText);
+    else if (draft.markText?.trim()) setMarkEnabled(true);
+    setMarkText(draft.markText?.trim() ? draft.markText : "");
     setConfirmOpen(false);
     setLastResult(null);
+    setComposeNonce((n) => n + 1);
     setSubTab("send");
+  }
+
+  function handleScheduleModeChange(next: boolean) {
+    setScheduleMode(next);
+    if (!next) return;
+    const min = Date.now() + 60_000;
+    const current = Date.parse(sendAtLocal);
+    if (!Number.isFinite(current) || current < min) {
+      setSendAtLocal(toDatetimeLocalValue(Date.now() + 60 * 60_000));
+    }
   }
 
   async function doSend() {
@@ -211,6 +233,14 @@ export default function BroadcastWizard({
     if (mode === "segment" && !segmentId) {
       onFlash({ type: "err", text: "Выберите сегмент для рассылки." });
       return;
+    }
+    let sendAtIso: string | undefined;
+    if (scheduleMode) {
+      sendAtIso = datetimeLocalToIso(sendAtLocal) ?? undefined;
+      if (!sendAtIso || Date.parse(sendAtIso) <= Date.now() + 15_000) {
+        onFlash({ type: "err", text: "Выберите дату и время в будущем." });
+        return;
+      }
     }
 
     setBusy(true);
@@ -237,10 +267,21 @@ export default function BroadcastWizard({
         ...(photoBase64
           ? { photo_base64: photoBase64, photo_mime: photoMime, photo_name: photoName }
           : {}),
+        ...(sendAtIso ? { send_at: sendAtIso } : {}),
       });
       setLastResult(result);
       await onHistoryReload();
-      if (result.ok) {
+      if (result.scheduled) {
+        onFlash({
+          type: "ok",
+          text: `Рассылка запланирована на ${new Date(result.send_at ?? sendAtIso ?? "").toLocaleString("ru-RU")}.`,
+        });
+        setFormFlash(true);
+        window.setTimeout(() => {
+          resetSendForm();
+          setFormFlash(false);
+        }, 280);
+      } else if (result.ok) {
         onFlash({
           type: "ok",
           text:
@@ -421,6 +462,7 @@ export default function BroadcastWizard({
             {audience !== "new_segment" ? (
               <>
                 <MessageComposer
+                  key={composeNonce}
                   busy={busy}
                   title={title}
                   onTitleChange={setTitle}
@@ -450,12 +492,17 @@ export default function BroadcastWizard({
                   canSend={canSend}
                   needsConfirm={needsConfirm}
                   confirmOpen={confirmOpen}
+                  scheduleMode={scheduleMode}
+                  onScheduleModeChange={handleScheduleModeChange}
+                  sendAtLocal={sendAtLocal}
+                  onSendAtLocalChange={setSendAtLocal}
+                  sendAtMin={toDatetimeLocalValue(Date.now())}
                   onRequestSend={onRequestSend}
                   onConfirm={() => void doSend()}
                   onCancelConfirm={() => setConfirmOpen(false)}
                 />
 
-                {lastResult && lastResult.failures.length > 0 ? (
+                {lastResult && !lastResult.scheduled && lastResult.failures.length > 0 ? (
                   <div className="comms-failures comms-wiz-card">
                     <h3>Ошибки доставки</h3>
                     <ul>

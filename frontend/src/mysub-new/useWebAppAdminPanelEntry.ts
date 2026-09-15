@@ -1,5 +1,6 @@
 import { useCallback, useRef, useState } from "react";
 import { checkWebAppAdminGate, loginWebAppAdmin } from "../api";
+import { ADMIN_HOME_PATH } from "../homeSearchIndex";
 
 const TAP_NEED = 5;
 const TAP_WINDOW_MS = 2500;
@@ -43,7 +44,7 @@ export function useWebAppAdminPanelEntry(initData: string, disabled = false) {
     setBusy(true);
     try {
       await loginWebAppAdmin(initData);
-      window.location.replace("/servers");
+      window.location.replace(ADMIN_HOME_PATH);
     } catch {
       setOpen(false);
     } finally {

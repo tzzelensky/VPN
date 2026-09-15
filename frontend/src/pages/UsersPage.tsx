@@ -12,7 +12,6 @@ import {
   renewUserSubscription,
   resetUserTraffic,
   setUserTrafficUsed,
-  syncUserStatsFromServers,
   type CreateUserPayload,
   type ServerDto,
   type UserDto,
@@ -31,6 +30,7 @@ import { usePanelTabParam } from "../lib/panelTabRoute";
 import DashboardLayout from "../components/DashboardLayout";
 import CreateSubscriptionLoader from "../components/CreateSubscriptionLoader";
 import PageLoadingState from "../components/PageLoadingState";
+import PageSectionHero from "../components/PageSectionHero";
 import Spinner from "../components/Spinner";
 import UserModal from "../components/UserModal";
 import TrafficUsedSlider from "../components/TrafficUsedSlider";
@@ -40,11 +40,11 @@ import { useModalEscape } from "../hooks/useModalEscape";
 import { notifyUsersChanged, USERS_CHANGED_EVENT } from "../usersEvents";
 import { readUsersListCache, writeUsersListCache } from "../usersListCache";
 import { prefetchUsersInBackground, USERS_CACHE_UPDATED_EVENT } from "../usersPrefetch";
+import { ensureOnlineStatsSynced, getOnlineStatsStatus } from "../onlineStatsSync";
 import { hideUserId, pruneHiddenUserIds, readHiddenUserIds, unhideUserId } from "../usersHidden";
 
 const BYTES_PER_GB = 1073741824;
 const DAY_MS = 24 * 60 * 60 * 1000;
-const SYNC_STATS_TIMEOUT_MS = 45_000;
 const PREVIEW_CONCURRENCY = 2;
 const PREVIEW_TIMEOUT_MS = 12_000;
 
@@ -301,7 +301,6 @@ export default function UsersPage({ onLogout }: { onLogout: () => void }) {
   const [searchQuery, setSearchQuery] = useState("");
   const [hiddenUserIds, setHiddenUserIds] = useState<number[]>(() => readHiddenUserIds());
   const [showHiddenUsers, setShowHiddenUsers] = useState(false);
-  const [usersHelpOpen, setUsersHelpOpen] = useState(false);
   const [notifyHints, setNotifyHints] = useState({ daysBefore: 3, lowGb: 30, expiryOn: true, trafficOn: true });
   const previewAbortRef = useRef<AbortController | null>(null);
   const previewTimerRef = useRef<number | null>(null);
@@ -586,27 +585,16 @@ export default function UsersPage({ onLogout }: { onLogout: () => void }) {
     statsSyncRunningRef.current = true;
     setStatsRefreshing(true);
     try {
-      const result = await Promise.race([
-        syncUserStatsFromServers(),
-        new Promise<"timeout">((resolve) => window.setTimeout(() => resolve("timeout"), SYNC_STATS_TIMEOUT_MS)),
-      ]);
-      if (result !== "timeout" && result.errors?.length) {
-        const errs = result.errors.filter((e) => e !== "timeout");
-        if (errs.length) {
-          setMsg({ type: "err", text: `Статистика с узлов: ${errs.join("; ")}` });
-        }
-      }
-      if (result !== "timeout") {
-        const synced = await loadUsersSnapshot();
-        schedulePreviewCounts(synced.users, synced.deployedServers);
-      }
+      const synced = await ensureOnlineStatsSynced({ force: true });
+      applyUsersSnapshot(synced.users, synced.deployedServers);
+      schedulePreviewCounts(synced.users, synced.deployedServers);
     } catch {
       /* список уже показан */
     } finally {
       statsSyncRunningRef.current = false;
       setStatsRefreshing(false);
     }
-  }, [loadUsersSnapshot, schedulePreviewCounts]);
+  }, [applyUsersSnapshot, schedulePreviewCounts]);
 
   const refresh = useCallback(
     async (opts?: { silent?: boolean; skipSync?: boolean }) => {
@@ -636,7 +624,9 @@ export default function UsersPage({ onLogout }: { onLogout: () => void }) {
         const data = await prefetchUsersInBackground({ force: !cached?.users?.length });
         applyUsersSnapshot(data.users, data.deployedServers);
         schedulePreviewCounts(data.users, data.deployedServers);
-        void runBackgroundStatsSync();
+        if (getOnlineStatsStatus() !== "ready") {
+          void runBackgroundStatsSync();
+        }
       } catch (e) {
         setMsg({ type: "err", text: String(e) });
       } finally {
@@ -1108,78 +1098,45 @@ export default function UsersPage({ onLogout }: { onLogout: () => void }) {
 
   return (
     <DashboardLayout onLogout={onLogout}>
-      <section className="panel users-hero-panel">
-        <div className="users-hero-top">
-          <div className="users-hero-title-row">
-            <h1>Пользователи</h1>
-            <button
-              type="button"
-              className={`users-help-toggle${usersHelpOpen ? " open" : ""}`}
-              aria-expanded={usersHelpOpen}
-              aria-controls="users-help-panel"
-              onClick={() => setUsersHelpOpen((v) => !v)}
-            >
-              <span className="users-help-toggle-label">Справка</span>
-              <span className="users-help-toggle-chevron" aria-hidden>
-                {usersHelpOpen ? "▾" : "▸"}
-              </span>
-            </button>
-          </div>
-          <div className="users-hero-actions">
-            <button
-              type="button"
-              className="primary"
-              disabled={refreshing}
-              onClick={() => setModal({ kind: "create" })}
-            >
-              Новый клиент
-            </button>
-          </div>
-        </div>
-        <div
-          id="users-help-panel"
-          className={`users-help-panel${usersHelpOpen ? " open" : ""}`}
-          aria-hidden={!usersHelpOpen}
-        >
-          <div className="users-help-grid">
-            <article className="users-help-card">
-              <div className="users-help-card-kicker">Раздел</div>
-              <h3 className="users-help-card-title">Клиенты и подписки</h3>
-              <p className="users-help-card-text">
-                Список VPN-клиентов: трафик, срок, онлайн и быстрые действия — без открытия карточки.
-              </p>
-            </article>
-            <article className="users-help-card">
-              <div className="users-help-card-kicker">Срок</div>
-              <h3 className="users-help-card-title">
-                {notifyHints.expiryOn
-                  ? `Пуш за ${notifyHints.daysBefore} ${ruDaysWord(notifyHints.daysBefore)}`
-                  : "Автопуш выключен"}
-              </h3>
-              <p className="users-help-card-text">
-                {notifyHints.expiryOn
-                  ? `Telegram-напоминание уходит, когда до окончания осталось ≤ ${notifyHints.daysBefore} дн. Нужен Chat ID.`
-                  : "Напоминания о сроке сейчас отключены в автокоммуникациях."}
-              </p>
-            </article>
-            <article className="users-help-card">
-              <div className="users-help-card-kicker">Трафик</div>
-              <h3 className="users-help-card-title">
-                {notifyHints.trafficOn
-                  ? `Пуш при ≤ ${notifyHints.lowGb} ГБ`
-                  : "Автопуш выключен"}
-              </h3>
-              <p className="users-help-card-text">
-                {notifyHints.trafficOn
-                  ? `Сначала предупреждение, когда осталось ≤ ${notifyHints.lowGb} ГБ, затем ещё одно при полном исчерпании. Нужен Chat ID.`
-                  : "Напоминания о трафике сейчас отключены в автокоммуникациях."}
-              </p>
-            </article>
-          </div>
-        </div>
+      <PageSectionHero
+        title="Пользователи"
+        helpCards={[
+          {
+            kicker: "Раздел",
+            title: "Клиенты и подписки",
+            text: "Список VPN-клиентов: трафик, срок, онлайн и быстрые действия — без открытия карточки.",
+          },
+          {
+            kicker: "Срок",
+            title: notifyHints.expiryOn
+              ? `Пуш за ${notifyHints.daysBefore} ${ruDaysWord(notifyHints.daysBefore)}`
+              : "Автопуш выключен",
+            text: notifyHints.expiryOn
+              ? `Telegram-напоминание уходит, когда до окончания осталось ≤ ${notifyHints.daysBefore} дн. Нужен Chat ID.`
+              : "Напоминания о сроке сейчас отключены в автокоммуникациях.",
+          },
+          {
+            kicker: "Трафик",
+            title: notifyHints.trafficOn ? `Пуш при ≤ ${notifyHints.lowGb} ГБ` : "Автопуш выключен",
+            text: notifyHints.trafficOn
+              ? `Сначала предупреждение, когда осталось ≤ ${notifyHints.lowGb} ГБ, затем ещё одно при полном исчерпании. Нужен Chat ID.`
+              : "Напоминания о трафике сейчас отключены в автокоммуникациях.",
+          },
+        ]}
+        actions={
+          <button
+            type="button"
+            className="primary"
+            disabled={refreshing}
+            onClick={() => setModal({ kind: "create" })}
+          >
+            Новый клиент
+          </button>
+        }
+      >
         {creatingUser ? <CreateSubscriptionLoader /> : null}
         {msg && !creatingUser ? <div className={`flash ${msg.type === "ok" ? "ok" : "err"}`}>{msg.text}</div> : null}
-      </section>
+      </PageSectionHero>
 
       <UserModal
         open={modal.kind !== "closed"}

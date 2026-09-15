@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import DashboardLayout from "../components/DashboardLayout";
 import PageLoadingState from "../components/PageLoadingState";
+import PageSectionHero from "../components/PageSectionHero";
 import DualListPicker, { type DualListItem } from "../components/DualListPicker";
 import VaultKeyJsonPanel from "../components/VaultKeyJsonPanel";
 import { useModalEscape } from "../hooks/useModalEscape";
@@ -8,11 +9,13 @@ import {
   bulkAssignConfigVaultKeys,
   bulkRenameConfigVaultKeys,
   checkAllConfigVaultKeys,
+  checkAllConfigVaultKeysViaConfig,
   checkConfigVaultKey,
   configVaultExportUrl,
   createConfigVaultKey,
   deleteConfigVaultKey,
   fetchConfigVaultKeyRaw,
+  fetchConfigVaultViaConfig,
   importConfigVaultKeys,
   importConfigVaultJson,
   listConfigVaultChecks,
@@ -73,7 +76,7 @@ function parseErr(e: unknown): string {
 }
 
 export default function ConfigVaultPage({ onLogout }: { onLogout: () => void }) {
-  const { confirmDangerous, maskSecret } = usePanelSettings();
+  const { confirmDangerous, maskSecret, settings: panelSettings } = usePanelSettings();
   const [data, setData] = useState<ConfigVaultOverviewDto | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -87,6 +90,23 @@ export default function ConfigVaultPage({ onLogout }: { onLogout: () => void }) 
   const [importOpen, setImportOpen] = useState(false);
   const [jsonImportOpen, setJsonImportOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [viaConfigOpen, setViaConfigOpen] = useState(false);
+  const [viaRaw, setViaRaw] = useState("");
+  const [viaCheckOnly, setViaCheckOnly] = useState(false);
+  const [viaTryRefresh, setViaTryRefresh] = useState(false);
+  const [viaCheckServers, setViaCheckServers] = useState(false);
+  const [viaMasked, setViaMasked] = useState("");
+  const [viaConfigured, setViaConfigured] = useState(false);
+  const [checkRun, setCheckRun] = useState<{
+    phase: "running" | "done";
+    title: string;
+    total: number;
+    done: number;
+    remaining: number;
+    success: number;
+    failed: number;
+    failedNames: string[];
+  } | null>(null);
   const [exportOpen, setExportOpen] = useState(false);
   const [exportMode, setExportMode] = useState<"all" | "active" | "subscriptions" | "available">("all");
 
@@ -128,6 +148,11 @@ export default function ConfigVaultPage({ onLogout }: { onLogout: () => void }) 
 
   useModalEscape(() => {
     if (usersPickerOpen || subscriptionTargetsOpen) return;
+    if (checkRun?.phase === "done") {
+      setCheckRun(null);
+      return;
+    }
+    if (checkRun?.phase === "running") return;
     if (historyKey) {
       setHistoryKey(null);
       return;
@@ -138,6 +163,10 @@ export default function ConfigVaultPage({ onLogout }: { onLogout: () => void }) 
     }
     if (settingsOpen) {
       setSettingsOpen(false);
+      return;
+    }
+    if (viaConfigOpen) {
+      setViaConfigOpen(false);
       return;
     }
     if (jsonImportOpen) {
@@ -162,9 +191,11 @@ export default function ConfigVaultPage({ onLogout }: { onLogout: () => void }) 
     }
     if (bulkRenameOpen) setBulkRenameOpen(false);
   }, Boolean(
-    historyKey ||
+    checkRun ||
+      historyKey ||
       exportOpen ||
       settingsOpen ||
+      viaConfigOpen ||
       jsonImportOpen ||
       importOpen ||
       viewKey ||
@@ -184,6 +215,161 @@ export default function ConfigVaultPage({ onLogout }: { onLogout: () => void }) 
     setLoading(false);
     return r;
   }, []);
+
+  function summarizeCheckRun(
+    keys: ConfigVaultKeyDto[],
+    targetIds: Set<number>,
+    baseline: Map<number, string | null>,
+    total: number,
+  ) {
+    let done = 0;
+    let success = 0;
+    let failed = 0;
+    const failedNames: string[] = [];
+    for (const k of keys) {
+      if (!targetIds.has(k.id)) continue;
+      if (k.last_check_status === "checking") continue;
+      if (k.last_check_at === baseline.get(k.id)) continue;
+      done += 1;
+      if (k.last_check_status === "available") {
+        success += 1;
+      } else if (k.last_check_status === "unavailable" || k.last_check_status === "unstable") {
+        failed += 1;
+        failedNames.push(k.name);
+      }
+    }
+    return {
+      done,
+      remaining: Math.max(0, total - done),
+      success,
+      failed,
+      failedNames,
+    };
+  }
+
+  async function runBulkVaultCheck(
+    title: string,
+    startFn: () => Promise<{
+      total?: number;
+      already_running?: boolean;
+      subscription_refresh?: {
+        ok: boolean;
+        status_code?: number | null;
+        error?: string | null;
+        user_found?: boolean;
+      } | null;
+    }>,
+    opts?: { useViaCheckRun?: boolean },
+  ) {
+    const snapshotKeys = data?.keys ?? [];
+    const activeKeys = snapshotKeys.filter((k) => k.active);
+    const targetIds = new Set(activeKeys.map((k) => k.id));
+    const baseline = new Map(activeKeys.map((k) => [k.id, k.last_check_at]));
+    const useViaCheckRun = opts?.useViaCheckRun === true;
+
+    try {
+      const start = await startFn();
+      const total = start.total ?? targetIds.size;
+      const sr = start.subscription_refresh;
+      if (sr) {
+        if (sr.ok) {
+          showToast("ok", `Подписка tzadmin обновлена (HTTP ${sr.status_code ?? "—"})`);
+        } else {
+          showToast(
+            "err",
+            `Обновление подписки: ${sr.error ?? "ошибка"}${sr.user_found ? "" : " (пользователь не найден)"}`,
+          );
+        }
+      }
+      if (start.already_running) {
+        showToast("ok", "Проверка уже выполняется");
+      }
+
+      setCheckRun({
+        phase: "running",
+        title,
+        total,
+        done: 0,
+        remaining: total,
+        success: 0,
+        failed: 0,
+        failedNames: [],
+      });
+
+      if (useViaCheckRun) {
+        const intervalMs = 1500;
+        const maxWaitMs = Math.max(20000, total * 12000);
+        const deadline = Date.now() + maxWaitMs;
+        while (Date.now() < deadline) {
+          const r = await reload();
+          const run = r?.via_check_run;
+          if (run) {
+            setCheckRun({
+              phase: run.running ? "running" : "done",
+              title,
+              total: run.total,
+              done: run.done,
+              remaining: Math.max(0, run.total - run.done),
+              success: run.success,
+              failed: run.failed,
+              failedNames: run.failed_names ?? [],
+            });
+            if (!run.running) return;
+          } else if (!r) {
+            break;
+          }
+          await new Promise((res) => setTimeout(res, intervalMs));
+        }
+        const final = await reload();
+        const run = final?.via_check_run;
+        if (run) {
+          setCheckRun({
+            phase: "done",
+            title,
+            total: run.total,
+            done: run.done,
+            remaining: Math.max(0, run.total - run.done),
+            success: run.success,
+            failed: run.failed,
+            failedNames: run.failed_names ?? [],
+          });
+        }
+        return;
+      }
+
+      await pollUntilVaultChecksDone(
+        async () => {
+          const r = await reload();
+          return r ?? { keys: [] };
+        },
+        total,
+        {
+          onTick: (tick) => {
+            const keys = tick.keys as ConfigVaultKeyDto[];
+            const s = summarizeCheckRun(keys, targetIds, baseline, total);
+            setCheckRun({
+              phase: "running",
+              title,
+              total,
+              ...s,
+            });
+          },
+        },
+      );
+
+      const final = await reload();
+      const s = summarizeCheckRun(final?.keys ?? [], targetIds, baseline, total);
+      setCheckRun({
+        phase: "done",
+        title,
+        total,
+        ...s,
+      });
+    } catch (e) {
+      setCheckRun(null);
+      throw e;
+    }
+  }
 
   useEffect(() => {
     void reload().catch((e) => showToast("err", parseErr(e)));
@@ -578,22 +764,38 @@ export default function ConfigVaultPage({ onLogout }: { onLogout: () => void }) 
   return (
     <DashboardLayout onLogout={onLogout}>
       <div className="vault-page">
-        <h1 className="page-title">Конфиг-хранилище</h1>
-        <p className="vault-lead muted">
-          Хранение ключей VLESS, Trojan и Hysteria2, управление добавлением в подписки и проверка доступности.
-        </p>
+        <PageSectionHero
+          title="Конфиг-хранилище"
+          helpCards={[
+            {
+              kicker: "Ключи",
+              title: "VLESS / Trojan / HY2",
+              text: "Хранение URI-ключей и добавление их в подписки клиентов.",
+            },
+            {
+              kicker: "Проверка",
+              title: "Доступность",
+              text: "Ручная и автоматическая проверка статуса ключей.",
+            },
+            {
+              kicker: "Импорт",
+              title: "Сторонний конфиг",
+              text: "Импорт списком и JSON, экспорт и массовые операции.",
+            },
+          ]}
+        >
+          {!data?.telegram_configured && (
+            <div className="vault-warn" role="status">
+              Telegram-уведомления не настроены (укажите токен бота и ID админов в настройках панели).
+            </div>
+          )}
 
-        {!data?.telegram_configured && (
-          <div className="vault-warn" role="status">
-            Telegram-уведомления не настроены (укажите токен бота и ID админов в настройках панели).
-          </div>
-        )}
-
-        {toast && (
-          <div className={`vault-toast vault-toast--${toast.type}`} role="status">
-            {toast.text}
-          </div>
-        )}
+          {toast && (
+            <div className={`vault-toast vault-toast--${toast.type}`} role="status">
+              {toast.text}
+            </div>
+          )}
+        </PageSectionHero>
 
         <div className="vault-stats">
           <div className="vault-stat-card">
@@ -657,21 +859,12 @@ export default function ConfigVaultPage({ onLogout }: { onLogout: () => void }) 
           <button
             type="button"
             className="btn"
-            disabled={busy}
-            onClick={() => void runBusy(async () => {
-              const start = await checkAllConfigVaultKeys();
-              if (start.already_running) {
-                showToast("ok", "Проверка уже выполняется");
-              } else {
-                showToast("ok", `Проверка запущена (${start.total ?? 0} ключей)`);
-              }
-              await pollUntilVaultChecksDone(async () => {
-                const r = await reload();
-                return r ?? { keys: [] };
-              }, start.total ?? 0);
-              await reload();
-              showToast("ok", "Проверка всех ключей завершена");
-            })}
+            disabled={busy || Boolean(checkRun)}
+            onClick={() =>
+              void runBusy(async () => {
+                await runBulkVaultCheck("Проверка всех ключей", () => checkAllConfigVaultKeys());
+              })
+            }
           >
             Проверить все сейчас
           </button>
@@ -685,6 +878,36 @@ export default function ConfigVaultPage({ onLogout }: { onLogout: () => void }) 
             }}
           >
             Настройки автопроверки
+          </button>
+          <button
+            type="button"
+            className="btn"
+            disabled={busy}
+            onClick={() => {
+              void runBusy(async () => {
+                const overview = data?.settings?.via_config;
+                setViaCheckOnly(overview?.check_only_via ?? false);
+                setViaTryRefresh(overview?.try_refresh_subscription ?? false);
+                setViaCheckServers(overview?.check_servers ?? false);
+                setViaMasked(overview?.masked_raw ?? "");
+                setViaConfigured(overview?.configured ?? false);
+                try {
+                  const r = await fetchConfigVaultViaConfig();
+                  const v = r.via_config;
+                  setViaRaw(v.raw ?? "");
+                  setViaCheckOnly(v.check_only_via);
+                  setViaTryRefresh(v.try_refresh_subscription);
+                  setViaCheckServers(v.check_servers ?? false);
+                  setViaMasked(v.masked_raw ?? "");
+                  setViaConfigured(v.configured);
+                } catch {
+                  setViaRaw("");
+                }
+                setViaConfigOpen(true);
+              });
+            }}
+          >
+            Проверка через сторонний конфиг
           </button>
           <button
             type="button"
@@ -1325,6 +1548,141 @@ export default function ConfigVaultPage({ onLogout }: { onLogout: () => void }) 
         </div>
       )}
 
+      {viaConfigOpen && (
+        <div className="modal-backdrop">
+          <div className="modal modal--md vault-modal" role="dialog" aria-labelledby="via-config-title">
+            <div className="modal-head">
+              <div>
+                <h2 id="via-config-title">Проверка через сторонний конфиг</h2>
+                <p className="muted" style={{ margin: "4px 0 0", fontSize: 13 }}>
+                  Панель поднимает локальный Xray и пингует ключи через SOCKS этого конфига
+                </p>
+              </div>
+              <button type="button" className="modal-close" onClick={() => setViaConfigOpen(false)} aria-label="Закрыть">
+                ×
+              </button>
+            </div>
+            <div className="modal-body">
+              {viaConfigured && viaMasked ? (
+                <p className="muted" style={{ marginTop: 0, fontSize: 13 }}>
+                  Сохранён:{" "}
+                  <code>
+                    {panelSettings?.security.maskSecrets
+                      ? viaMasked || "••••"
+                      : viaRaw.slice(0, 120) || viaMasked || "—"}
+                  </code>
+                </p>
+              ) : (
+                <p className="muted" style={{ marginTop: 0, fontSize: 13 }}>
+                  Конфиг ещё не сохранён
+                </p>
+              )}
+              <label className="field">
+                <span>VLESS / Trojan / Hysteria2 или JSON Happ/Xray</span>
+                <textarea
+                  className="input"
+                  rows={8}
+                  placeholder={"vless://…\nили вставьте client JSON"}
+                  value={viaRaw}
+                  onChange={(e) => setViaRaw(e.target.value)}
+                  spellCheck={false}
+                />
+              </label>
+              <label className="check-row">
+                <input
+                  type="checkbox"
+                  checked={viaCheckOnly}
+                  onChange={(e) => setViaCheckOnly(e.target.checked)}
+                />
+                Проверять только через этот конфиг
+              </label>
+              <p className="muted" style={{ margin: "0 0 12px", fontSize: 12 }}>
+                Выкл: автопроверка и «Проверить» идут обычным TCP; через туннель — только кнопка ниже. Вкл: все
+                проверки идут через туннель.
+              </p>
+              <label className="check-row">
+                <input
+                  type="checkbox"
+                  checked={viaTryRefresh}
+                  onChange={(e) => setViaTryRefresh(e.target.checked)}
+                />
+                Пробовать обновить подписку
+              </label>
+              <p className="muted" style={{ margin: "0 0 8px", fontSize: 12 }}>
+                Перед проверкой ключей: GET подписки пользователя tzadmin с User-Agent Happ (как обновление в
+                клиенте).
+              </p>
+              <label className="check-row">
+                <input
+                  type="checkbox"
+                  checked={viaCheckServers}
+                  onChange={(e) => setViaCheckServers(e.target.checked)}
+                />
+                Проверить сервера
+              </label>
+              <p className="muted" style={{ margin: "0 0 8px", fontSize: 12 }}>
+                Дополнительно пинговать через туннель порты добавленных серверов панели: VLESS и, если
+                развёрнуты, Hysteria2 и Trojan.
+              </p>
+            </div>
+            <div className="modal-footer" style={{ flexWrap: "wrap", gap: 8 }}>
+              <button type="button" className="btn" onClick={() => setViaConfigOpen(false)}>
+                Закрыть
+              </button>
+              <button
+                type="button"
+                className="btn"
+                disabled={busy}
+                onClick={() =>
+                  void runBusy(async () => {
+                    await patchConfigVaultSettings({
+                      via_config: {
+                        raw: viaRaw,
+                        check_only_via: viaCheckOnly,
+                        try_refresh_subscription: viaTryRefresh,
+                        check_servers: viaCheckServers,
+                      },
+                    });
+                    const r = await reload();
+                    const v = r?.settings?.via_config;
+                    setViaConfigured(v?.configured ?? Boolean(viaRaw.trim()));
+                    setViaMasked(v?.masked_raw ?? "");
+                    showToast("ok", "Сторонний конфиг сохранён");
+                  })
+                }
+              >
+                Сохранить
+              </button>
+              <button
+                type="button"
+                className="btn primary"
+                disabled={busy || Boolean(checkRun) || !viaRaw.trim()}
+                onClick={() =>
+                  void runBusy(async () => {
+                    await patchConfigVaultSettings({
+                      via_config: {
+                        raw: viaRaw,
+                        check_only_via: viaCheckOnly,
+                        try_refresh_subscription: viaTryRefresh,
+                        check_servers: viaCheckServers,
+                      },
+                    });
+                    await reload();
+                    setViaConfigOpen(false);
+                    await runBulkVaultCheck("Проверка через сторонний конфиг", () =>
+                      checkAllConfigVaultKeysViaConfig(),
+                      { useViaCheckRun: true },
+                    );
+                  })
+                }
+              >
+                Проверить все через этот конфиг
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {exportOpen && (
         <div className="modal-backdrop">
           <div
@@ -1463,6 +1821,100 @@ export default function ConfigVaultPage({ onLogout }: { onLogout: () => void }) 
                 )}
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {checkRun && (
+        <div className="modal-backdrop vault-check-run-backdrop" role="presentation">
+          <div
+            className="modal modal--sm vault-modal vault-check-run-modal"
+            role="dialog"
+            aria-labelledby="vault-check-run-title"
+            aria-busy={checkRun.phase === "running"}
+            aria-live="polite"
+          >
+            <div className="modal-head">
+              <div>
+                <h2 id="vault-check-run-title">{checkRun.title}</h2>
+                <p className="vault-check-run__sub muted">
+                  {checkRun.phase === "running" ? "Идёт проверка ключей…" : "Проверка завершена"}
+                </p>
+              </div>
+              {checkRun.phase === "done" && (
+                <button
+                  type="button"
+                  className="modal-close"
+                  onClick={() => setCheckRun(null)}
+                  aria-label="Закрыть"
+                >
+                  ×
+                </button>
+              )}
+            </div>
+            <div className="modal-body vault-check-run__body">
+              {checkRun.phase === "running" && (
+                <div className="vault-check-run__loader" aria-hidden>
+                  <span className="spinner" />
+                </div>
+              )}
+              <div className="proxy-create-progress vault-check-run__progress" role="status">
+                <p className="proxy-create-progress__label">
+                  {checkRun.phase === "running"
+                    ? `Проверено ${checkRun.done} из ${checkRun.total}`
+                    : `Всего проверено: ${checkRun.done} из ${checkRun.total}`}
+                </p>
+                <div className="proxy-create-progress__track" aria-hidden>
+                  <div
+                    className="proxy-create-progress__fill"
+                    style={{
+                      width: `${checkRun.total > 0 ? Math.min(100, Math.round((checkRun.done / checkRun.total) * 100)) : 0}%`,
+                    }}
+                  />
+                </div>
+                <p className="proxy-create-progress__meta">
+                  <span>
+                    {checkRun.phase === "running"
+                      ? `Осталось: ${checkRun.remaining}`
+                      : "Готово"}
+                  </span>
+                  <span className="muted">
+                    {checkRun.total > 0
+                      ? `${Math.min(100, Math.round((checkRun.done / checkRun.total) * 100))}%`
+                      : "0%"}
+                  </span>
+                </p>
+              </div>
+
+              <div className="vault-check-run__stats">
+                <div className="vault-check-run__stat vault-check-run__stat--ok">
+                  <span className="vault-check-run__stat-label">Успешно</span>
+                  <strong>{checkRun.success}</strong>
+                </div>
+                <div className="vault-check-run__stat vault-check-run__stat--bad">
+                  <span className="vault-check-run__stat-label">Неуспешно</span>
+                  <strong>{checkRun.failed}</strong>
+                </div>
+              </div>
+
+              {checkRun.failedNames.length > 0 && (
+                <div className="vault-check-run__fails">
+                  <p className="vault-check-run__fails-title">Неуспешные конфиги</p>
+                  <ul className="vault-check-run__fails-list">
+                    {checkRun.failedNames.map((name, i) => (
+                      <li key={`${name}-${i}`}>{name}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+            {checkRun.phase === "done" && (
+              <div className="modal-footer">
+                <button type="button" className="btn primary" onClick={() => setCheckRun(null)}>
+                  Закрыть
+                </button>
+              </div>
+            )}
           </div>
         </div>
       )}

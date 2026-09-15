@@ -1,5 +1,7 @@
-import type { TelegramColoredButtonKey } from "./telegram/inlineButtonStyles.js";
+import type { TelegramButtonColors, TelegramColoredButtonKey } from "./telegram/inlineButtonStyles.js";
 import { DEFAULT_TELEGRAM_BUTTON_COLORS } from "./telegram/inlineButtonStyles.js";
+
+export type { TelegramButtonColors, TelegramColoredButtonKey };
 
 export type PanelTheme = "system" | "light" | "dark";
 export type PanelAccent = "blue" | "green" | "purple" | "orange" | "red" | string;
@@ -70,8 +72,6 @@ export type PanelDecoyShop = {
   footer: string;
 };
 
-export type TelegramButtonColors = Record<TelegramColoredButtonKey, string>;
-
 export type PanelSettings = {
   panel: {
     title: string;
@@ -89,11 +89,8 @@ export type PanelSettings = {
   ui: {
     theme: PanelTheme;
     accentColor: PanelAccent;
-    compactMode: boolean;
     showHints: boolean;
     timezone: string;
-    /** Новый дизайн Telegram Mini App для пользователей. */
-    webAppNewDesign: boolean;
     /** Показывать функционал «Превью WebApp» в админ-панели. */
     webAppPreviewEnabled: boolean;
   };
@@ -103,34 +100,27 @@ export type PanelSettings = {
   telegram: {
     adminIds: number[];
     adminClientsButtonEnabled: boolean;
-    notifyNewUsers: boolean;
-    notifySurveyResponses: boolean;
-    notifyBroadcastErrors: boolean;
-    notifyServerErrors: boolean;
-    testMode: boolean;
     /** Код входа в панель через Telegram (по умолчанию включено). */
     login2faEnabled: boolean;
     /** Вход в мобильную админку из Telegram WebApp (5 тапов по аватарке, только Admin ID). */
     webAppAdminPanelEnabled: boolean;
-    /** HEX цвета кнопок бота (в API — primary / success / danger). */
+    /** Стили inline-кнопок бота: primary / success / danger. */
     buttonColors: TelegramButtonColors;
     /** Показывать кнопку «Спросить AI» в боте (нужен ещё Gemini API key). */
     aiAssistantEnabled: boolean;
-    /** Модель Gemini, например gemini-2.5-flash-lite. */
+    /** Модель Gemini, например gemini-3.5-flash-lite. */
     geminiModel: string;
+    /** HTTP(S) прокси для запросов к Gemini (обход «User location is not supported»). */
+    geminiHttpsProxy: string;
   };
   security: {
     maskSecrets: boolean;
     confirmDangerousActions: boolean;
     autoLogoutMinutes: number | null;
-    showDiagnosticDetails: boolean;
     /** Регулировка потраченных ГБ слайдером на странице пользователей. */
     manualTrafficAdjust: boolean;
     /** Секретный URL-сегмент → страница входа (латиница, цифры, символы; без /). */
     panelAccessPath: string;
-  };
-  maintenance: {
-    enabled: boolean;
   };
   /** Порядок элементов подписки в VPN-клиенте. */
   vpnDisplay: {
@@ -289,6 +279,27 @@ export function reorderIdsByTemplate(userIds: number[], templateOrder: number[])
   return [...head, ...tail];
 }
 
+/** HTTP/HTTPS прокси для исходящих запросов к Gemini. Пусто = без прокси. */
+export function parseGeminiHttpsProxy(raw: unknown): { ok: true; value: string } | { ok: false; error: string } {
+  const s = String(raw ?? "").trim();
+  if (!s) return { ok: true, value: "" };
+  if (s.length > 300) return { ok: false, error: "invalid_gemini_https_proxy" };
+  try {
+    const u = new URL(s);
+    if (u.protocol !== "http:" && u.protocol !== "https:") {
+      return { ok: false, error: "invalid_gemini_https_proxy" };
+    }
+    return { ok: true, value: s };
+  } catch {
+    return { ok: false, error: "invalid_gemini_https_proxy" };
+  }
+}
+
+export function normalizeGeminiHttpsProxy(raw: unknown): string {
+  const parsed = parseGeminiHttpsProxy(raw);
+  return parsed.ok ? parsed.value : "";
+}
+
 export function defaultPanelSettings(): PanelSettings {
   const sections = {} as Record<PanelSectionKey, boolean>;
   for (const s of PANEL_SECTION_META) sections[s.key] = true;
@@ -317,10 +328,8 @@ export function defaultPanelSettings(): PanelSettings {
     ui: {
       theme: "system",
       accentColor: "blue",
-      compactMode: false,
       showHints: true,
       timezone: "Asia/Yekaterinburg",
-      webAppNewDesign: false,
       webAppPreviewEnabled: true,
     },
     sections,
@@ -328,26 +337,20 @@ export function defaultPanelSettings(): PanelSettings {
     telegram: {
       adminIds: [],
       adminClientsButtonEnabled: true,
-      notifyNewUsers: false,
-      notifySurveyResponses: true,
-      notifyBroadcastErrors: true,
-      notifyServerErrors: true,
-      testMode: false,
       login2faEnabled: false,
       webAppAdminPanelEnabled: true,
       buttonColors: { ...DEFAULT_TELEGRAM_BUTTON_COLORS },
       aiAssistantEnabled: true,
-      geminiModel: "gemini-2.5-flash-lite",
+      geminiModel: "gemini-3.5-flash-lite",
+      geminiHttpsProxy: "",
     },
     security: {
       maskSecrets: true,
       confirmDangerousActions: true,
       autoLogoutMinutes: null,
-      showDiagnosticDetails: true,
       manualTrafficAdjust: false,
       panelAccessPath: "",
     },
-    maintenance: { enabled: false },
     vpnDisplay: { serverOrder: [], entryOrder: [] },
     updatedAt: Date.now(),
   };

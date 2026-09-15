@@ -21,7 +21,7 @@ import {
 } from "../db.js";
 import { primarySubscriptionUrl, publicSubUrl } from "../subscriptionUrl.js";
 import { requireAuth } from "../middleware/requireAuth.js";
-import { pushClientListToAllDeployedServers, refreshSpeedLimitsOnAllDeployedServers, removeUserUuidFromAllServers } from "../userSync.js";
+import { pushClientListToAllDeployedServers, clearSpeedLimitsOnAllDeployedServers, removeUserUuidFromAllServers } from "../userSync.js";
 import { initNdjsonStream, ndjsonLine, wantsNdjsonStream } from "../streamUtil.js";
 import { resolveSubscriptionBase64, resolveSubscriptionLinks } from "../subscriptionResolve.js";
 import { peekUserTrafficForSubscription } from "../xrayStatsPull.js";
@@ -156,9 +156,9 @@ router.post("/sync-stats", async (_req, res) => {
       warns.push(`traffic-notify: ${e instanceof Error ? e.message : String(e)}`);
     }
     try {
-      await refreshSpeedLimitsOnAllDeployedServers();
+      await clearSpeedLimitsOnAllDeployedServers();
     } catch (e) {
-      warns.push(`speed-limit: ${e instanceof Error ? e.message : String(e)}`);
+      warns.push(`speed-limit-clear: ${e instanceof Error ? e.message : String(e)}`);
     }
     res.json({
       ok: errors.length === 0,
@@ -236,7 +236,6 @@ function userDto(u: UserRow, opts?: { includeVaultLinks?: boolean }) {
     device_limit_total: isDeviceLimitActiveForUser(u) ? userDeviceTotalLimit(u) : 0,
     devices_registered: activeDeviceSlots(u.device_slots ?? []).length,
     device_slots: (u.device_slots ?? []).map((s) => deviceSlotDto(u, s)),
-    speed_limit_mbps: u.speed_limit_mbps,
     whitelist_happ_enabled: u.whitelist_happ_enabled === 1,
     whitelist_purchased: userHasPaidWhitelistProduct(u),
     online: deriveOnlineFromRow(u),
@@ -331,7 +330,6 @@ function parseCreateBody(req: import("express").Request): CreateUserInput & { na
             ? 1
             : undefined,
     device_limit_count: b.device_limit_count != null ? Number(b.device_limit_count) : undefined,
-    speed_limit_mbps: b.speed_limit_mbps != null && b.speed_limit_mbps !== "" ? Number(b.speed_limit_mbps) : undefined,
     whitelist_happ_enabled:
       typeof b.whitelist_happ_enabled === "boolean"
         ? b.whitelist_happ_enabled

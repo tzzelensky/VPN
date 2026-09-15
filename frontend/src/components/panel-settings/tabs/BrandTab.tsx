@@ -403,14 +403,6 @@ export default function BrandTab({
             </div>
           ) : null}
         </div>
-        <div className="settings-toggle-list">
-          <SettingsToggleRow
-            label="Режим обслуживания"
-            hint={PANEL_HINTS.maintenance}
-            on={draft.maintenance.enabled}
-            onToggle={() => patchDraft((d) => ({ ...d, maintenance: { enabled: !d.maintenance.enabled } }))}
-          />
-        </div>
       </SettingsCard>
     </div>
   );

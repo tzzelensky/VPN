@@ -6,9 +6,12 @@ import { PanelSettingsProvider } from "./panelSettingsContext";
 import { PanelUpdatesProvider } from "./panelUpdatesContext";
 import { prefetchUsersInBackground } from "./usersPrefetch";
 import { clearUsersListCache } from "./usersListCache";
+import { clearOnlineStatsSession } from "./onlineStatsSync";
 import SectionGuard from "./components/SectionGuard";
 import HomeRedirect from "./components/HomeRedirect";
+import HomePage from "./pages/HomePage";
 import LoginPage from "./pages/LoginPage";
+import { ADMIN_HOME_PATH } from "./homeSearchIndex";
 import { usePublicSiteMeta } from "./usePublicSiteMeta";
 import ServersPage from "./pages/ServersPage";
 import UsersPage from "./pages/UsersPage";
@@ -50,6 +53,7 @@ function useSession() {
   useEffect(() => {
     if (!loggedIn) {
       clearUsersListCache();
+      clearOnlineStatsSession();
       return;
     }
     void prefetchUsersInBackground();
@@ -147,13 +151,21 @@ export default function App() {
             path={`/${secretPath}`}
             element={
               loggedIn ? (
-                <Navigate to="/servers" replace />
+                <Navigate to={ADMIN_HOME_PATH} replace />
               ) : (
                 <LoginPage onSuccess={() => setLoggedIn(true)} />
               )
             }
           />
         ) : null}
+        <Route
+          path={ADMIN_HOME_PATH}
+          element={
+            <AuthRoute loggedIn={loggedIn} path={ADMIN_HOME_PATH}>
+              <HomePage onLogout={logout} />
+            </AuthRoute>
+          }
+        />
         <Route
           path="/servers"
           element={

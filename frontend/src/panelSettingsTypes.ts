@@ -87,7 +87,7 @@ export type TelegramButtonColors = Record<
   | "sendAppeal"
   | "askAi"
   | "inviteFriend",
-  string
+  "primary" | "success" | "danger"
 >;
 
 export type PanelSettings = {
@@ -106,10 +106,8 @@ export type PanelSettings = {
   ui: {
     theme: PanelTheme;
     accentColor: PanelAccent;
-    compactMode: boolean;
     showHints: boolean;
     timezone: string;
-    webAppNewDesign: boolean;
     /** Показывать функционал «Превью WebApp» в админ-панели. */
     webAppPreviewEnabled: boolean;
   };
@@ -118,29 +116,23 @@ export type PanelSettings = {
   telegram: {
     adminIds: number[];
     adminClientsButtonEnabled: boolean;
-    notifyNewUsers: boolean;
-    notifySurveyResponses: boolean;
-    notifyBroadcastErrors: boolean;
-    notifyServerErrors: boolean;
-    testMode: boolean;
     login2faEnabled: boolean;
     /** Вход в мобильную админку из Telegram WebApp (5 тапов по аватарке, только Admin ID). */
     webAppAdminPanelEnabled: boolean;
     buttonColors: TelegramButtonColors;
     aiAssistantEnabled: boolean;
     geminiModel: string;
+    geminiHttpsProxy: string;
   };
   security: {
     maskSecrets: boolean;
     confirmDangerousActions: boolean;
     autoLogoutMinutes: number | null;
-    showDiagnosticDetails: boolean;
     /** Регулировка потраченных ГБ слайдером на странице пользователей. */
     manualTrafficAdjust: boolean;
     /** Секретный URL-сегмент → страница входа (латиница, цифры, символы; без /). */
     panelAccessPath: string;
   };
-  maintenance: { enabled: boolean };
   vpnDisplay: {
     serverOrder: number[];
     entryOrder: string[];

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import DashboardLayout from "../components/DashboardLayout";
 import ClientPickerModal from "../components/ClientPickerModal";
 import PageLoadingState from "../components/PageLoadingState";
+import PageSectionHero from "../components/PageSectionHero";
 import {
   deleteDailyGiftPrize,
   deleteDailyGiftSchedule,
@@ -437,16 +438,28 @@ export default function DailyGiftPage({ onLogout }: { onLogout: () => void }) {
   return (
     <DashboardLayout onLogout={onLogout}>
       <div className="daily-gift-page">
-        <header className="daily-gift-page__header">
-          <div>
-            <h1 className="daily-gift-page__title">Ежедневный подарок</h1>
-            <p className="daily-gift-page__desc">
-              Настройка подарков, режима выдачи и уведомлений для пользователей WebApp
-            </p>
-          </div>
-        </header>
-
-        {msg ? <div className={`flash ${msg.type === "ok" ? "ok" : "err"}`}>{msg.text}</div> : null}
+        <PageSectionHero
+          title="Ежедневный подарок"
+          helpCards={[
+            {
+              kicker: "Награды",
+              title: "Призы",
+              text: "Настройка типов подарков: скидки, ГБ, дни и другие награды.",
+            },
+            {
+              kicker: "Расписание",
+              title: "Сброс и очередь",
+              text: "Время сброса, режим выдачи и очередь призов.",
+            },
+            {
+              kicker: "Условия",
+              title: "WebApp и уведомления",
+              text: "Отображение блока подарка и напоминания пользователям.",
+            },
+          ]}
+        >
+          {msg ? <div className={`flash ${msg.type === "ok" ? "ok" : "err"}`}>{msg.text}</div> : null}
+        </PageSectionHero>
 
         {loading && !data ? (
           <section className="panel">

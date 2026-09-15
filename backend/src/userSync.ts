@@ -13,12 +13,11 @@ import {
   alterInboundUsersViaApi,
   TZADMIN_XRAY_CONFIG_PATH,
   removeClientUuidFromTzadmin,
-  sshReadRemoteFile,
   syncServerClientUuids,
   type ManagedClientInput,
   type SshLog,
 } from "./ssh.js";
-import { enforceSpeedLimitsOnServer } from "./speedLimitEnforce.js";
+import { clearSpeedLimitsOnServer } from "./speedLimitEnforce.js";
 import { subscriptionUsesPqClientEncryption } from "./serverSubscriptionSettings.js";
 
 function sshCfg(row: ServerRow) {
@@ -46,19 +45,17 @@ const lastSyncedSignatureByServerId = new Map<number, string>();
 /** Последняя успешно синхронизированная карта клиентов по server.id (id -> policy). */
 const lastSyncedClientMapByServerId = new Map<number, Map<string, ClientPolicySnapshot>>();
 
-type ClientPolicySnapshot = { deviceLimit?: number; speedLimitMbps?: number };
+type ClientPolicySnapshot = { deviceLimit?: number };
 
 function policySnapshot(raw: ManagedClientInput): ClientPolicySnapshot {
   const deviceLimit = Number(raw.deviceLimit);
-  const speedLimitMbps = Number(raw.speedLimitMbps);
   const out: ClientPolicySnapshot = {};
   if (Number.isFinite(deviceLimit) && deviceLimit > 0) out.deviceLimit = Math.floor(deviceLimit);
-  if (Number.isFinite(speedLimitMbps) && speedLimitMbps > 0) out.speedLimitMbps = Math.floor(speedLimitMbps);
   return out;
 }
 
 function policySnapshotsEqual(a: ClientPolicySnapshot, b: ClientPolicySnapshot): boolean {
-  return (a.deviceLimit ?? 0) === (b.deviceLimit ?? 0) && (a.speedLimitMbps ?? 0) === (b.speedLimitMbps ?? 0);
+  return (a.deviceLimit ?? 0) === (b.deviceLimit ?? 0);
 }
 
 function signatureForClients(clients: ManagedClientInput[]): string {
@@ -69,7 +66,7 @@ function signatureForClients(clients: ManagedClientInput[]): string {
     }))
     .filter((c) => c.id)
     .sort((a, b) => a.id.localeCompare(b.id))
-    .map((c) => `${c.id}|${c.deviceLimit ?? 0}|${c.speedLimitMbps ?? 0}`)
+    .map((c) => `${c.id}|${c.deviceLimit ?? 0}`)
     .join(",");
 }
 
@@ -101,29 +98,16 @@ export function managedClientsForServer(serverUuid: string | null): ManagedClien
     out.push({
       id,
       ...(isDeviceLimitActiveForUser(u) ? { deviceLimit: userDeviceTotalLimit(u) } : {}),
-      ...(u.speed_limit_mbps > 0 ? { speedLimitMbps: u.speed_limit_mbps } : {}),
     });
   }
   return out;
 }
 
-async function refreshSpeedLimitsOnServer(
-  row: ServerRow,
-  configPath: string,
-  clients: ManagedClientInput[],
-  log?: SshLog,
-): Promise<void> {
-  const rules = clients
-    .filter((c) => Number(c.speedLimitMbps) > 0)
-    .map((c) => ({ email: String(c.id ?? "").trim(), mbps: Math.floor(Number(c.speedLimitMbps) || 0) }))
-    .filter((r) => r.email && r.mbps > 0);
-  if (rules.length === 0) return;
+async function clearSpeedLimitsOnRow(row: ServerRow, log?: SshLog): Promise<void> {
   try {
-    const raw = await sshReadRemoteFile(sshCfg(row), configPath, log);
-    const config = JSON.parse(raw.toString("utf8")) as Record<string, unknown>;
-    await enforceSpeedLimitsOnServer(sshCfg(row), config, rules, log);
+    await clearSpeedLimitsOnServer(sshCfg(row), log);
   } catch (e) {
-    log?.(`Лимит скорости на ${row.host}: ${e instanceof Error ? e.message : String(e)}`);
+    log?.(`Снятие лимита скорости на ${row.host}: ${e instanceof Error ? e.message : String(e)}`);
   }
 }
 
@@ -139,7 +123,7 @@ export async function pushClientListToAllDeployedServers(log?: SshLog): Promise<
       const prevSig = lastSyncedSignatureByServerId.get(row.id);
       if (prevSig === sig) {
         log?.(`Синхронизация ${row.host} пропущена: список клиентов не изменился.`);
-        await refreshSpeedLimitsOnServer(row, path, clients, log);
+        await clearSpeedLimitsOnRow(row, log);
         continue;
       }
       const nextMap = mapFromClients(clients);
@@ -153,7 +137,7 @@ export async function pushClientListToAllDeployedServers(log?: SshLog): Promise<
           else if (!policySnapshotsEqual(prevMap.get(id) ?? {}, snap)) hasMutableUpdates = true;
         }
         for (const id of prevMap.keys()) if (!nextMap.has(id)) rem.push(id);
-        const addNeedsFullSync = add.some((c) => Number(c.deviceLimit) > 0 || Number(c.speedLimitMbps) > 0);
+        const addNeedsFullSync = add.some((c) => Number(c.deviceLimit) > 0);
         // Быстрый путь без рестарта: только без policy-лимитов (иначе не обновится policy в рантайме).
         if (
           !hasMutableUpdates &&
@@ -170,7 +154,7 @@ export async function pushClientListToAllDeployedServers(log?: SshLog): Promise<
             log?.(`Быстрый sync ${row.host}: ${fast.detail}`);
             lastSyncedSignatureByServerId.set(row.id, sig);
             lastSyncedClientMapByServerId.set(row.id, nextMap);
-            await refreshSpeedLimitsOnServer(row, path, clients, log);
+            await clearSpeedLimitsOnRow(row, log);
             continue;
           }
           log?.(`Быстрый sync недоступен на ${row.host}, fallback на полный sync: ${fast.detail}`);
@@ -210,7 +194,7 @@ export async function pushClientListToAllDeployedServers(log?: SshLog): Promise<
       }
       lastSyncedSignatureByServerId.set(row.id, sig);
       lastSyncedClientMapByServerId.set(row.id, nextMap);
-      await refreshSpeedLimitsOnServer(row, path, clients, log);
+      await clearSpeedLimitsOnRow(row, log);
     }
     try {
       const { pushHysteria2ClientsToAllDeployedServers } = await import("./hysteria2Deploy.js");
@@ -230,12 +214,10 @@ export async function pushClientListToAllDeployedServers(log?: SshLog): Promise<
   await job;
 }
 
-/** Переприменить tc-лимиты по онлайн IP (без полного sync UUID). */
-export async function refreshSpeedLimitsOnAllDeployedServers(log?: SshLog): Promise<void> {
+/** Снять leftover HTB speed-limit на всех развёрнутых узлах. */
+export async function clearSpeedLimitsOnAllDeployedServers(log?: SshLog): Promise<void> {
   for (const row of listDeployedServers()) {
-    const path = await resolveConfigPath(row, log);
-    const clients = managedClientsForServer(row.vless_uuid);
-    await refreshSpeedLimitsOnServer(row, path, clients, log);
+    await clearSpeedLimitsOnRow(row, log);
   }
 }
 

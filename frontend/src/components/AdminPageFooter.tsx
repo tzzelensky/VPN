@@ -1,11 +1,22 @@
 import { useEffect, useState } from "react";
-import { panelBuiltAtMs, panelVersionLabel } from "../panelVersion";
+import { panelLastDeployAtMs, panelVersionLabel } from "../panelVersion";
+import { usePanelSettings } from "../panelSettingsContext";
 
-const EKB_TZ = "Asia/Yekaterinburg";
+const DEFAULT_TZ = "Asia/Yekaterinburg";
 
-function formatEkbDateTime(ts: number): string {
+const TZ_CITY_LABEL: Record<string, string> = {
+  "Asia/Yekaterinburg": "Екатеринбург",
+  "Europe/Moscow": "Москва",
+  "Asia/Yerevan": "Ереван",
+};
+
+function cityLabelForTimezone(timeZone: string): string {
+  return TZ_CITY_LABEL[timeZone] || timeZone;
+}
+
+function formatPanelDateTime(ts: number, timeZone: string): string {
   return new Intl.DateTimeFormat("ru-RU", {
-    timeZone: EKB_TZ,
+    timeZone,
     day: "2-digit",
     month: "2-digit",
     year: "numeric",
@@ -14,23 +25,19 @@ function formatEkbDateTime(ts: number): string {
   }).format(new Date(ts));
 }
 
-function formatEkbDate(ts: number): string {
-  return new Intl.DateTimeFormat("ru-RU", {
-    timeZone: EKB_TZ,
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-  }).format(new Date(ts));
-}
-
 type Props = {
   brandName: string;
 };
 
 export default function AdminPageFooter({ brandName }: Props) {
+  const panel = usePanelSettings();
+  const timeZone = panel.settings?.ui.timezone?.trim() || DEFAULT_TZ;
+  const cityLabel = cityLabelForTimezone(timeZone);
+
   const [now, setNow] = useState(() => Date.now());
-  const builtAt = panelBuiltAtMs();
-  const year = new Intl.DateTimeFormat("en-CA", { timeZone: EKB_TZ, year: "numeric" }).format(new Date(now));
+  const lastDeployAt = panelLastDeployAtMs();
+  const lastDeployLabel = formatPanelDateTime(lastDeployAt, timeZone);
+  const year = new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric" }).format(new Date(now));
 
   useEffect(() => {
     const id = window.setInterval(() => setNow(Date.now()), 30_000);
@@ -47,18 +54,27 @@ export default function AdminPageFooter({ brandName }: Props) {
       <ul className="admin-page-footer__meta">
         <li>
           <span className="admin-page-footer__meta-label">Версия</span>
-          <span className="admin-page-footer__meta-value">{panelVersionLabel()}</span>
+          <span
+            className="admin-page-footer__meta-value admin-page-footer__version"
+            title={`Последнее обновление: ${lastDeployLabel} (${cityLabel})`}
+          >
+            {panelVersionLabel()}
+          </span>
         </li>
         <li>
-          <span className="admin-page-footer__meta-label">Екатеринбург</span>
+          <span className="admin-page-footer__meta-label">{cityLabel}</span>
           <time className="admin-page-footer__meta-value" dateTime={new Date(now).toISOString()}>
-            {formatEkbDateTime(now)}
+            {formatPanelDateTime(now, timeZone)}
           </time>
         </li>
         <li>
           <span className="admin-page-footer__meta-label">Обновление панели</span>
-          <time className="admin-page-footer__meta-value" dateTime={new Date(builtAt).toISOString()}>
-            {formatEkbDate(builtAt)}
+          <time
+            className="admin-page-footer__meta-value"
+            dateTime={new Date(lastDeployAt).toISOString()}
+            title={`Последнее обновление: ${lastDeployLabel} (${cityLabel})`}
+          >
+            {lastDeployLabel}
           </time>
         </li>
       </ul>

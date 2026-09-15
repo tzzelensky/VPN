@@ -22,6 +22,8 @@ import { initAutoCommunicationsStore } from "./autoCommunicationsStore.js";
 import { initTriggerMailingsStore } from "./triggerMailingsStore.js";
 import { initTriggerMailingsHistoryStore } from "./triggerMailingsHistoryStore.js";
 import { startTriggerMailingsLoop } from "./triggerMailingsService.js";
+import { initScheduledMailingsStore } from "./scheduledMailingsStore.js";
+import { startScheduledMailingsLoop } from "./scheduledMailingsService.js";
 import { startDailyGiftNotifyLoop } from "./telegram/dailyGiftNotify.js";
 import { createApp } from "./createApp.js";
 
@@ -32,6 +34,7 @@ initDailyGiftStore();
 initAutoCommunicationsStore();
 initTriggerMailingsStore();
 initTriggerMailingsHistoryStore();
+initScheduledMailingsStore();
 
 {
   let dl = getDeviceLimitSettings();
@@ -87,6 +90,7 @@ app.listen(PORT, "0.0.0.0", () => {
     startAutoExpiryNotifyLoop();
     startDailyGiftNotifyLoop();
     startTriggerMailingsLoop();
+    startScheduledMailingsLoop();
   }
   // Всегда: снимать истёкших с узлов (не зависит от Telegram).
   startExpiredSubscriptionAccessLoop();

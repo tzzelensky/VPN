@@ -4,6 +4,7 @@ import SurveysPanel from "../components/SurveysPanel";
 import AutoBroadcastsPanel from "../components/AutoBroadcastsPanel";
 import TriggeredMailingsPanel from "../components/TriggeredMailingsPanel";
 import PanelTabs from "../components/PanelTabs";
+import PageSectionHero from "../components/PageSectionHero";
 import AdminModalBackdrop from "../components/AdminModalBackdrop";
 import BroadcastWizard from "../components/comms/BroadcastWizard";
 import { usePanelSettings } from "../panelSettingsContext";
@@ -94,28 +95,44 @@ export default function CommunicationsPage({ onLogout }: { onLogout: () => void 
 
   return (
     <DashboardLayout onLogout={onLogout}>
-      <section className="panel users-hero-panel">
-        <h1>Коммуникации</h1>
-        <p className="sub users-hero-sub">
-          Рассылки и опросы в Telegram: глобально, выборочно или по сегменту.
-        </p>
-        <PanelTabs
-          tabs={[
-            { id: "mailings", label: "Рассылки" },
-            { id: "triggermailing", label: "Триггерные рассылки" },
-            { id: "surveys", label: "Опросы" },
-            { id: "auto", label: "Авто-рассылки" },
-            { id: "history", label: "История отправок" },
-          ]}
-          value={commsTab}
-          onChange={setCommsTab}
-          className="comms-main-tabs-bar"
-        />
+      <PageSectionHero
+        title="Коммуникации"
+        helpCards={[
+          {
+            kicker: "Рассылки",
+            title: "Массовые сообщения",
+            text: "Глобальные и выборочные рассылки в Telegram из панели.",
+          },
+          {
+            kicker: "Сегменты",
+            title: "Опросы и аудитории",
+            text: "Сегменты клиентов и опросы для точечных коммуникаций.",
+          },
+          {
+            kicker: "Авто",
+            title: "Авто-рассылки",
+            text: "Триггерные и автоматические уведомления по событиям.",
+          },
+        ]}
+      >
         {commsTab === "mailings" && msg ? (
           <div className={`flash ${msg.type === "ok" ? "ok" : "err"}`}>{msg.text}</div>
         ) : null}
         {commsTab === "mailings" && photoNotice ? <div className="flash ok">{photoNotice}</div> : null}
-      </section>
+      </PageSectionHero>
+
+      <PanelTabs
+        tabs={[
+          { id: "mailings", label: "Рассылки" },
+          { id: "triggermailing", label: "Триггерные рассылки" },
+          { id: "surveys", label: "Опросы" },
+          { id: "auto", label: "Авто-рассылки" },
+          { id: "history", label: "История отправок" },
+        ]}
+        value={commsTab}
+        onChange={setCommsTab}
+        className="comms-main-tabs-bar"
+      />
 
       {commsTab === "triggermailing" ? (
         <section className="panel comms-panel">

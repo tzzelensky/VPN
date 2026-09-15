@@ -3,6 +3,7 @@ import AdminModalBackdrop from "../components/AdminModalBackdrop";
 import DashboardLayout from "../components/DashboardLayout";
 import SettingsToggleRow from "../components/SettingsToggleRow";
 import PageLoadingState from "../components/PageLoadingState";
+import PageSectionHero from "../components/PageSectionHero";
 import PanelTabs from "../components/PanelTabs";
 import Spinner from "../components/Spinner";
 import { usePanelTabParam } from "../lib/panelTabRoute";
@@ -40,7 +41,6 @@ function settingsEqual(a: DeviceLimitSettingsDto, b: DeviceLimitSettingsDto): bo
     a.enabled === b.enabled &&
     a.limit_scope === b.limit_scope &&
     a.default_slots === b.default_slots &&
-    a.auto_bind === b.auto_bind &&
     a.on_limit_exceeded === b.on_limit_exceeded &&
     a.purchase_enabled === b.purchase_enabled &&
     a.purchase_price_rub === b.purchase_price_rub &&
@@ -290,18 +290,27 @@ export default function DeviceLimitPage({ onLogout }: { onLogout: () => void }) 
   return (
     <DashboardLayout onLogout={onLogout}>
       <div className="device-limit-page">
-        <section className="panel users-hero-panel">
-          <div className="users-hero-top">
-            <div>
-              <h1>Ограничение по устройствам</h1>
-              <p className="sub users-hero-sub">
-                Контроль количества устройств, которые могут использовать одну VPN-подписку.
-              </p>
-              {dirty && tab === "settings" ? (
-                <p className="referral-unsaved-hint">Есть несохранённые изменения</p>
-              ) : null}
-            </div>
-            <div className="users-hero-actions">
+        <PageSectionHero
+          title="Ограничение по устройствам"
+          helpCards={[
+            {
+              kicker: "Слоты",
+              title: "Устройства",
+              text: "Слоты устройств на подписку: просмотр, сброс и переименование.",
+            },
+            {
+              kicker: "Лимиты",
+              title: "Глобальные и персональные",
+              text: "Общий лимит и индивидуальные ограничения для клиентов.",
+            },
+            {
+              kicker: "Подписки",
+              title: "Покупки и журнал",
+              text: "Доп. слоты, покупки и события ограничения устройств.",
+            },
+          ]}
+          actions={
+            <>
               <button type="button" className="ghost" onClick={() => void refresh()} disabled={loading || saving}>
                 Обновить
               </button>
@@ -321,10 +330,14 @@ export default function DeviceLimitPage({ onLogout }: { onLogout: () => void }) 
                   )}
                 </button>
               ) : null}
-            </div>
-          </div>
+            </>
+          }
+        >
+          {dirty && tab === "settings" ? (
+            <p className="referral-unsaved-hint">Есть несохранённые изменения</p>
+          ) : null}
           {toast ? <div className={`flash ${toast.type === "ok" ? "ok" : "err"}`}>{toast.text}</div> : null}
-        </section>
+        </PageSectionHero>
 
         {loading && !overview ? (
           <section className="panel">
@@ -393,12 +406,6 @@ export default function DeviceLimitPage({ onLogout }: { onLogout: () => void }) 
                       hint="Включает функцию лимита. Кого ограничивать — выберите ниже."
                       on={settings.enabled}
                       onToggle={() => setSettings({ ...settings, enabled: !settings.enabled })}
-                    />
-                    <SettingsToggleRow
-                      label="Автопривязка нового устройства"
-                      hint="При первом запросе подписки с новым did устройство автоматически займёт свободный слот."
-                      on={settings.auto_bind}
-                      onToggle={() => setSettings({ ...settings, auto_bind: !settings.auto_bind })}
                     />
                   </div>
                   <div className="form-field" style={{ marginTop: "0.75rem" }}>

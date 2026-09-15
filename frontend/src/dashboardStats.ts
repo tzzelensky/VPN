@@ -11,8 +11,37 @@ export type DashboardStats = {
   expiringSoonCount: number;
 };
 
-function usedBytes(u: UserDto): number {
+export function usedBytes(u: UserDto): number {
   return (Number(u.traffic_up) || 0) + (Number(u.traffic_down) || 0);
+}
+
+export function sumTrafficBytes(users: UserDto[]): { up: number; down: number; total: number } {
+  let up = 0;
+  let down = 0;
+  for (const u of users) {
+    up += Number(u.traffic_up) || 0;
+    down += Number(u.traffic_down) || 0;
+  }
+  return { up, down, total: up + down };
+}
+
+export function formatTrafficAmount(bytes: number): string {
+  const n = Math.max(0, Number(bytes) || 0);
+  const units = [
+    { size: 1024 ** 4, label: "ТБ" },
+    { size: 1024 ** 3, label: "ГБ" },
+    { size: 1024 ** 2, label: "МБ" },
+    { size: 1024, label: "КБ" },
+  ];
+  for (const u of units) {
+    if (n >= u.size) {
+      const v = n / u.size;
+      const digits = v >= 100 ? 0 : v >= 10 ? 1 : 2;
+      const raw = v.toFixed(digits).replace(/\.?0+$/, "");
+      return `${raw} ${u.label}`;
+    }
+  }
+  return `${Math.round(n)} Б`;
 }
 
 export function isExpirySoon(u: UserDto, now: number): boolean {

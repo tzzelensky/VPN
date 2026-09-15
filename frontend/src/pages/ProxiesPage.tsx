@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import DashboardLayout from "../components/DashboardLayout";
 import PageLoadingState from "../components/PageLoadingState";
+import PageSectionHero from "../components/PageSectionHero";
 import {
   checkAllTelegramProxies,
   checkTelegramProxy,
@@ -455,65 +456,79 @@ export default function ProxiesPage({ onLogout }: { onLogout: () => void }) {
   return (
     <DashboardLayout onLogout={onLogout}>
       <div className="proxy-page">
-        <div className="proxy-page-head">
-          <div className="proxy-page-head__text">
-            <h1 className="page-title">Прокси</h1>
-            <p className="vault-lead muted">
-              Развертывание Telegram-прокси на добавленных серверах без влияния на VPN-подписки.
-            </p>
-          </div>
-          <div className="proxy-page-head__actions vault-toolbar">
-            <button
-              type="button"
-              className="btn primary"
-              onClick={() => void openCreate()}
-              disabled={busy || servers.length === 0}
-            >
-              {busyAction === "create" ? "Создание…" : "Создать прокси"}
-            </button>
-            <button type="button" className="btn" disabled={busy} onClick={() => void handleCheckAll()}>
-              {busyAction === "check-all" ? "Проверка…" : "Проверить все"}
-            </button>
-            <button
-              type="button"
-              className="btn"
-              disabled={busy}
-              onClick={() => {
-                setSettingsForm(data?.settings ?? null);
-                setSettingsOpen(true);
-              }}
-            >
-              Настройки автопроверки
-            </button>
-            <button
-              type="button"
-              className="btn"
-              disabled={busy}
-              onClick={() =>
-                void runBusy(null, async () => {
-                  const r = await listTelegramProxyEvents(300);
-                  setEvents(r.events);
-                  setJournalPage(1);
-                  setJournalOpen(true);
-                })
-              }
-            >
-              Журнал
-            </button>
-          </div>
-        </div>
+        <PageSectionHero
+          title="Прокси"
+          helpCards={[
+            {
+              kicker: "Telegram",
+              title: "Прокси для бота",
+              text: "Развёртывание Telegram-прокси на серверах без влияния на VPN.",
+            },
+            {
+              kicker: "Проверка",
+              title: "Статус и доступность",
+              text: "Ручная и массовая проверка прокси, журнал событий.",
+            },
+            {
+              kicker: "Назначение",
+              title: "Порты и секреты",
+              text: "Создание, настройки автопроверки и назначение прокси.",
+            },
+          ]}
+          actions={
+            <>
+              <button
+                type="button"
+                className="btn primary"
+                onClick={() => void openCreate()}
+                disabled={busy || servers.length === 0}
+              >
+                {busyAction === "create" ? "Создание…" : "Создать прокси"}
+              </button>
+              <button type="button" className="btn" disabled={busy} onClick={() => void handleCheckAll()}>
+                {busyAction === "check-all" ? "Проверка…" : "Проверить все"}
+              </button>
+              <button
+                type="button"
+                className="btn"
+                disabled={busy}
+                onClick={() => {
+                  setSettingsForm(data?.settings ?? null);
+                  setSettingsOpen(true);
+                }}
+              >
+                Настройки автопроверки
+              </button>
+              <button
+                type="button"
+                className="btn"
+                disabled={busy}
+                onClick={() =>
+                  void runBusy(null, async () => {
+                    const r = await listTelegramProxyEvents(300);
+                    setEvents(r.events);
+                    setJournalPage(1);
+                    setJournalOpen(true);
+                  })
+                }
+              >
+                Журнал
+              </button>
+            </>
+          }
+        >
+          {!data?.telegram_configured && (
+            <div className="vault-warn" role="status">
+              Telegram-уведомления не настроены (укажите токен бота и ID админов в настройках панели).
+            </div>
+          )}
 
-        {!data?.telegram_configured && (
-          <div className="vault-warn" role="status">
-            Telegram-уведомления не настроены (укажите токен бота и ID админов в настройках панели).
-          </div>
-        )}
-
-        {toast && (
-          <div className={`vault-toast vault-toast--${toast.type}`} role="status">
-            {toast.text}
-          </div>
-        )}
+          {toast && (
+            <div className={`vault-toast vault-toast--${toast.type}`} role="status">
+              {toast.text}
+            </div>
+          )}
+        </PageSectionHero>
 
         <div className="vault-stats">
           <div className="vault-stat-card">

@@ -411,7 +411,6 @@ export function evaluateDeviceLimitAccess(
     userAgent?: string;
     deviceName?: string;
     touchOnly?: boolean;
-    autoBind?: boolean;
     globalEnabled?: boolean;
     defaultSlots?: number;
   },

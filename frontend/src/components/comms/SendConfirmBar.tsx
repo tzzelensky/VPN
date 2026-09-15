@@ -16,6 +16,11 @@ type Props = {
   canSend: boolean;
   needsConfirm: boolean;
   confirmOpen: boolean;
+  scheduleMode: boolean;
+  onScheduleModeChange: (v: boolean) => void;
+  sendAtLocal: string;
+  onSendAtLocalChange: (v: string) => void;
+  sendAtMin: string;
   onRequestSend: () => void;
   onConfirm: () => void;
   onCancelConfirm: () => void;
@@ -43,6 +48,11 @@ export default function SendConfirmBar({
   canSend,
   needsConfirm,
   confirmOpen,
+  scheduleMode,
+  onScheduleModeChange,
+  sendAtLocal,
+  onSendAtLocalChange,
+  sendAtMin,
   onRequestSend,
   onConfirm,
   onCancelConfirm,
@@ -50,6 +60,8 @@ export default function SendConfirmBar({
   const [previewOpen, setPreviewOpen] = useState(false);
   const [photoUrl, setPhotoUrl] = useState<string | null>(null);
   const showPreviewBlock = hasPhoto || text.trim().length > 160;
+  const actionLabel = scheduleMode ? "Запланировать" : "Отправить";
+  const actionBusyLabel = scheduleMode ? "Планирование…" : "Отправка…";
 
   useEffect(() => {
     if (!confirmOpen) setPreviewOpen(false);
@@ -77,6 +89,38 @@ export default function SendConfirmBar({
                 {recipientCount} {recipientsLabel(recipientCount)}
               </strong>
             </div>
+            <div className="comms-wiz-when" role="group" aria-label="Когда отправить">
+              <button
+                type="button"
+                className={`comms-wiz-when-btn${!scheduleMode ? " is-on" : ""}`}
+                disabled={busy}
+                onClick={() => onScheduleModeChange(false)}
+              >
+                Сейчас
+              </button>
+              <button
+                type="button"
+                className={`comms-wiz-when-btn${scheduleMode ? " is-on" : ""}`}
+                disabled={busy}
+                onClick={() => onScheduleModeChange(true)}
+              >
+                Запланировать
+              </button>
+            </div>
+            {scheduleMode ? (
+              <div className="form-field comms-wiz-when-at">
+                <label htmlFor="comms-send-at">Дата и время</label>
+                <input
+                  id="comms-send-at"
+                  type="datetime-local"
+                  className="comms-wiz-input"
+                  min={sendAtMin}
+                  value={sendAtLocal}
+                  disabled={busy}
+                  onChange={(e) => onSendAtLocalChange(e.target.value)}
+                />
+              </div>
+            ) : null}
             <ul className="comms-wiz-props">
               <li>
                 <span>Название</span>
@@ -94,7 +138,7 @@ export default function SendConfirmBar({
           </div>
           <div className="comms-wiz-send-actions">
             <button type="button" className="primary" disabled={busy || !canSend} onClick={onRequestSend}>
-              {busy ? "Отправка…" : "Отправить"}
+              {busy ? actionBusyLabel : actionLabel}
             </button>
           </div>
         </div>
@@ -110,21 +154,25 @@ export default function SendConfirmBar({
             onClick={(e) => e.stopPropagation()}
           >
             <h3 id="comms-wiz-confirm-title" className="comms-wiz-confirm-title">
-              Подтверждение отправки
+              {scheduleMode ? "Подтверждение планирования" : "Подтверждение отправки"}
             </h3>
 
             <div className="comms-wiz-confirm-hero">
-              <span className="comms-wiz-confirm-hero-label">Будет отправлено</span>
+              <span className="comms-wiz-confirm-hero-label">
+                {scheduleMode ? "Будет запланировано" : "Будет отправлено"}
+              </span>
               <strong className="comms-wiz-confirm-hero-count">
                 {recipientCount} {recipientsLabel(recipientCount)}
               </strong>
             </div>
 
-            {recipientCount > 100 ? (
+            {recipientCount > 100 && !scheduleMode ? (
               <p className="comms-wiz-confirm-warn" role="alert">
                 Сообщение будет отправлено {recipientCount} пользователям. После отправки отменить
                 рассылку будет невозможно.
               </p>
+            ) : scheduleMode ? (
+              <p className="comms-wiz-confirm-note">Рассылку можно отменить во вкладке «Отправлено», пока она не ушла.</p>
             ) : (
               <p className="comms-wiz-confirm-note">После отправки отменить рассылку будет невозможно.</p>
             )}
@@ -184,7 +232,7 @@ export default function SendConfirmBar({
                 Отмена
               </button>
               <button type="button" className="primary" disabled={busy} onClick={onConfirm}>
-                {busy ? "Отправка…" : "Отправить"}
+                {busy ? actionBusyLabel : actionLabel}
               </button>
             </div>
           </div>

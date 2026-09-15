@@ -3,6 +3,7 @@ import { subscriptionLabel } from "../subscriptionLabel";
 import DashboardLayout from "../components/DashboardLayout";
 import PanelTabs from "../components/PanelTabs";
 import PageLoadingState from "../components/PageLoadingState";
+import PageSectionHero from "../components/PageSectionHero";
 import Spinner from "../components/Spinner";
 import {
   getPrizeColor,
@@ -388,13 +389,27 @@ export default function DropperGamePage({ onLogout }: { onLogout: () => void }) 
 
   return (
     <DashboardLayout onLogout={onLogout}>
-      <section className="panel users-hero-panel">
-        <div className="users-hero-top">
-          <div>
-            <h1>Рулетка</h1>
-            <p className="sub users-hero-sub">Настройки рулетки, билеты и отчёты в WebApp.</p>
-          </div>
-          <div className="users-hero-actions">
+      <PageSectionHero
+        title="Рулетка"
+        helpCards={[
+          {
+            kicker: "Билеты",
+            title: "Пул билетов",
+            text: "Выдача, сброс и учёт билетов пользователей для рулетки.",
+          },
+          {
+            kicker: "Призы",
+            title: "Награды и шансы",
+            text: "Настройка призов, вероятностей и архивации позиций.",
+          },
+          {
+            kicker: "Настройки",
+            title: "WebApp и отчёты",
+            text: "Включение игры в Mini App и отчёты по спинам.",
+          },
+        ]}
+        actions={
+          <>
             <button type="button" className="ghost" disabled={loading || saving} onClick={() => void refresh()}>
               Обновить
             </button>
@@ -414,10 +429,11 @@ export default function DropperGamePage({ onLogout }: { onLogout: () => void }) 
                 )}
               </button>
             ) : null}
-          </div>
-        </div>
+          </>
+        }
+      >
         {msg ? <div className={`flash ${msg.type === "ok" ? "ok" : "err"}`}>{msg.text}</div> : null}
-      </section>
+      </PageSectionHero>
 
       <PanelTabs
         tabs={[

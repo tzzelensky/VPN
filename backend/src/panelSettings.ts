@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import {
   defaultPanelSettings,
   normalizeDecoyShop,
+  normalizeGeminiHttpsProxy,
   normalizeWhitelistOffer,
   normalizeSectionOrder,
   orderPanelSectionMeta,
@@ -64,12 +65,32 @@ function mergeSettings(raw: Partial<PanelSettings> | null): PanelSettings {
       whitelistOffer: normalizeWhitelistOffer((raw.panel as { whitelistOffer?: unknown } | undefined)?.whitelistOffer),
       decoyShop: normalizeDecoyShop((raw.panel as { decoyShop?: unknown } | undefined)?.decoyShop ?? base.panel.decoyShop),
     },
-    ui: { ...base.ui, ...(raw.ui ?? {}) },
+    ui: {
+      theme: (raw.ui?.theme as PanelSettings["ui"]["theme"]) ?? base.ui.theme,
+      accentColor: raw.ui?.accentColor ?? base.ui.accentColor,
+      showHints: raw.ui?.showHints !== undefined ? raw.ui.showHints === true : base.ui.showHints,
+      timezone: String(raw.ui?.timezone ?? base.ui.timezone),
+      webAppPreviewEnabled:
+        raw.ui?.webAppPreviewEnabled !== undefined
+          ? raw.ui.webAppPreviewEnabled !== false
+          : base.ui.webAppPreviewEnabled,
+    },
     sections: { ...base.sections, ...(rawSections as PanelSettings["sections"]) },
     sectionOrder: normalizeSectionOrder(raw.sectionOrder ?? base.sectionOrder),
     telegram: {
-      ...base.telegram,
-      ...(raw.telegram ?? {}),
+      adminIds: Array.isArray(raw.telegram?.adminIds) ? raw.telegram!.adminIds : base.telegram.adminIds,
+      adminClientsButtonEnabled:
+        raw.telegram?.adminClientsButtonEnabled !== undefined
+          ? raw.telegram.adminClientsButtonEnabled !== false
+          : base.telegram.adminClientsButtonEnabled,
+      login2faEnabled:
+        raw.telegram?.login2faEnabled !== undefined
+          ? raw.telegram.login2faEnabled === true
+          : base.telegram.login2faEnabled,
+      webAppAdminPanelEnabled:
+        raw.telegram?.webAppAdminPanelEnabled !== undefined
+          ? raw.telegram.webAppAdminPanelEnabled !== false
+          : base.telegram.webAppAdminPanelEnabled,
       buttonColors: normalizeTelegramButtonColors(raw.telegram?.buttonColors ?? base.telegram.buttonColors),
       aiAssistantEnabled:
         raw.telegram?.aiAssistantEnabled === undefined
@@ -77,11 +98,29 @@ function mergeSettings(raw: Partial<PanelSettings> | null): PanelSettings {
           : raw.telegram.aiAssistantEnabled === true,
       geminiModel: (() => {
         const m = String(raw.telegram?.geminiModel ?? base.telegram.geminiModel ?? "").trim();
-        return m || base.telegram.geminiModel || "gemini-2.5-flash-lite";
+        return m || base.telegram.geminiModel || "gemini-3.5-flash-lite";
       })(),
+      geminiHttpsProxy: normalizeGeminiHttpsProxy(
+        (raw.telegram as { geminiHttpsProxy?: unknown } | undefined)?.geminiHttpsProxy ?? base.telegram.geminiHttpsProxy,
+      ),
     },
-    security: { ...base.security, ...(raw.security ?? {}) },
-    maintenance: { ...base.maintenance, ...(raw.maintenance ?? {}) },
+    security: {
+      maskSecrets:
+        raw.security?.maskSecrets !== undefined ? raw.security.maskSecrets === true : base.security.maskSecrets,
+      confirmDangerousActions:
+        raw.security?.confirmDangerousActions !== undefined
+          ? raw.security.confirmDangerousActions === true
+          : base.security.confirmDangerousActions,
+      autoLogoutMinutes:
+        raw.security?.autoLogoutMinutes !== undefined
+          ? raw.security.autoLogoutMinutes
+          : base.security.autoLogoutMinutes,
+      manualTrafficAdjust:
+        raw.security?.manualTrafficAdjust !== undefined
+          ? raw.security.manualTrafficAdjust === true
+          : base.security.manualTrafficAdjust,
+      panelAccessPath: String(raw.security?.panelAccessPath ?? base.security.panelAccessPath ?? ""),
+    },
     vpnDisplay: normalizeVpnDisplay(raw.vpnDisplay, base.vpnDisplay),
     updatedAt: raw.updatedAt ?? base.updatedAt,
   };

@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { usePanelSettings } from "../panelSettingsContext";
 import { isSectionPathVisible } from "../panelNavUtils";
+import { ADMIN_HOME_PATH } from "../homeSearchIndex";
 
 function normPath(path: string): string {
   return path.replace(/\/$/, "") || path;
@@ -16,11 +17,9 @@ export default function SectionGuard({ path, children }: { path: string; childre
 
   useEffect(() => {
     if (!blocked) return;
-    const target = panel.firstVisiblePath;
-    if (normPath(target) === normPath(path)) return;
-    if (!isSectionPathVisible(target, panel.settings, panel.meta)) return;
-    nav(target, { replace: true, state: { sectionHidden: true } });
-  }, [blocked, path, panel.firstVisiblePath, panel.settings, panel.meta, nav]);
+    if (normPath(path) === ADMIN_HOME_PATH) return;
+    nav(ADMIN_HOME_PATH, { replace: true, state: { sectionHidden: true } });
+  }, [blocked, path, nav]);
 
   if (!panel.loaded) {
     return <>{children}</>;
@@ -30,8 +29,7 @@ export default function SectionGuard({ path, children }: { path: string; childre
     return <>{children}</>;
   }
 
-  const target = panel.firstVisiblePath;
-  if (normPath(target) === normPath(path) || !isSectionPathVisible(target, panel.settings, panel.meta)) {
+  if (normPath(path) === ADMIN_HOME_PATH) {
     return (
       <div className="login-wrap">
         <div className="flash err">

@@ -3,7 +3,6 @@
     "enabled": true,
     "limit_scope": "selected",
     "default_slots": 2,
-    "auto_bind": true,
     "on_limit_exceeded": "stub",
     "purchase_enabled": true,
     "purchase_price_rub": 99,

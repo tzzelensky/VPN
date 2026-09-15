@@ -1,7 +1,12 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { PanelSettings } from "../../../panelSettingsTypes";
 import { PANEL_HINTS } from "../../../panelSettingsHints";
-import { changeAdminPassword, panelSettingsExportUrl } from "../../../api";
+import {
+  changeAdminPassword,
+  fetchPanelHttpsStatus,
+  panelSettingsExportUrl,
+  type PanelHttpsStatusDto,
+} from "../../../api";
 import { usePanelUpdates } from "../../../panelUpdatesContext";
 import { FieldLabel } from "../../SettingHint";
 import SettingsToggleRow from "../../SettingsToggleRow";
@@ -42,6 +47,8 @@ export default function SystemTab({
   const [newPassword2, setNewPassword2] = useState("");
   const [pwdBusy, setPwdBusy] = useState(false);
   const [httpsModalOpen, setHttpsModalOpen] = useState(false);
+  const [httpsStatus, setHttpsStatus] = useState<PanelHttpsStatusDto | null>(null);
+  const [httpsStatusLoading, setHttpsStatusLoading] = useState(true);
 
   const {
     info: updateInfo,
@@ -63,6 +70,24 @@ export default function SystemTab({
 
   const canSubmitPassword =
     Boolean(oldPassword) && matchState === "match" && !pwdBusy && !busy;
+
+  useEffect(() => {
+    let cancelled = false;
+    setHttpsStatusLoading(true);
+    void fetchPanelHttpsStatus()
+      .then((s) => {
+        if (!cancelled) setHttpsStatus(s);
+      })
+      .catch(() => {
+        if (!cancelled) setHttpsStatus(null);
+      })
+      .finally(() => {
+        if (!cancelled) setHttpsStatusLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const applying = applyPhase !== "idle" && applyPhase !== "error";
   const updateBusy = checking || applying;
@@ -121,14 +146,12 @@ export default function SystemTab({
             [
               ["maskSecrets", "Маскировать секреты в UI"],
               ["confirmDangerousActions", "Подтверждение опасных действий"],
-              ["showDiagnosticDetails", "Показывать диагностические данные"],
               ["manualTrafficAdjust", "Регулировка потраченных ГБ на странице пользователей"],
             ] as const
           ).map(([key, label]) => {
             const hintMap: Record<string, string> = {
               maskSecrets: PANEL_HINTS.maskSecrets,
               confirmDangerousActions: PANEL_HINTS.confirmDangerous,
-              showDiagnosticDetails: PANEL_HINTS.showDiagnostic,
               manualTrafficAdjust: PANEL_HINTS.manualTrafficAdjust,
             };
             return (
@@ -379,16 +402,42 @@ export default function SystemTab({
           <p className="sub">Загрузка…</p>
         )}
 
-        <div className="panel-https-block">
+        <div
+          className={`panel-https-block${httpsStatus?.httpsEnabled ? " panel-https-block--ok" : ""}`}
+        >
           <div className="panel-https-block__text">
             <strong>HTTPS‑шифрование</strong>
-            <p className="field-hint">
-              Получить бесплатный сертификат Let's Encrypt и включить https:// для домена панели.
-            </p>
+            {httpsStatusLoading ? (
+              <p className="field-hint">Проверяем статус…</p>
+            ) : httpsStatus?.httpsEnabled ? (
+              <p className="field-hint panel-https-block__ok-text">
+                Уже подключено
+                {httpsStatus.httpsUrl ? (
+                  <>
+                    {" · "}
+                    <a href={httpsStatus.httpsUrl} target="_blank" rel="noreferrer">
+                      {httpsStatus.httpsUrl}
+                    </a>
+                  </>
+                ) : httpsStatus.domain ? (
+                  <> · {httpsStatus.domain}</>
+                ) : null}
+              </p>
+            ) : (
+              <p className="field-hint">
+                Получить бесплатный сертификат Let's Encrypt и включить https:// для домена панели.
+              </p>
+            )}
           </div>
-          <button type="button" className="primary" onClick={() => setHttpsModalOpen(true)}>
-            Подключить HTTPS шифрование
-          </button>
+          {httpsStatus?.httpsEnabled ? (
+            <button type="button" className="ghost" onClick={() => setHttpsModalOpen(true)}>
+              Подробнее
+            </button>
+          ) : (
+            <button type="button" className="primary" onClick={() => setHttpsModalOpen(true)}>
+              Подключить HTTPS шифрование
+            </button>
+          )}
         </div>
 
         <div className={`panel-updates-block ${updateAvailable ? "panel-updates-block--available" : ""}`}>
@@ -496,7 +545,15 @@ export default function SystemTab({
         </button>
       </SettingsCard>
 
-      <EnableHttpsModal open={httpsModalOpen} onClose={() => setHttpsModalOpen(false)} />
+      <EnableHttpsModal
+        open={httpsModalOpen}
+        onClose={() => {
+          setHttpsModalOpen(false);
+          void fetchPanelHttpsStatus()
+            .then(setHttpsStatus)
+            .catch(() => {});
+        }}
+      />
     </div>
   );
 }

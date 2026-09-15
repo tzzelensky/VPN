@@ -15,7 +15,6 @@ function panelUiKey(settings: PanelSettings): string {
   return JSON.stringify({
     theme: settings.ui.theme,
     accent: settings.ui.accentColor,
-    compact: settings.ui.compactMode,
     hints: settings.ui.showHints,
     tz: settings.ui.timezone,
   });
@@ -44,7 +43,7 @@ export function applyPanelUiSettings(settings: PanelSettings): void {
     root.setAttribute("data-accent-custom", "1");
   }
 
-  root.classList.toggle("admin-compact", settings.ui.compactMode);
+  root.classList.remove("admin-compact");
   root.classList.toggle("admin-no-hints", !settings.ui.showHints);
   root.dataset.panelTimezone = settings.ui.timezone || "Europe/Moscow";
 }

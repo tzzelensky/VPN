@@ -1,10 +1,13 @@
 import { useEffect, useMemo, useState, type SVGProps } from "react";
 import {
+  cancelScheduledMailing,
   deleteCommunicationHistory,
   fetchCommunicationHistoryPhoto,
   getCommunicationHistoryItem,
   listCommunicationHistory,
+  listScheduledMailings,
   type CommunicationMessageLogDto,
+  type ScheduledMailingDto,
 } from "../../api";
 import AdminModalBackdrop from "../AdminModalBackdrop";
 import Spinner from "../Spinner";
@@ -69,20 +72,33 @@ function buttonLabel(id: string): string {
   return MESSAGE_BUTTON_OPTIONS.find((b) => b.id === id)?.short ?? id;
 }
 
+function modeLabel(mode: ScheduledMailingDto["mode"]): string {
+  if (mode === "global") return "Всем клиентам";
+  if (mode === "selected" || mode === "single") return "Выбранным";
+  if (mode === "segment") return "Сегмент";
+  return mode;
+}
+
 export default function SentMailingsPanel({ busy, onCopy, onFlash }: Props) {
   const [items, setItems] = useState<CommunicationMessageLogDto[]>([]);
+  const [scheduled, setScheduled] = useState<ScheduledMailingDto[]>([]);
   const [loading, setLoading] = useState(true);
   const [actionBusyId, setActionBusyId] = useState<string | null>(null);
-  const [actionKind, setActionKind] = useState<"copy" | "delete" | null>(null);
+  const [actionKind, setActionKind] = useState<"copy" | "delete" | "cancel" | null>(null);
   const [recipientsModal, setRecipientsModal] = useState<CommunicationMessageLogDto | null>(null);
 
   async function reload() {
     setLoading(true);
     try {
-      const data = await listCommunicationHistory({ limit: 200, manualOnly: true });
+      const [data, queued] = await Promise.all([
+        listCommunicationHistory({ limit: 200, manualOnly: true }),
+        listScheduledMailings().catch(() => ({ items: [] as ScheduledMailingDto[] })),
+      ]);
       setItems(data.items);
+      setScheduled(queued.items);
     } catch {
       setItems([]);
+      setScheduled([]);
     } finally {
       setLoading(false);
     }
@@ -101,6 +117,23 @@ export default function SentMailingsPanel({ busy, onCopy, onFlash }: Props) {
     }
     return map;
   }, [items]);
+
+  async function handleCancelScheduled(item: ScheduledMailingDto) {
+    if (!window.confirm("Отменить эту запланированную рассылку?")) return;
+    setActionBusyId(item.id);
+    setActionKind("cancel");
+    onFlash(null);
+    try {
+      await cancelScheduledMailing(item.id);
+      setScheduled((prev) => prev.filter((x) => x.id !== item.id));
+      onFlash({ type: "ok", text: "Запланированная рассылка отменена." });
+    } catch (e) {
+      onFlash({ type: "err", text: e instanceof Error ? e.message : String(e) });
+    } finally {
+      setActionBusyId(null);
+      setActionKind(null);
+    }
+  }
 
   async function handleCopy(item: CommunicationMessageLogDto) {
     setActionBusyId(item.id);
@@ -188,18 +221,50 @@ export default function SentMailingsPanel({ busy, onCopy, onFlash }: Props) {
     return <p className="field-hint">Загрузка отправленных рассылок…</p>;
   }
 
-  if (items.length === 0) {
-    return (
-      <div className="comms-wiz-card">
-        <p className="field-hint" style={{ margin: 0 }}>
-          Пока нет отправленных рассылок из панели.
-        </p>
-      </div>
-    );
-  }
-
   return (
     <div className="comms-sent-list">
+      {scheduled.length > 0 ? (
+        <section className="comms-scheduled-block">
+          <h2 className="comms-wiz-h2">Запланировано</h2>
+          {scheduled.map((job) => {
+            const rowBusy = actionBusyId === job.id;
+            return (
+              <article key={job.id} className="comms-sent-card comms-scheduled-card">
+                <div className="comms-sent-card-head">
+                  <time dateTime={job.send_at}>{formatWhen(job.send_at)}</time>
+                  <span className="comms-sent-source">{modeLabel(job.mode)}</span>
+                  {job.title ? <span className="field-hint">· {job.title}</span> : null}
+                  <div className="comms-sent-card-actions">
+                    <button
+                      type="button"
+                      className="ghost btn-sm"
+                      disabled={busy || rowBusy}
+                      onClick={() => void handleCancelScheduled(job)}
+                    >
+                      {rowBusy && actionKind === "cancel" ? (
+                        <>
+                          <Spinner /> Отмена…
+                        </>
+                      ) : (
+                        "Отменить"
+                      )}
+                    </button>
+                  </div>
+                </div>
+                <p className="comms-sent-text">{job.text_preview || "—"}</p>
+              </article>
+            );
+          })}
+        </section>
+      ) : null}
+
+      {items.length === 0 ? (
+        <div className="comms-wiz-card">
+          <p className="field-hint" style={{ margin: 0 }}>
+            Пока нет отправленных рассылок из панели.
+          </p>
+        </div>
+      ) : null}
       {items.map((item) => {
         const recipients = item.recipients ?? [];
         const visible = recipients.slice(0, PREVIEW_VISIBLE);

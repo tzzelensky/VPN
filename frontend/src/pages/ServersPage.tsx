@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   addServerToAllSubscriptions,
   removeServerFromAllSubscriptions,
@@ -18,10 +18,50 @@ import {
 } from "../api";
 import DashboardLayout from "../components/DashboardLayout";
 import PageLoadingState from "../components/PageLoadingState";
+import PageSectionHero from "../components/PageSectionHero";
 import AddServerModal from "../components/AddServerModal";
 import LiveLogPanel, { type LogLine } from "../components/LiveLogPanel";
 import ServerCard, { type ServerBusyAction } from "../components/ServerCard";
 import ServerSubscriptionSettingsPanel from "../components/ServerSubscriptionSettingsPanel";
+import { useAnimatedNumber } from "../hooks/useAnimatedNumber";
+
+function serversKpi(servers: ServerDto[]) {
+  let sshOk = 0;
+  let sshErr = 0;
+  let vless = 0;
+  let clients = 0;
+  for (const s of servers) {
+    if (s.last_ssh_ok) sshOk += 1;
+    else if (s.last_error) sshErr += 1;
+    if (s.vless_deployed) vless += 1;
+    const total = s.subscription_users_total ?? 0;
+    const missing = s.subscription_users_missing ?? 0;
+    clients += Math.max(0, total - missing);
+  }
+  return { total: servers.length, sshOk, sshErr, vless, clients };
+}
+
+function ServersKpi({
+  label,
+  value,
+  loading,
+  tone,
+}: {
+  label: string;
+  value: number;
+  loading: boolean;
+  tone: "total" | "ok" | "err" | "vless" | "clients";
+}) {
+  const animated = useAnimatedNumber(loading ? null : value);
+  return (
+    <div className={`servers-kpi servers-kpi--${tone}`}>
+      <span className="servers-kpi__label">{label}</span>
+      <span className={`servers-kpi__value${loading ? " servers-kpi__value--skeleton" : ""}`}>
+        {loading ? "—" : (animated ?? 0)}
+      </span>
+    </div>
+  );
+}
 
 export default function ServersPage({ onLogout }: { onLogout: () => void }) {
   const [servers, setServers] = useState<ServerDto[]>([]);
@@ -42,6 +82,8 @@ export default function ServersPage({ onLogout }: { onLogout: () => void }) {
   useEffect(() => {
     refresh().catch((e) => setMsg({ type: "err", text: String(e) }));
   }, [refresh]);
+
+  const kpi = useMemo(() => serversKpi(servers), [servers]);
 
   function appendLog(line: string) {
     setActivity((a) =>
@@ -104,38 +146,74 @@ export default function ServersPage({ onLogout }: { onLogout: () => void }) {
 
   return (
     <DashboardLayout onLogout={onLogout}>
-      <section className="panel" style={{ marginBottom: "1.25rem" }}>
-        <div className="servers-page-head">
-          <div>
-            <h1>Сервера</h1>
-            <p className="sub servers-page-head__sub">
-              SSH к VPS, проверка, установка Xray, развёртывание VLESS. Имя и страна отображаются у клиентов в
-              подписке.
-            </p>
-          </div>
-          <button type="button" className="primary servers-page-head__add" onClick={() => setAddModalOpen(true)}>
-            Добавить сервер
-          </button>
+      <div className="servers-page">
+        <PageSectionHero
+          title="Серверы"
+          helpCards={[
+            {
+              kicker: "SSH",
+              title: "VPS и Xray",
+              text: "Подключение по SSH, установка и проверка Xray на серверах панели.",
+            },
+            {
+              kicker: "Протоколы",
+              title: "VLESS / HY2 / Trojan",
+              text: "Развёртывание протоколов и отображение имени и страны сервера у клиентов.",
+            },
+            {
+              kicker: "Клиенты",
+              title: "Подписки",
+              text: "Управление тем, какие серверы попадают в VPN-подписки пользователям.",
+            },
+          ]}
+          actions={
+            <button type="button" className="primary" onClick={() => setAddModalOpen(true)}>
+              Добавить сервер
+            </button>
+          }
+        />
+
+        <div className="servers-kpi-row" aria-label="Сводка по серверам">
+          <ServersKpi label="Всего" value={kpi.total} loading={loading} tone="total" />
+          <ServersKpi label="SSH OK" value={kpi.sshOk} loading={loading} tone="ok" />
+          <ServersKpi label="С ошибкой" value={kpi.sshErr} loading={loading} tone="err" />
+          <ServersKpi label="VLESS" value={kpi.vless} loading={loading} tone="vless" />
+          <ServersKpi label="В подписках" value={kpi.clients} loading={loading} tone="clients" />
         </div>
 
         {msg ? <div className={`flash ${msg.type === "ok" ? "ok" : "err"}`}>{msg.text}</div> : null}
         {activity ? <LiveLogPanel title={activity.title} lines={activity.lines} /> : null}
-      </section>
 
-      <section className="panel">
-        <h1 style={{ fontSize: "1.1rem" }}>Список</h1>
         {loading ? (
-          <PageLoadingState />
+          <section className="panel servers-list-shell">
+            <PageLoadingState />
+          </section>
         ) : servers.length === 0 ? (
-          <p className="sub" style={{ marginBottom: 0 }}>
-            Пока нет серверов — нажмите «Добавить сервер».
-          </p>
+          <section className="panel servers-empty">
+            <div className="servers-empty__icon" aria-hidden>
+              <svg viewBox="0 0 48 48" width="40" height="40" fill="none" stroke="currentColor" strokeWidth="1.7">
+                <rect x="6" y="10" width="36" height="26" rx="4" />
+                <path d="M6 18h36" />
+                <circle cx="14" cy="14" r="1.2" fill="currentColor" stroke="none" />
+                <circle cx="19" cy="14" r="1.2" fill="currentColor" stroke="none" />
+                <path d="M16 28h16M20 32h8" strokeLinecap="round" />
+              </svg>
+            </div>
+            <h2 className="servers-empty__title">Пока нет серверов</h2>
+            <p className="servers-empty__text">
+              Добавьте VPS — панель проверит SSH, поставит Xray и развернёт протоколы для подписки.
+            </p>
+            <button type="button" className="primary" onClick={() => setAddModalOpen(true)}>
+              Добавить сервер
+            </button>
+          </section>
         ) : (
           <div className="server-card-grid">
-            {servers.map((s) => (
+            {servers.map((s, index) => (
               <ServerCard
                 key={s.id}
                 server={s}
+                index={index}
                 disabled={busyId === s.id}
                 busyAction={busyId === s.id ? busyAction : null}
                 onNotify={(type, text) => setMsg({ type, text })}
@@ -329,7 +407,7 @@ export default function ServersPage({ onLogout }: { onLogout: () => void }) {
             ))}
           </div>
         )}
-      </section>
+      </div>
 
       {subSettingsServer ? (
         <ServerSubscriptionSettingsPanel

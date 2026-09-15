@@ -822,6 +822,151 @@
         ]
       }
     },
+    "/api/communications/improve-text": {
+      "post": {
+        "tags": [
+          "Communications"
+        ],
+        "summary": "Улучшает черновик рассылки через Gemini (рекламный тон).",
+        "description": "Улучшает черновик рассылки через Gemini (рекламный тон).\n\n**HTTP:** `POST /api/communications/improve-text`\n\n**Файл:** `communications.ts`\n\n**Требуется сессия** (cookie `tzadmin.sid`)",
+        "responses": {
+          "200": {
+            "description": "Успех"
+          },
+          "400": {
+            "description": "Неверный запрос",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Не авторизован",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Не найдено"
+          },
+          "500": {
+            "description": "Ошибка сервера"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/communications/scheduled": {
+      "get": {
+        "tags": [
+          "Communications"
+        ],
+        "summary": "Список запланированных ручных рассылок.",
+        "description": "Список запланированных ручных рассылок.\n\n**HTTP:** `GET /api/communications/scheduled`\n\n**Файл:** `communications.ts`\n\n**Требуется сессия** (cookie `tzadmin.sid`)",
+        "responses": {
+          "200": {
+            "description": "Успех"
+          },
+          "400": {
+            "description": "Неверный запрос",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Не авторизован",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Не найдено"
+          },
+          "500": {
+            "description": "Ошибка сервера"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ]
+      }
+    },
+    "/api/communications/scheduled/{id}": {
+      "delete": {
+        "tags": [
+          "Communications"
+        ],
+        "summary": "Отменяет запланированную рассылку.",
+        "description": "Отменяет запланированную рассылку.\n\n**HTTP:** `DELETE /api/communications/scheduled/{id}`\n\n**Файл:** `communications.ts`\n\n**Требуется сессия** (cookie `tzadmin.sid`)",
+        "responses": {
+          "200": {
+            "description": "Успех"
+          },
+          "400": {
+            "description": "Неверный запрос",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Не авторизован",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Не найдено"
+          },
+          "500": {
+            "description": "Ошибка сервера"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ]
+      }
+    },
     "/api/communications/segments": {
       "get": {
         "tags": [
@@ -1123,8 +1268,8 @@
         "tags": [
           "Communications"
         ],
-        "summary": "Отправляет Telegram-сообщение выбранной аудитории (текст и/или фото).",
-        "description": "Отправляет Telegram-сообщение выбранной аудитории (текст и/или фото).\n\n**HTTP:** `POST /api/communications/send`\n\n**Файл:** `communications.ts`\n\n**Требуется сессия** (cookie `tzadmin.sid`)",
+        "summary": "Отправляет Telegram-сообщение выбранной аудитории (текст и/или фото). Если передан send_at в будущем — ставит рассылку в очередь.",
+        "description": "Отправляет Telegram-сообщение выбранной аудитории (текст и/или фото). Если передан send_at в будущем — ставит рассылку в очередь.\n\n**HTTP:** `POST /api/communications/send`\n\n**Файл:** `communications.ts`\n\n**Требуется сессия** (cookie `tzadmin.sid`)",
         "responses": {
           "200": {
             "description": "Успех"
@@ -2216,6 +2361,61 @@
         }
       }
     },
+    "/api/config-vault/check-all-via-config": {
+      "post": {
+        "tags": [
+          "Config vault"
+        ],
+        "summary": "`POST /api/config-vault/check-all-via-config`",
+        "description": "**HTTP:** `POST /api/config-vault/check-all-via-config`\n\n**Файл:** `configVault.ts`\n\n**Требуется сессия**",
+        "responses": {
+          "200": {
+            "description": "Успех"
+          },
+          "400": {
+            "description": "Неверный запрос",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Не авторизован",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Не найдено"
+          },
+          "500": {
+            "description": "Ошибка сервера"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/config-vault/export": {
       "get": {
         "tags": [
@@ -2467,6 +2667,51 @@
             }
           }
         }
+      }
+    },
+    "/api/config-vault/via-config": {
+      "get": {
+        "tags": [
+          "Config vault"
+        ],
+        "summary": "`GET /api/config-vault/via-config`",
+        "description": "**HTTP:** `GET /api/config-vault/via-config`\n\n**Файл:** `configVault.ts`\n\n**Требуется сессия**",
+        "responses": {
+          "200": {
+            "description": "Успех"
+          },
+          "400": {
+            "description": "Неверный запрос",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Не авторизован",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Не найдено"
+          },
+          "500": {
+            "description": "Ошибка сервера"
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ]
       }
     },
     "/api/daily-gift/": {

@@ -137,7 +137,6 @@ router.get("/:token", async (req, res) => {
         userAgent,
         deviceName: isUsefulDeviceName(parsedClient.device_name) ? parsedClient.device_name : undefined,
         matchedBy: resolved.matchedBy,
-        autoBind: true,
       });
       if (access.user) {
         subUser = {

@@ -386,7 +386,6 @@ async function buildMySubWebAppProfileDto(
       },
     },
     combo_offers: buildComboOffersForClient(tgId, linked),
-    web_app_new_design: refreshPanelSettingsCache().ui.webAppNewDesign === true,
     daily_gift: buildDailyGiftWebAppState(
       tgId,
       subscriptions.find((s) => s.stats.subscription_active)?.id ?? subscriptions[0]?.id,

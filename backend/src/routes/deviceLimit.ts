@@ -383,7 +383,6 @@ router.post("/diagnose", (req, res) => {
   const evalResult = evaluateDeviceLimitAccess(u, deviceId, {
     userAgent: String(body.user_agent ?? ""),
     touchOnly: true,
-    autoBind: settings.auto_bind,
     defaultSlots: settings.default_slots,
   });
   res.json({

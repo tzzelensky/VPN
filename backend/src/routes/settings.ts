@@ -17,6 +17,7 @@ import {
   normalizeSectionOrder,
   normalizeVpnServerOrder,
   PANEL_SECTION_META,
+  parseGeminiHttpsProxy,
   type PanelSectionKey,
   type PanelSettings,
 } from "../panelSettingsTypes.js";
@@ -181,15 +182,86 @@ router.patch("/", (req, res) => {
   const next = {
     ...prev,
     panel: { ...prev.panel, ...(body.settings?.panel ?? {}) },
-    ui: { ...prev.ui, ...(body.settings?.ui ?? {}) },
+    ui: {
+      ...prev.ui,
+      ...(body.settings?.ui
+        ? {
+            theme: body.settings.ui.theme ?? prev.ui.theme,
+            accentColor: body.settings.ui.accentColor ?? prev.ui.accentColor,
+            showHints:
+              body.settings.ui.showHints !== undefined ? body.settings.ui.showHints === true : prev.ui.showHints,
+            timezone: body.settings.ui.timezone ?? prev.ui.timezone,
+            webAppPreviewEnabled:
+              body.settings.ui.webAppPreviewEnabled !== undefined
+                ? body.settings.ui.webAppPreviewEnabled !== false
+                : prev.ui.webAppPreviewEnabled,
+          }
+        : {}),
+    },
     sections: { ...prev.sections, ...(body.settings?.sections ?? {}) },
     sectionOrder:
       body.settings?.sectionOrder !== undefined
         ? normalizeSectionOrder(body.settings.sectionOrder)
         : prev.sectionOrder,
-    telegram: { ...prev.telegram, ...(body.settings?.telegram ?? {}) },
-    security: { ...prev.security, ...(body.settings?.security ?? {}) },
-    maintenance: { ...prev.maintenance, ...(body.settings?.maintenance ?? {}) },
+    telegram: {
+      ...prev.telegram,
+      ...(body.settings?.telegram
+        ? {
+            adminIds: body.settings.telegram.adminIds ?? prev.telegram.adminIds,
+            adminClientsButtonEnabled:
+              body.settings.telegram.adminClientsButtonEnabled !== undefined
+                ? body.settings.telegram.adminClientsButtonEnabled !== false
+                : prev.telegram.adminClientsButtonEnabled,
+            login2faEnabled:
+              body.settings.telegram.login2faEnabled !== undefined
+                ? body.settings.telegram.login2faEnabled === true
+                : prev.telegram.login2faEnabled,
+            webAppAdminPanelEnabled:
+              body.settings.telegram.webAppAdminPanelEnabled !== undefined
+                ? body.settings.telegram.webAppAdminPanelEnabled !== false
+                : prev.telegram.webAppAdminPanelEnabled,
+            buttonColors: body.settings.telegram.buttonColors
+              ? normalizeTelegramButtonColors(body.settings.telegram.buttonColors)
+              : prev.telegram.buttonColors,
+            aiAssistantEnabled:
+              body.settings.telegram.aiAssistantEnabled !== undefined
+                ? body.settings.telegram.aiAssistantEnabled === true
+                : prev.telegram.aiAssistantEnabled,
+            geminiModel: body.settings.telegram.geminiModel ?? prev.telegram.geminiModel,
+            geminiHttpsProxy:
+              body.settings.telegram.geminiHttpsProxy !== undefined
+                ? String(body.settings.telegram.geminiHttpsProxy)
+                : prev.telegram.geminiHttpsProxy,
+          }
+        : {}),
+    },
+    security: {
+      ...prev.security,
+      ...(body.settings?.security
+        ? {
+            maskSecrets:
+              body.settings.security.maskSecrets !== undefined
+                ? body.settings.security.maskSecrets === true
+                : prev.security.maskSecrets,
+            confirmDangerousActions:
+              body.settings.security.confirmDangerousActions !== undefined
+                ? body.settings.security.confirmDangerousActions === true
+                : prev.security.confirmDangerousActions,
+            autoLogoutMinutes:
+              body.settings.security.autoLogoutMinutes !== undefined
+                ? body.settings.security.autoLogoutMinutes
+                : prev.security.autoLogoutMinutes,
+            manualTrafficAdjust:
+              body.settings.security.manualTrafficAdjust !== undefined
+                ? body.settings.security.manualTrafficAdjust === true
+                : prev.security.manualTrafficAdjust,
+            panelAccessPath:
+              body.settings.security.panelAccessPath !== undefined
+                ? String(body.settings.security.panelAccessPath)
+                : prev.security.panelAccessPath,
+          }
+        : {}),
+    },
     vpnDisplay: { ...prev.vpnDisplay, ...(body.settings?.vpnDisplay ?? {}) },
   };
   if (body.settings?.vpnDisplay !== undefined) {
@@ -266,10 +338,15 @@ router.patch("/", (req, res) => {
     const m = String(body.settings.telegram.geminiModel ?? "")
       .trim()
       .slice(0, 80);
-    next.telegram.geminiModel = m || prev.telegram.geminiModel || "gemini-2.5-flash-lite";
+    next.telegram.geminiModel = m || prev.telegram.geminiModel || "gemini-3.5-flash-lite";
   }
-  if (body.settings?.ui && "webAppNewDesign" in body.settings.ui) {
-    next.ui.webAppNewDesign = body.settings.ui.webAppNewDesign === true;
+  if (body.settings?.telegram && "geminiHttpsProxy" in body.settings.telegram) {
+    const parsed = parseGeminiHttpsProxy(body.settings.telegram.geminiHttpsProxy);
+    if (!parsed.ok) {
+      res.status(400).json({ error: parsed.error });
+      return;
+    }
+    next.telegram.geminiHttpsProxy = parsed.value;
   }
   if (body.settings?.ui && "webAppPreviewEnabled" in body.settings.ui) {
     next.ui.webAppPreviewEnabled = body.settings.ui.webAppPreviewEnabled === true;
@@ -381,7 +458,6 @@ router.post("/import", (req, res) => {
       buttonColors: normalizeTelegramButtonColors(raw.settings.telegram?.buttonColors),
     },
     security: { ...defaultPanelSettings().security, ...(raw.settings.security ?? {}) },
-    maintenance: { ...defaultPanelSettings().maintenance, ...(raw.settings.maintenance ?? {}) },
     vpnDisplay: {
       serverOrder: Array.isArray(raw.settings.vpnDisplay?.serverOrder)
         ? normalizeVpnServerOrder(
